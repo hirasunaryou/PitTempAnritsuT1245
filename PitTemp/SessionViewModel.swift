@@ -7,80 +7,62 @@
 //   - SwiftUIの画面からは「状態変更リクエスト」だけ投げる（MVVM）
 //   - HID(=キーボード)の“行確定”と“途中バッファ”の扱いを分離
 //
-
 import Foundation
 import SwiftUI
 import Combine
 
-
-// ======= ここまで（重複注意） =======
-
 @MainActor
 final class SessionViewModel: ObservableObject {
-    // --- 設定（AppStorage で永続化） ---
-    @AppStorage("pref.durationSec") var durationSec: Int = 10
-    @AppStorage("pref.zoneOrder") var zoneOrder: Int = 0 // 0: IN-CL-OUT, 1: OUT-CL-IN
-    @AppStorage("pref.chartWindowSec") var chartWindowSec: Double = 6
-    @AppStorage("pref.advanceWithGreater") var advanceWithGreater: Bool = false
-    @AppStorage("pref.advanceWithRightArrow") var advanceWithRightArrow: Bool = false
-    @AppStorage("pref.advanceWithReturn") var advanceWithReturn: Bool = true
-    @AppStorage("pref.minAdvanceSec") var minAdvanceSec: Double = 0.3
 
-    // 自動補完や識別情報
-    @AppStorage("pref.autofillDateTime") var autofillDateTime: Bool = true
-    @AppStorage("hr2500.id") var hr2500ID: String = ""   // ラベル/資産タグ等（手入力）
+    // MARK: - 依存（DI）
+    private let settings: SettingsStore
+    private let exporter: CSVExporting
 
-    // --- メタとライブ表示 ---
+    init(exporter: CSVExporting = CSVExporter(),
+         settings: SettingsStore? = nil) {
+        self.exporter = exporter
+        // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
+        self.settings = settings ?? SettingsStore()
+    }
+
+    // MARK: - メタ & ライブ
     @Published var meta = MeasureMeta()
     @Published private(set) var latestValueText: String = "--"
     @Published private(set) var live: [TempSample] = []
     private var lastSampleAt: Date? = nil
 
-    // --- 測定状態 ---
+    // MARK: - 測定状態
     @Published private(set) var isCaptureActive = false
     @Published private(set) var currentWheel: WheelPos? = nil
     @Published private(set) var currentZone: Zone? = nil
     @Published private(set) var elapsed: Double = 0
     @Published private(set) var peakC: Double = .nan
 
-    // セッション時刻（要望：「測定を開始しようと動き出した時間」）
+    // セッション時刻（「測定を開始しようと動き出した時間」）
     private var sessionBeganAt: Date?
 
     // 結果とCSV
     @Published private(set) var results: [MeasureResult] = []
     @Published private(set) var lastCSV: URL? = nil
 
-    // メモ
-    // --- Memo（ホイール別の自由記述メモを保持） ---
+    // メモ（ホイール別の自由記述）
     @Published var wheelMemos: [WheelPos: String] = [:]
 
-    
-    // CSV
-    private let exporter: CSVExporting
-    
-    // 追加：デフォルト引数つき init（PitTempApp を変更しなくてOK）
-    init(exporter: CSVExporting = CSVExporter()) {
-        self.exporter = exporter
-    }
-    
-    
-    /// 音声起こし等のテキストを指定ホイールのメモに追記
-    func appendMemo(_ text: String, to wheel: WheelPos) {
-        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
-        if let old = wheelMemos[wheel], !old.isEmpty {
-            wheelMemos[wheel] = old + " " + t
-        } else {
-            wheelMemos[wheel] = t
-        }
-    }
+    // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
+    private var durationSec: Int { settings.validatedDurationSec }
+    private var zoneOrder: Int { settings.zoneOrderRaw } // 既存ロジック都合で Int のまま
+    private var chartWindowSec: Double { settings.chartWindowSec }
+    private var advanceWithGreater: Bool { settings.advanceWithGreater }
+    private var advanceWithRightArrow: Bool { settings.advanceWithRightArrow }
+    private var advanceWithReturn: Bool { settings.advanceWithReturn }
+    private var minAdvanceSec: Double { settings.minAdvanceSec }
+    private var autofillDateTime: Bool { settings.autofillDateTime }
 
-    
     // タイマ
     private var startedAt: Date? = nil
     private var timer: Timer? = nil
 
-    // MARK: - パブリック API（View から呼ぶ）
+    // MARK: - View からの操作
     func tapCell(wheel: WheelPos, zone: Zone) {
         start(wheel: wheel, zone: zone)
     }
@@ -108,7 +90,7 @@ final class SessionViewModel: ObservableObject {
         // peakC / live はここでは触らない
     }
 
-    /// 特殊キー（Return/→など）を受ける
+    /// 特殊キー（Return/→など）
     func receiveSpecial(_ token: String) {
         switch token {
         case "<RET>":
@@ -118,7 +100,7 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    /// 既存CSVを返す。無ければ新規出力して返す
+    /// 既存CSVを返す。無ければ新規出力
     func ensureCSV() -> URL? {
         if let u = lastCSV { return u }
         exportCSV()
@@ -126,9 +108,7 @@ final class SessionViewModel: ObservableObject {
     }
 
     /// CSV出力（ホイール1行＝OUT/CL/INの列）
-    // CSV保存のトリガーで呼ぶ関数
     func exportCSV() {
-        // セッション開始時間（未設定なら今）
         let sessionStart = sessionBeganAt ?? Date()
 
         // Dateが空欄かつ自動補完ONなら補完（元の挙動を踏襲）
@@ -150,54 +130,8 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-
-//    func exportCSV() {
-//        // セッション開始時間（未設定なら今）
-//        let sessionStart = sessionBeganAt ?? Date()
-//        // Dateが空欄かつ自動補完ONなら補完
-//        if autofillDateTime && meta.date.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-//            meta.date = Self.isoNoFrac.string(from: sessionStart)
-//        }
-//
-//        // ホイールごとに OUT/CL/IN を集計
-//        struct Agg { var out: Double?; var cl: Double?; var inn: Double? }
-//        var agg: [WheelPos: Agg] = [:]
-//        for w in WheelPos.allCases { agg[w] = Agg(out: nil, cl: nil, inn: nil) }
-//        for r in results {
-//            switch r.zone {
-//            case .OUT: agg[r.wheel]?.out = r.peakC.isFinite ? r.peakC : nil
-//            case .CL:  agg[r.wheel]?.cl  = r.peakC.isFinite ? r.peakC : nil
-//            case .IN:  agg[r.wheel]?.inn = r.peakC.isFinite ? r.peakC : nil
-//            }
-//        }
-//
-//        // ファイル準備
-//        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-//        let name = "track_session_flatwheel_" + Self.isoNoFrac.string(from: Date()) + ".csv"
-//        let url  = dir.appendingPathComponent(name)
-//
-//        var rows: [String] = []
-//        // ヘッダ（UPLOADED_AT_ISO はアップロード時に埋める）
-//        rows.append("TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO")
-//        let exportedAt = Self.isoFrac.string(from: Date())
-//        let sessionISO = Self.isoFrac.string(from: sessionStart)
-//
-//        for w in WheelPos.allCases {
-//            let a = agg[w]!
-//            let outS = a.out.map { String(format: "%.1f", $0) } ?? ""
-//            let clS  = a.cl .map { String(format: "%.1f", $0) } ?? ""
-//            let inS  = a.inn.map { String(format: "%.1f", $0) } ?? ""
-//            let memo = (wheelMemos[w] ?? "").csvEscaped
-//            rows.append("\(meta.track),\(meta.date),\(meta.car),\(meta.driver),\(meta.tyre),\(meta.time),\(meta.lap),\(meta.checker),\(w.rawValue),\(outS),\(clS),\(inS),\(memo),\(sessionISO),\(exportedAt),")
-//        }
-//
-//        try? rows.joined(separator: "\n").appending("\n").data(using: .utf8)?.write(to: url)
-//        lastCSV = url
-//    }
-
     // MARK: - 内部処理
     private func start(wheel: WheelPos, zone: Zone) {
-        // 最初の計測開始時にセッション開始時刻を記録
         if sessionBeganAt == nil { sessionBeganAt = Date() }
 
         finalize(via: "auto") // 既存の計測があれば閉じる
@@ -230,7 +164,7 @@ final class SessionViewModel: ObservableObject {
         // 表示上の安定化（FL..RR/IN..OUT）
         results.sort { ($0.wheel.rawValue, $0.zone.rawValue) < ($1.wheel.rawValue, $1.zone.rawValue) }
 
-        // 次のターゲットへ（autoAdvanceは呼び出し側で）
+        // 次のターゲットへ
         startedAt = nil; elapsed = 0; latestValueText = "--"; peakC = .nan
         Haptics.success()
     }
@@ -272,7 +206,7 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    // 小物
+    // MARK: - 小物
     private static let isoFrac: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -284,5 +218,3 @@ final class SessionViewModel: ObservableObject {
         return f
     }()
 }
-
-

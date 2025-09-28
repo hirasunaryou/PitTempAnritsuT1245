@@ -2,10 +2,7 @@
 //  SettingsView.swift
 //  PitTemp
 //
-//  役割: 共有フォルダの指定、測定窓/グラフ幅の設定
-//  初心者向けメモ:
-//   - SwiftUI の .fileImporter を使って「フォルダ」を選んでもらう
-//   - 選んだ URL はブックマーク化して永続保存（iOS のお作法）
+//  役割: 共有フォルダの指定、測定窓/グラフ幅など各種設定
 //
 
 import SwiftUI
@@ -14,34 +11,39 @@ import UniformTypeIdentifiers
 struct SettingsView: View {
     @EnvironmentObject var vm: SessionViewModel
     @EnvironmentObject var folderBM: FolderBookmark
+    @EnvironmentObject var settings: SettingsStore   // ← 追加：設定は SettingsStore に集約
 
     @State private var showPicker = false
-    
-    @AppStorage("profile.checker") private var checker: String = ""
-    @AppStorage("hr2500.id") private var hr2500ID: String = ""
-//    @EnvironmentObject var kb: KeyboardWatcher
 
     var body: some View {
         NavigationStack {
             Form {
-                
+                // プロファイル
                 Section("Profile") {
-                    TextField("Checker", text: $checker)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
+                    // checker は SettingsStore 側に寄せていないため、必要なら移設可。
+                    // ここでは既存キーを流用する形で統一するため SettingsStore に追加して使うのが綺麗です。
+                    // ひとまずキーをそのまま使いたい場合は、下行のように @AppStorage を残すか、
+                    // SettingsStore に @AppStorage("profile.checker") を追加して $settings.checker にしてください。
+                    TextField("Checker", text: .init(
+                        get: { UserDefaults.standard.string(forKey: "profile.checker") ?? "" },
+                        set: { UserDefaults.standard.set($0, forKey: "profile.checker") }
+                    ))
+                    .textInputAutocapitalization(.characters)
+                    .autocorrectionDisabled()
+
                     HStack {
-                        TextField("Thermometer (HR-...)", text: $hr2500ID)
+                        TextField("Thermometer (HR-...)", text: $settings.hr2500ID) // ← SettingsStore を参照
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
-//                        if let cand = kb.hrCandidateID {
-//                            Button("Use detected") { hr2500ID = cand }
-//                        }
                     }
-                    // 必要なら「Reset onboarding」ボタンも
-                    Button("Show Welcome on next launch") { UserDefaults.standard.set(false, forKey: "onboarded") }
-                        .tint(.orange)
+
+                    Button("Show Welcome on next launch") {
+                        UserDefaults.standard.set(false, forKey: "onboarded")
+                    }
+                    .tint(.orange)
                 }
-                
+
+                // 共有フォルダ
                 Section("Shared Folder") {
                     HStack {
                         Text("Upload Folder")
@@ -51,15 +53,21 @@ struct SettingsView: View {
                     }
                     Button("Choose iCloud Folder…") { showPicker = true }
                 }
-                
+
+                // 測定パラメータ
                 Section("Measurement") {
-                    Stepper(value: $vm.durationSec, in: 2...20) { Text("Window: \(vm.durationSec) s") }
-                    Stepper(value: $vm.chartWindowSec, in: 3...60) { Text("Chart Width: \(Int(vm.chartWindowSec)) s") }
-                    Toggle("Autofill Date/Time if empty", isOn: $vm.autofillDateTime)
+                    Stepper(value: $settings.durationSec, in: 2...20) {
+                        Text("Window: \(settings.durationSec) s")
+                    }
+                    Stepper(value: $settings.chartWindowSec, in: 3...60, step: 1) {
+                        Text("Chart Width: \(Int(settings.chartWindowSec)) s")
+                    }
+                    Toggle("Autofill Date/Time if empty", isOn: $settings.autofillDateTime)
                 }
-                
+
+                // デバイス & ロケーション
                 Section("Device & Location") {
-                    TextField("HR2500 ID (label / asset tag)", text: $vm.hr2500ID)
+                    TextField("HR2500 ID (label / asset tag)", text: $settings.hr2500ID)
 
                     HStack {
                         let status = LocationLogger.shared.authStatus
@@ -69,21 +77,17 @@ struct SettingsView: View {
                         Button("Enable") { LocationLogger.shared.request() }
                     }
                 }
-
-                
             }
             .navigationTitle("Settings")
         }
         .fileImporter(
             isPresented: $showPicker,
             allowedContentTypes: [.folder],
-            allowsMultipleSelection: true
+            allowsMultipleSelection: false   // フォルダは1つで十分
         ) { result in
             switch result {
             case .success(let urls):
-                if let first = urls.first {
-                    folderBM.save(url: first)
-                }
+                if let first = urls.first { folderBM.save(url: first) }
             case .failure(let error):
                 print("Folder pick failed:", error)
             }

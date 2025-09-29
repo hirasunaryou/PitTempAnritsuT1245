@@ -50,7 +50,7 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
     private var durationSec: Int { settings.validatedDurationSec }
-    private var zoneOrder: Int { settings.zoneOrderRaw } // 既存ロジック都合で Int のまま
+    // private var zoneOrder: Int { settings.zoneOr*/derRaw } // 既存ロジック都合で Int のまま
     private var chartWindowSec: Double { settings.chartWindowSec }
     private var advanceWithGreater: Bool { settings.advanceWithGreater }
     private var advanceWithRightArrow: Bool { settings.advanceWithRightArrow }
@@ -171,7 +171,8 @@ final class SessionViewModel: ObservableObject {
 
     private func autoAdvance() {
         guard let w = currentWheel, let z = currentZone else { isCaptureActive = false; return }
-        let order: [Zone] = (zoneOrder == 0) ? [.IN, .CL, .OUT] : [.OUT, .CL, .IN]
+//        let order: [Zone] = (zoneOrder == 0) ? [.IN, .CL, .OUT] : [.OUT, .CL, .IN]
+        let order: [Zone] = settings.zoneOrderEnum.sequence
         if let idx = order.firstIndex(of: z) {
             let nextIdx = idx + 1
             if nextIdx < order.count {

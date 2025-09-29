@@ -63,6 +63,19 @@ struct SettingsView: View {
                         Text("Chart Width: \(Int(settings.chartWindowSec)) s")
                     }
                     Toggle("Autofill Date/Time if empty", isOn: $settings.autofillDateTime)
+                    
+                    // 👇 追加：Zone順序の切替
+                    Picker(
+                        "Zone order",
+                        selection: Binding(
+                            get: { settings.zoneOrderEnum },
+                            set: { settings.zoneOrderEnum = $0 }
+                        )
+                    ) {
+                        ForEach(SettingsStore.ZoneOrder.allCases) { o in
+                            Text(o.label).tag(o)
+                        }
+                    }
                 }
 
                 // デバイス & ロケーション

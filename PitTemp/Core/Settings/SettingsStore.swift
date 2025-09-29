@@ -14,31 +14,46 @@ import SwiftUI
 @MainActor
 final class SettingsStore: ObservableObject {
 
-    // ==== 既存キー（互換維持） ====
+    // 既存キー（互換維持）
     @AppStorage("pref.durationSec") var durationSec: Int = 10
-    @AppStorage("pref.zoneOrder") var zoneOrderRaw: Int = 0        // 0: IN-CL-OUT, 1: OUT-CL-IN
     @AppStorage("pref.chartWindowSec") var chartWindowSec: Double = 6
     @AppStorage("pref.advanceWithGreater") var advanceWithGreater: Bool = false
     @AppStorage("pref.advanceWithRightArrow") var advanceWithRightArrow: Bool = false
     @AppStorage("pref.advanceWithReturn") var advanceWithReturn: Bool = true
     @AppStorage("pref.minAdvanceSec") var minAdvanceSec: Double = 0.3
 
+    // ← zone順序は “Raw値” を保存して UI では型安全enumで扱う
+    @AppStorage("pref.zoneOrder") private var zoneOrderRaw: Int = 0   // 0: IN-CL-OUT, 1: OUT-CL-IN
+
     // 自動補完や識別情報
     @AppStorage("pref.autofillDateTime") var autofillDateTime: Bool = true
     @AppStorage("hr2500.id") var hr2500ID: String = ""
 
-    // ==== 型安全ラッパー ====
-    enum ZoneOrder: Int {
+    // 型安全enum（1つだけ定義）
+    enum ZoneOrder: Int, CaseIterable, Identifiable {
         case in_cl_out = 0
         case out_cl_in = 1
+        var id: Int { rawValue }
+        var label: String {
+            switch self {
+            case .in_cl_out: return "IN → CL → OUT"
+            case .out_cl_in: return "OUT → CL → IN"
+            }
+        }
+        var sequence: [Zone] {
+            switch self {
+            case .in_cl_out: return [.IN, .CL, .OUT]
+            case .out_cl_in: return [.OUT, .CL, .IN]
+            }
+        }
     }
-    var zoneOrder: ZoneOrder {
+
+    /// UI用：enumで get/set（AppStorageのRaw値にブリッジ）
+    var zoneOrderEnum: ZoneOrder {
         get { ZoneOrder(rawValue: zoneOrderRaw) ?? .in_cl_out }
         set { zoneOrderRaw = newValue.rawValue }
     }
 
-    // 必要に応じて、範囲バリデーションを追加（例）
-    var validatedDurationSec: Int {
-        max(1, min(durationSec, 60))
-    }
+    // 例：範囲バリデーション
+    var validatedDurationSec: Int { max(1, min(durationSec, 60)) }
 }

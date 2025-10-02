@@ -53,6 +53,18 @@ struct SettingsView: View {
                     }
                     Button("Choose iCloud Folder…") { showPicker = true }
                 }
+                
+                Section("Meta Input") {
+                    Picker("Mode", selection: Binding(
+                        get: { settings.metaInputMode },
+                        set: { settings.metaInputMode = $0 }
+                    )) {
+                        ForEach(SettingsStore.MetaInputMode.allCases) { m in
+                            Text(m.label).tag(m)
+                        }
+                    }
+                }
+
 
                 // 測定パラメータ
                 Section("Measurement") {

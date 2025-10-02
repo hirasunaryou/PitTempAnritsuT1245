@@ -56,4 +56,18 @@ final class SettingsStore: ObservableObject {
 
     // 例：範囲バリデーション
     var validatedDurationSec: Int { max(1, min(durationSec, 60)) }
+    
+    // --- 追加: メタ入力モード ---
+    @AppStorage("pref.metaInputMode") private var metaInputModeRaw: Int = 0
+    enum MetaInputMode: Int, CaseIterable, Identifiable {
+        case keyboard = 0
+        case voice = 1
+        var id: Int { rawValue }
+        var label: String { self == .keyboard ? "Keyboard" : "Voice" }
+    }
+    var metaInputMode: MetaInputMode {
+        get { MetaInputMode(rawValue: metaInputModeRaw) ?? .keyboard }
+        set { metaInputModeRaw = newValue.rawValue }
+    }
+    
 }

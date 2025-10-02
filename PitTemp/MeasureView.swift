@@ -11,6 +11,7 @@ struct MeasureView: View {
     @State private var focusTick = 0
     @State private var showMetaEditor = false
 
+    
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -48,9 +49,15 @@ struct MeasureView: View {
                 Button("Edit") { showMetaEditor = true }
             }
             .sheet(isPresented: $showMetaEditor) {
-                MetaEditorView()
-                    .environmentObject(vm)
-                    .presentationDetents([.medium, .large])
+                if settings.metaInputMode == .voice {
+                    MetaVoiceEditorView()
+                        .environmentObject(vm)
+                        .presentationDetents([.medium, .large])
+                } else {
+                    MetaEditorView()
+                        .environmentObject(vm)
+                        .presentationDetents([.medium, .large])
+                }
             }
         }
         .onAppear { speech.requestAuth() }

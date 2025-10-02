@@ -6,13 +6,24 @@
 import SwiftUI
 
 /// メタ情報の音声入力版エディタ。
-/// 1フィールドずつ「録音→停止→追記」できる最小構成。
+/// 1フィールドずつ「録音→停止→追記/上書き」+ 手動編集/消去ができる。
 struct MetaVoiceEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var vm: SessionViewModel
 
     @StateObject private var speech = SpeechMemoManager() // 既存の音声起こしマネージャを再利用
     @State private var targetField: Field?
+
+    // 反映モード
+    private enum ApplyMode: String, CaseIterable, Identifiable {
+        case append = "Append"
+        case replace = "Replace"
+        var id: String { rawValue }
+    }
+
+    @State private var mode: ApplyMode = .append        // 追記/上書き 切替
+    @State private var editingField: Field? = nil       // 手動編集対象
+    @State private var draftText: String = ""           // 手動編集用
 
     enum Field: String, CaseIterable, Identifiable {
         case track, date, time, lap, car, driver, tyre, checker
@@ -59,32 +70,41 @@ struct MetaVoiceEditorView: View {
                                 .lineLimit(2)
                         }
                         Spacer()
+
                         if speech.isRecording && targetField == f {
                             Button {
                                 speech.stop()
                                 let t = speech.takeFinalText()
-                                if !t.isEmpty { f.append(t, to: &vm.meta) }
+                                if !t.isEmpty { apply(text: t, to: f) }
                                 targetField = nil
                             } label: {
                                 Label("Stop", systemImage: "stop.circle.fill")
                             }
                             .buttonStyle(.borderedProminent)
                         } else {
-                            Button {
-                                // もし他のフィールドで録音中なら取り出して反映してから開始
-                                let (prevWheel, prevText) = speech.stopAndTakeText()
-                                _ = prevWheel // メモ用のwheelは使わない
-                                if !prevText.isEmpty, let t = targetField {
-                                    t.append(prevText, to: &vm.meta)
-                                }
-                                try? speech.start(for: .FL) // ダミー（内部でwheelは使わない前提）
-                                targetField = f
-                                Haptics.impactLight()
-                            } label: {
-                                Label("Dictate", systemImage: "mic.fill")
+                            HStack(spacing: 8) {
+                                Button {
+                                    let (_, prevText) = speech.stopAndTakeText()
+                                    if !prevText.isEmpty, let tf = targetField { apply(text: prevText, to: tf) }
+                                    try? speech.start(for: .FL)   // wheelは未使用ダミー
+                                    targetField = f
+                                    Haptics.impactLight()
+                                } label: { Label("Dictate", systemImage: "mic.fill") }
+                                .buttonStyle(.bordered)
+                                .disabled(!speech.isAuthorized)
+
+                                Button {
+                                    // 手動編集を開始
+                                    draftText = value(for: f)
+                                    editingField = f
+                                } label: { Label("Edit", systemImage: "pencil") }
+                                .buttonStyle(.bordered)
+
+                                Button(role: .destructive) {
+                                    setValue("", for: f)
+                                } label: { Label("Clear", systemImage: "trash") }
+                                .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.bordered)
-                            .disabled(!speech.isAuthorized)
                         }
                     }
                     .padding(.vertical, 6)
@@ -92,13 +112,19 @@ struct MetaVoiceEditorView: View {
             }
             .navigationTitle("Edit Meta (Voice)")
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Picker("", selection: $mode) {
+                        ForEach(ApplyMode.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 220)
+                }
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         // 録音中なら止めて反映
-                        let (prevWheel, prevText) = speech.stopAndTakeText()
-                        _ = prevWheel
-                        if !prevText.isEmpty, let t = targetField { t.append(prevText, to: &vm.meta) }
+                        let (_, prevText) = speech.stopAndTakeText()
+                        if !prevText.isEmpty, let t = targetField { apply(text: prevText, to: t) }
                         targetField = nil
                         dismiss()
                     }
@@ -106,18 +132,48 @@ struct MetaVoiceEditorView: View {
             }
         }
         .onAppear { speech.requestAuth(); vm.stopAll() }
-    }
-
-    private func value(for f: Field) -> String {
-        switch f {
-        case .track: vm.meta.track
-        case .date: vm.meta.date
-        case .time: vm.meta.time
-        case .lap: vm.meta.lap
-        case .car: vm.meta.car
-        case .driver: vm.meta.driver
-        case .tyre: vm.meta.tyre
-        case .checker: vm.meta.checker
+        .sheet(item: $editingField) { f in
+            NavigationStack {
+                Form {
+                    Section(f.label) {
+                        TextField("Enter text", text: $draftText, axis: .vertical)
+                            .textInputAutocapitalization(.characters)
+                    }
+                }
+                .navigationTitle("Edit \(f.label)")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingField = nil } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") {
+                            apply(text: draftText, to: f)   // モードに従い反映
+                            editingField = nil
+                        }
+                    }
+                }
+            }
         }
     }
-}
+
+    // MARK: - 反映・値操作
+    private func apply(text: String, to field: Field) {
+        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return }
+        switch mode {
+        case .append:
+            var meta = vm.meta
+            field.append(cleaned, to: &meta)
+            vm.meta = meta
+        case .replace:
+            setValue(cleaned, for: field)
+        }
+    }
+
+    private func setValue(_ newValue: String, for f: Field) {
+        switch f {
+        case .track:   vm.meta.track = newValue
+        case .date:    vm.meta.date = newValue
+        case .time:    vm.meta.time = newValue
+        case .lap:     vm.meta.lap = newValue
+        case .car:     vm.meta.car = newValue
+        case .driver:  vm.meta.driver = newValue
+        case .tyre:    vm.meta.tyre = newVal

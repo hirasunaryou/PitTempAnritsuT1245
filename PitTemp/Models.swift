@@ -13,7 +13,16 @@ enum WheelPos: String, CaseIterable, Identifiable, Codable { case FL, FR, RL, RR
 enum Zone:     String, CaseIterable, Identifiable, Codable { case IN, CL, OUT; var id: String { rawValue } }
 
 struct MeasureMeta: Codable {
-    var track = "", date = "", car = "", driver = "", tyre = "", time = "", lap = "", checker = ""
+    var track = ""
+    var date = ""
+    var car = ""
+    var driver = ""
+    var tyre = ""
+    var time = ""
+    var lap = ""
+    var checker = ""
+    var carNo: String = ""            // 末尾数字ブロック（例: "18"）
+    var carNoAndMemo: String = ""     // 生テキスト（正規化済み）
 }
 
 struct MeasureResult: Identifiable, Codable {

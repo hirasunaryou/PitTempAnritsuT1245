@@ -1,3 +1,5 @@
+// MeasureView.swift
+
 import SwiftUI
 
 struct MeasureView: View {
@@ -10,21 +12,39 @@ struct MeasureView: View {
     @State private var showRaw = false
     @State private var focusTick = 0
     @State private var showMetaEditor = false
-
+    @EnvironmentObject var ble: BluetoothService
     
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    connectBar
+                    HStack(spacing: 12) {
+                        Text(String(format: "Hz: %.1f", ble.notifyHz))
+                        Text("W: \(ble.writeCount)")
+                        Text("N: \(ble.notifyCountUI)")
+                        if let v = ble.latestTemperature {
+                            Text(String(format: "Now: %.1f℃", v)).monospacedDigit()
+                        }
+                    }
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+
+
+                    // 開発確認用に温度を確認したい
+                    if let v = ble.latestTemperature {
+                        Text(String(format: "BLE Now: %.1f℃", v))
+                            .font(.title3).monospacedDigit()
+                    }
+
                     headerReadOnly
                     grid
-                    if vm.isCaptureActive {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            MiniTempChart(data: vm.live)
-                        }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        MiniTempChart(data: vm.live)
                     }
                 }
                 .padding()
@@ -41,8 +61,8 @@ struct MeasureView: View {
                     focusTick: $focusTick
                 )
                 .frame(width: showRaw ? 280 : 1, height: showRaw ? 36 : 1)
-                .padding(.trailing, 12)
-                .padding(.bottom, showRaw ? 64 : 12)
+                .padding(Edge.Set.trailing, 12)              // ← ここを明示
+                .padding(Edge.Set.bottom, showRaw ? 64 : 12) // ← ここも明示
             }
             .navigationTitle("TrackTemp")
             .toolbar {
@@ -61,7 +81,16 @@ struct MeasureView: View {
             }
         }
         .onAppear { speech.requestAuth() }
+        .onAppear {
+            ble.startScan()                 // 起動時にスキャン開始
+            print("[UI] MeasureView appear")
+        }
+
         .onDisappear { vm.stopAll() }
+        .onReceive(ble.temperatureStream) { sample in
+            vm.ingestBLESample(sample)
+        }
+
     }
 
     // MARK: - メタ情報（ラベル表示のみ）
@@ -268,4 +297,52 @@ struct MeasureView: View {
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
     }
+    // MARK: - BLE 接続バー（最小）
+    private var connectBar: some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text("BLE: " + stateText()).font(.subheadline)
+                Spacer()
+                if let name = ble.deviceName {
+                    Text(name).font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            HStack(spacing: 8) {
+                Button(scanButtonTitle()) { scanOrDisconnect() }
+                    .buttonStyle(.borderedProminent)
+                Button("DATA") { ble.requestOnce() }
+                    .disabled(ble.connectionState != .ready)
+                Button("TIME") { ble.setDeviceTime() }
+                Button("Poll 5Hz") { ble.startPolling(hz: 5) }
+                    .disabled(ble.connectionState != .ready)
+                Button("Stop") { ble.stopPolling() }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+    }
+
+    // 補助
+    private func stateText() -> String {
+        switch ble.connectionState {
+        case .idle: "idle"
+        case .scanning: "scanning"
+        case .connecting: "connecting"
+        case .ready: "ready"
+        case .failed(let m): "failed: \(m)"
+        }
+    }
+    private func scanButtonTitle() -> String {
+        switch ble.connectionState {
+        case .idle, .failed: "Scan"
+        default: "Disconnect"
+        }
+    }
+    private func scanOrDisconnect() {
+        switch ble.connectionState {
+        case .idle, .failed: ble.startScan()
+        default: ble.disconnect()
+        }
+    }
+
 }

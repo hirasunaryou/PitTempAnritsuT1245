@@ -62,6 +62,22 @@ final class SessionViewModel: ObservableObject {
     private var startedAt: Date? = nil
     private var timer: Timer? = nil
 
+    // BLEからのサンプルをUI更新系に反映
+    func ingestBLESample(_ s: TemperatureSample) {
+        // ライブ表示
+        latestValueText = String(format: "%.1f", s.value)
+        if s.value.isFinite, s.value > peakC || !peakC.isFinite { peakC = s.value }
+
+        // グラフ用のライブ配列（HIDと同じ窓切り）
+        live.append(TempSample(ts: s.time, c: s.value))
+        lastSampleAt = s.time
+        let cutoff = s.time.addingTimeInterval(-chartWindowSec)
+        if let idx = live.firstIndex(where: { $0.ts >= cutoff }), idx > 0 {
+            live.removeFirst(idx)
+        }
+    }
+
+    
     // MARK: - View からの操作
     func tapCell(wheel: WheelPos, zone: Zone) {
         start(wheel: wheel, zone: zone)

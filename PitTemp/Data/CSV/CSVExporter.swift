@@ -1,17 +1,33 @@
-//
-//  CSVExporter.swift
-//  Data/CSV
-//
-//  既存実装に合わせた CSV 出力。
-//  ヘッダは従来の：
-//  TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO
-//
-
 import Foundation
 
+/// ライブ追記（time,value）と集計CSV(export)の両方に対応する実装
 final class CSVExporter: CSVExporting {
-    init() {}
 
+    // ---- ライブ追記（PitTempLogs）用 ----
+    private var handle: FileHandle?
+    private let dateFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        return f
+    }()
+
+    /// ライブ追記：TemperatureSample を 1 行ずつ書く
+    func appendLive(sample: TemperatureSample) {
+        ensureStreamingHandle()
+        guard let h = handle else { return }
+        let line = "\(dateFmt.string(from: sample.time)),\(sample.value)\n"
+        if let d = line.data(using: .utf8) {
+            do { try h.write(contentsOf: d) } catch { /* 必要ならログ出力 */ }
+        }
+    }
+
+    deinit {
+        if let h = handle {
+            do { try h.close() } catch { /* ignore */ }
+        }
+    }
+
+    // ---- 集計CSV（PitTempReports）用 ----
     func export(
         meta: MeasureMeta,
         results: [MeasureResult],
@@ -19,72 +35,81 @@ final class CSVExporter: CSVExporting {
         sessionStart: Date
     ) throws -> URL {
 
-        // Wheel順は既存仕様に合わせて固定（あなたのプロジェクトは FL, FR, RL, RR）
-        let wheels: [WheelPos] = [.FL, .FR, .RL, .RR]
+        let base = documentsBase()
+        let day = ISO8601DateFormatter().string(from: sessionStart).prefix(10) // yyyy-MM-dd
+        let dir = base.appendingPathComponent("PitTempReports/\(day)")
 
-        // 集計（各Wheelごとに OUT/CL/IN のピーク値を入れる）
-        struct Agg { var out: Double?; var cl: Double?; var inn: Double? }
-        var agg: [WheelPos: Agg] = [:]
-        for w in wheels { agg[w] = Agg(out: nil, cl: nil, inn: nil) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
+        let stamp = Int(sessionStart.timeIntervalSince1970)
+        let safeTrack = meta.track.replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
+        let url = dir.appendingPathComponent("report_\(safeTrack)_\(stamp).csv")
+
+        var csv = ""
+        csv += "# PitTemp Session Report\n"
+        csv += "# track,\(meta.track)\n"
+        csv += "# date,\(meta.date)\n"
+        csv += "# time,\(meta.time)\n"
+        csv += "# lap,\(meta.lap)\n"
+        csv += "# car,\(meta.car)\n"
+        csv += "# driver,\(meta.driver)\n"
+        csv += "# tyre,\(meta.tyre)\n"
+        csv += "# checker,\(meta.checker)\n"
+        csv += "\n"
+        csv += "wheel,zone,peakC,startedAt,endedAt,via,memo\n"
+
+        let iso = ISO8601DateFormatter()
         for r in results {
-            // r.peakC が有限値なら採用
-            guard r.peakC.isFinite else { continue }
-            switch r.zone {
-            case .OUT: agg[r.wheel]?.out = r.peakC
-            case .CL:  agg[r.wheel]?.cl  = r.peakC
-            case .IN:  agg[r.wheel]?.inn = r.peakC
-            }
+            let memo = wheelMemos[r.wheel] ?? ""
+            let row = [
+                r.wheel.rawValue,
+                r.zone.rawValue,
+                r.peakC.isFinite ? String(format: "%.1f", r.peakC) : "",
+                iso.string(from: r.startedAt),
+                iso.string(from: r.endedAt),
+                r.via,
+                memo.replacingOccurrences(of: ",", with: " ")
+            ].joined(separator: ",")
+            csv += row + "\n"
         }
 
-        // 保存先
-        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let stamp = Self.isoNoFrac.string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let url  = dir.appendingPathComponent("track_session_flatwheel_\(stamp).csv")
-
-        // ヘッダ
-        var rows: [String] = []
-        rows.append("TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO")
-
-        let exportedAt = Self.isoFrac.string(from: Date())
-        let sessionISO = Self.isoFrac.string(from: sessionStart)
-
-        // 1行 = 1 Wheel
-        for w in wheels {
-            let a = agg[w]!
-
-            let outS = a.out.map { String(format: "%.1f", $0) } ?? ""
-            let clS  = a.cl .map { String(format: "%.1f", $0) } ?? ""
-            let inS  = a.inn.map { String(format: "%.1f", $0) } ?? ""
-
-            let memo = csvEscape(wheelMemos[w] ?? "")
-
-            rows.append("\(csvEscape(meta.track)),\(csvEscape(meta.date)),\(csvEscape(meta.car)),\(csvEscape(meta.driver)),\(csvEscape(meta.tyre)),\(csvEscape(meta.time)),\(csvEscape(meta.lap)),\(csvEscape(meta.checker)),\(w.rawValue),\(outS),\(clS),\(inS),\(memo),\(sessionISO),\(exportedAt),")
-        }
-
-        try rows.joined(separator: "\n").appending("\n").data(using: .utf8)!.write(to: url, options: .atomic)
+        try csv.data(using: .utf8)!.write(to: url, options: .atomic)
         return url
     }
 
-    // MARK: - Helpers
+    // ---- ヘルパ ----
 
-    private static let isoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    private static let isoNoFrac: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
-    /// CSVエスケープ（カンマ/改行/ダブルクォートを含む場合は "..." に）
-    private func csvEscape(_ s: String) -> String {
-        if s.contains(",") || s.contains("\"") || s.contains("\n") {
-            let escaped = s.replacingOccurrences(of: "\"", with: "\"\"")
-            return "\"\(escaped)\""
+    /// iCloud Drive が有効なら /Documents、なければローカル Documents
+    private func documentsBase() -> URL {
+        if let ubiq = FileManager.default
+            .url(forUbiquityContainerIdentifier: nil)?
+            .appendingPathComponent("Documents") {
+            return ubiq
         }
-        return s
+        return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    /// ライブ追記用ファイルのハンドルを lazy に準備
+    private func ensureStreamingHandle() {
+        if handle != nil { return }
+        let base = documentsBase()
+        let day = ISO8601DateFormatter().string(from: Date()).prefix(10) // yyyy-MM-dd
+        let dir = base.appendingPathComponent("PitTempLogs/\(day)")
+
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent("session-\(Int(Date().timeIntervalSince1970)).csv")
+            if !FileManager.default.fileExists(atPath: url.path) {
+                FileManager.default.createFile(
+                    atPath: url.path,
+                    contents: "time,value\n".data(using: .utf8)
+                )
+            }
+            let h = try FileHandle(forWritingTo: url)
+            try h.seekToEnd()
+            handle = h
+        } catch {
+            handle = nil // 準備失敗時は以降の appendLive を無視
+        }
     }
 }

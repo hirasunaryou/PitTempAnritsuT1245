@@ -18,12 +18,26 @@
 
 /* Begin PBXFileReference section */
 		5B68211C2E7ED85600F86998 /* PitTemp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PitTemp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5BDC25252E9A8CA200057A23 /* PitTemp.xcodeproj */ = {isa = PBXFileReference; lastKnownFileType = "wrapper.pb-project"; path = PitTemp.xcodeproj; sourceTree = SOURCE_ROOT; };
 		ACEAFDB62E810C7A00B7DE89 /* PitTempTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PitTempTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		5BDC250F2E9A76E900057A23 /* Exceptions for "PitTemp" folder in "PitTemp" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 5B68211B2E7ED85600F86998 /* PitTemp */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		5B68211E2E7ED85600F86998 /* PitTemp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				5BDC250F2E9A76E900057A23 /* Exceptions for "PitTemp" folder in "PitTemp" target */,
+			);
 			path = PitTemp;
 			sourceTree = "<group>";
 		};
@@ -55,6 +69,7 @@
 		5B6821132E7ED85600F86998 = {
 			isa = PBXGroup;
 			children = (
+				5BDC25252E9A8CA200057A23 /* PitTemp.xcodeproj */,
 				5B68211E2E7ED85600F86998 /* PitTemp */,
 				ACEAFDB72E810C7A00B7DE89 /* PitTempTests */,
 				5B68211D2E7ED85600F86998 /* Products */,
@@ -328,11 +343,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PitTemp/PitTemp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = H9S63CJWFA;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PitTemp/Info.plist;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "“This app uses Bluetooth to connect to a temperature mesurement probe and read temperatures, including in the background.”";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "“計測データに位置情報を添付して後から解析できるようにするために使用します。”";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record short pit memos.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Speech-to-text for quick pit notes.";
@@ -360,11 +378,14 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PitTemp/PitTemp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = H9S63CJWFA;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = PitTemp/Info.plist;
+				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "“This app uses Bluetooth to connect to a temperature mesurement probe and read temperatures, including in the background.”";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "“計測データに位置情報を添付して後から解析できるようにするために使用します。”";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record short pit memos.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Speech-to-text for quick pit notes.";

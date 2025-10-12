@@ -5,288 +5,182 @@
 
 import SwiftUI
 
-/// メタ情報の音声入力版エディタ。
-/// 1フィールドずつ「録音→停止→追記/上書き」+ 手動編集/消去ができる。
+/// 既存の SpeechMemoManager を使って音声 → テキスト化し、
+/// そのテキストから各メタ項目(Track/Car/Driver/…）を抽出・反映する簡易エディタ。
 struct MetaVoiceEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var vm: SessionViewModel
 
-    @StateObject private var speech = SpeechMemoManager() // 既存の音声起こしマネージャを再利用
-    @State private var targetField: Field?
+    @StateObject private var speech = SpeechMemoManager()
 
-    // 反映モード
-    private enum ApplyMode: String, CaseIterable, Identifiable {
-        case append = "Append"
-        case replace = "Replace"
-        var id: String { rawValue }
-    }
-
-    @State private var mode: ApplyMode = .append        // 追記/上書き 切替
-    @State private var editingField: Field? = nil       // 手動編集対象
-    @State private var draftText: String = ""           // 手動編集用
-
-    enum Field: String, CaseIterable, Identifiable {
-        case track, date, time, lap, car, driver, tyre, checker
-        var id: String { rawValue }
-        var label: String {
-            switch self {
-            case .track: "TRACK"
-            case .date: "DATE"
-            case .time: "TIME"
-            case .lap: "LAP"
-            case .car: "CAR"
-            case .driver: "DRIVER"
-            case .tyre: "TYRE"
-            case .checker: "CHECKER"
-            }
-        }
-        /// 追記の仕方を統一
-        func append(_ text: String, to meta: inout MeasureMeta) {
-            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !t.isEmpty else { return }
-            func join(_ old: inout String) { old = old.isEmpty ? t : (old + " " + t) }
-            switch self {
-            case .track:   join(&meta.track)
-            case .date:    join(&meta.date)
-            case .time:    join(&meta.time)
-            case .lap:     join(&meta.lap)
-            case .car:     join(&meta.car)
-            case .driver:  join(&meta.driver)
-            case .tyre:    join(&meta.tyre)
-            case .checker: join(&meta.checker)
-            }
-        }
-    }
+    @State private var transcript: String = ""
+    @State private var lastError: String?
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(Field.allCases) { f in
-                    FieldRow(
-                        field: f,
-                        value: value(for: f),
-                        isRecording: (speech.isRecording && targetField == f),
-                        onDictate: {
-                            // 他の録音があれば反映してから開始
-                            let (_, prevText) = speech.stopAndTakeText()
-                            if !prevText.isEmpty, let tf = targetField { apply(text: prevText, to: tf) }
-                            try? speech.start(for: .FL) // wheelは未使用
-                            targetField = f
-                            Haptics.impactLight()
-                        },
-                        onStop: {
-                            speech.stop()
-                            let t = speech.takeFinalText()
-                            if !t.isEmpty { apply(text: t, to: f) }
-                            targetField = nil
-                        },
-                        onEdit: {
-                            draftText = value(for: f)
-                            editingField = f
-                        },
-                        onClear: {
-                            setValue("", for: f)
-                        }
-                    )
-                    .padding(.vertical, 6)
-                }
-            }
-            .navigationTitle("Edit Meta (Voice)")
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Picker("", selection: $mode) {
-                        ForEach(ApplyMode.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 220)
-                }
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        // 録音中なら止めて反映
-                        let (_, prevText) = speech.stopAndTakeText()
-                        if !prevText.isEmpty, let t = targetField { apply(text: prevText, to: t) }
-                        targetField = nil
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .onAppear { speech.requestAuth(); vm.stopAll() }
-        .sheet(item: $editingField) { f in
-            NavigationStack {
-                Form {
-                    Section(f.label) {
-                        TextField("Enter text", text: $draftText, axis: .vertical)
-                            .textInputAutocapitalization(.characters)
-                    }
-                }
-                .navigationTitle("Edit \(f.label)")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { editingField = nil } }
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Save") {
-                            apply(text: draftText, to: f)   // モードに従い反映
-                            editingField = nil
-                        }
-                    }
-                }
-            }
-        }
-    }
+            VStack(spacing: 12) {
 
-    // MARK: - 行コンポーネント（アイコンのみ／狭い幅で値を下段へ）
-    private struct FieldRow: View {
-        let field: MetaVoiceEditorView.Field
-        let value: String
-        let isRecording: Bool
-        let onDictate: () -> Void
-        let onStop: () -> Void
-        let onEdit: () -> Void
-        let onClear: () -> Void
-
-        var body: some View {
-            GeometryReader { geo in
-                let narrow = geo.size.width < 360
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(alignment: .center, spacing: 12) {
-                        Text(field.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 76, alignment: .leading)
-
-                        Spacer(minLength: 0)
-
-                        if isRecording {
-                            Button(action: onStop) {
-                                Image(systemName: "stop.circle.fill")
-                                    .font(.system(size: 22, weight: .semibold))
-                            }
-                            .buttonStyle(PillIconButtonStyle(prominent: true))
-                            .accessibilityLabel("Stop recording")
+                // 録音状態表示 + 操作
+                HStack(spacing: 12) {
+                    Group {
+                        if speech.isRecording {
+                            Label("録音中…", systemImage: "record.circle.fill")
+                                .foregroundStyle(.red)
                         } else {
-                            HStack(spacing: 10) {
-                                Button(action: onDictate) {
-                                    Image(systemName: "mic.fill")
-                                        .font(.system(size: 18, weight: .semibold))
-                                }
-                                .buttonStyle(PillIconButtonStyle())
-                                .accessibilityLabel("Dictate")
-
-                                Button(action: onEdit) {
-                                    Image(systemName: "pencil")
-                                        .font(.system(size: 18, weight: .semibold))
-                                }
-                                .buttonStyle(PillIconButtonStyle())
-                                .accessibilityLabel("Edit")
-
-                                Button(role: .destructive, action: onClear) {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 18, weight: .semibold))
-                                }
-                                .buttonStyle(PillIconButtonStyle(destructive: true))
-                                .accessibilityLabel("Clear")
-                            }
+                            Label("待機中", systemImage: "mic")
+                                .foregroundStyle(.secondary)
                         }
                     }
+                    .font(.headline)
 
-                    if narrow {
-                        Text(value.isEmpty ? "-" : value)
-                            .font(.headline)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.leading, 76)
+                    Spacer()
+
+                    if speech.isRecording {
+                        Button {
+                            stopRecordingAndAppend()
+                        } label: {
+                            Label("Stop", systemImage: "stop.circle.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
                     } else {
-                        HStack {
-                            Spacer()
-                            Text(value.isEmpty ? "-" : value)
-                                .font(.headline)
-                                .multilineTextAlignment(.trailing)
+                        Button {
+                            // SpeechMemoManager.start(for:) が WheelPos 必須のため
+                            // メタ入力ではダミーで .FL を渡して録音のみ利用する
+                            do { try speech.start(for: .FL) } catch {
+                                lastError = error.localizedDescription
+                            }
+                        } label: {
+                            Label("Start", systemImage: "mic.fill")
                         }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!speech.isAuthorized)
                     }
+                }
 
-                    Divider().opacity(0.15)
+                // 音声→テキスト結果
+                TextEditor(text: $transcript)
+                    .font(.body)
+                    .frame(minHeight: 180)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(.secondary.opacity(0.25), lineWidth: 1)
+                    )
+                    .padding(.top, 4)
+
+                HStack {
+                    Button {
+                        transcript.removeAll()
+                    } label: {
+                        Label("Clear", systemImage: "trash")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+
+                    Button {
+                        applyTranscriptToMeta()
+                    } label: {
+                        Label("テキストから反映", systemImage: "text.badge.plus")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                // 現在のメタ（読み取り専用プレビュー）
+                VStack(alignment: .leading, spacing: 6) {
+                    metaRow("TRACK", vm.meta.track)
+                    metaRow("DATE", vm.meta.date)
+                    metaRow("TIME", vm.meta.time)
+                    metaRow("CAR", vm.meta.car)
+                    metaRow("DRIVER", vm.meta.driver)
+                    metaRow("TYRE", vm.meta.tyre)
+                    metaRow("LAP", vm.meta.lap)
+                    metaRow("CHECKER", vm.meta.checker)
+                }
+                .padding(12)
+                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+
+                if let e = lastError {
+                    Text("Error: \(e)")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                }
+
+                Spacer(minLength: 8)
+            }
+            .padding()
+            .navigationTitle("Meta (Voice)")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .disabled(speech.isRecording)
                 }
             }
-            .frame(height: 72)
+            .onAppear { speech.requestAuth() }
+            .onDisappear { if speech.isRecording { speech.stop() } }
         }
     }
 
-    private struct PillIconButtonStyle: ButtonStyle {
-        var prominent = false
-        var destructive = false
-
-        func makeBody(configuration: Configuration) -> some View {
-            configuration.label
-                .foregroundStyle(destructive ? .red : (prominent ? .white : .blue))
-                .padding(.vertical, 10)
-                .padding(.horizontal, 14)
-                .background(
-                    RoundedRectangle(cornerRadius: 16)
-                        .fill(destructive ? Color.red.opacity(0.12)
-                                          : (prominent ? Color.blue : Color.blue.opacity(0.12)))
-                )
-                .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
-                .animation(.spring(response: 0.2, dampingFraction: 0.8), value: configuration.isPressed)
+    private func metaRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Spacer()
+            Text(value.isEmpty ? "-" : value).font(.headline)
         }
     }
 
-    // MARK: - 反映・値操作
-    private func apply(text: String, to field: Field) {
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return }
+    /// Stop → 認識テキストを transcript に追記
+    private func stopRecordingAndAppend() {
+        speech.stop()
+        let t = speech.takeFinalText()
+        if !t.isEmpty {
+            if transcript.isEmpty { transcript = t }
+            else { transcript += "\n" + t }
+        }
+    }
 
-        switch mode {
-        case .append:
-            var meta = vm.meta
-            if field == .car {
-                // 既存値と空白区切りで連結 → 抽出
-                let joined = [meta.car, cleaned]
-                    .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                    .joined(separator: " ")
-                let (no, raw) = CarNumberExtractor.extract(from: joined)
-                meta.car = raw                       // 画面表示は全文
-                meta.carNo = no ?? meta.carNo        // 見つかったら更新
-                meta.carNoAndMemo = raw              // 常に全文保持
-            } else {
-                field.append(cleaned, to: &meta)
+    /// transcript から簡易に各メタ項目を抽出して vm.meta に反映
+    private func applyTranscriptToMeta() {
+        let text = transcript
+            .replacingOccurrences(of: "：", with: ":") // 全角コロン対策
+            .replacingOccurrences(of: "　", with: " ")
+            .lowercased()
+
+        func find(_ keys: [String]) -> String? {
+            for k in keys {
+                if let r = text.range(of: "\(k)[:\\s]+([^\\n]+)", options: .regularExpression) {
+                    let line = String(text[r])
+                    if let m = line.range(of: "[:\\s]+([^\\n]+)", options: .regularExpression) {
+                        let val = line[m]
+                        return String(val)
+                            .replacingOccurrences(of: ":", with: "")
+                            .trimmingCharacters(in: .whitespaces)
+                    }
+                }
             }
-            vm.meta = meta
-
-        case .replace:
-            if field == .car {
-                let (no, raw) = CarNumberExtractor.extract(from: cleaned)
-                vm.meta.car = raw
-                vm.meta.carNo = no ?? ""
-                vm.meta.carNoAndMemo = raw
-            } else {
-                setValue(cleaned, for: field)
-            }
+            return nil
         }
-    }
 
-    private func setValue(_ newValue: String, for f: Field) {
-        switch f {
-        case .track:   vm.meta.track = newValue
-        case .date:    vm.meta.date = newValue
-        case .time:    vm.meta.time = newValue
-        case .lap:     vm.meta.lap = newValue
-        case .car:     vm.meta.car = newValue
-        case .driver:  vm.meta.driver = newValue
-        case .tyre:    vm.meta.tyre = newValue
-        case .checker: vm.meta.checker = newValue
-        }
-    }
+        // よく言いがちな言い回しを複数キーで吸収（日本語＋英語）
+        let track = find(["track", "コース", "トラック", "サーキット"])
+        let car = find(["car", "車", "車種", "クルマ"])
+        let driver = find(["driver", "ドライバー", "運転手"])
+        let tyre = find(["tyre", "タイヤ", "タイア", "タイヤ種"])
+        let lap = find(["lap", "ラップ"])
+        let time = find(["time", "時刻", "タイム"])
+        let checker = find(["checker", "チェッカー", "担当", "記録者", "計測者"])
+        let date = find(["date", "日付", "日にち"])
 
-    private func value(for f: Field) -> String {
-        switch f {
-        case .track:   return vm.meta.track
-        case .date:    return vm.meta.date
-        case .time:    return vm.meta.time
-        case .lap:     return vm.meta.lap
-        case .car:     return vm.meta.car
-        case .driver:  return vm.meta.driver
-        case .tyre:    return vm.meta.tyre
-        case .checker: return vm.meta.checker
-        }
+        // 反映（空でなければ上書き）
+        if let v = track, !v.isEmpty { vm.meta.track = v }
+        if let v = car, !v.isEmpty { vm.meta.car = v }
+        if let v = driver, !v.isEmpty { vm.meta.driver = v }
+        if let v = tyre, !v.isEmpty { vm.meta.tyre = v }
+        if let v = lap, !v.isEmpty { vm.meta.lap = v }
+        if let v = time, !v.isEmpty { vm.meta.time = v }
+        if let v = checker, !v.isEmpty { vm.meta.checker = v }
+        if let v = date, !v.isEmpty { vm.meta.date = v }
     }
 }

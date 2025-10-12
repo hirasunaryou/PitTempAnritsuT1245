@@ -23,10 +23,10 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		5BDC250F2E9A76E900057A23 /* Exceptions for "PitTemp" folder in "PitTemp" target */ = {
+		5B7CD5F62E9BAADD004F1F47 /* Exceptions for "PitTemp" folder in "PitTemp" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Info.plist,
+				App/Info.plist,
 			);
 			target = 5B68211B2E7ED85600F86998 /* PitTemp */;
 		};
@@ -36,7 +36,7 @@
 		5B68211E2E7ED85600F86998 /* PitTemp */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				5BDC250F2E9A76E900057A23 /* Exceptions for "PitTemp" folder in "PitTemp" target */,
+				5B7CD5F62E9BAADD004F1F47 /* Exceptions for "PitTemp" folder in "PitTemp" target */,
 			);
 			path = PitTemp;
 			sourceTree = "<group>";
@@ -354,13 +354,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = PitTemp/PitTemp.entitlements;
+				CODE_SIGN_ENTITLEMENTS = PitTemp/App/PitTemp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = H9S63CJWFA;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PitTemp/Info.plist;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PitTemp/App/Info.plist;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "“This app uses Bluetooth to connect to a temperature mesurement probe and read temperatures, including in the background.”";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "“計測データに位置情報を添付して後から解析できるようにするために使用します。”";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record short pit memos.";
@@ -389,13 +389,13 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = PitTemp/PitTemp.entitlements;
+				CODE_SIGN_ENTITLEMENTS = PitTemp/App/PitTemp.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = H9S63CJWFA;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = PitTemp/Info.plist;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PitTemp/App/Info.plist;
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "“This app uses Bluetooth to connect to a temperature mesurement probe and read temperatures, including in the background.”";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "“計測データに位置情報を添付して後から解析できるようにするために使用します。”";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Record short pit memos.";
@@ -429,7 +429,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = developmentSolution.PitTempTests;
+				PRODUCT_BUNDLE_IDENTIFIER = developmentSolution.PitTemp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -451,7 +451,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.6;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = developmentSolution.PitTempTests;
+				PRODUCT_BUNDLE_IDENTIFIER = developmentSolution.PitTemp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;

@@ -15,7 +15,7 @@ struct MetaEditorView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // 音声入力にワンタップで切り替え
+                // まとめ録り（シート）も残しておく
                 Section {
                     Button {
                         showVoiceEditor = true
@@ -23,35 +23,28 @@ struct MetaEditorView: View {
                         Label("Start voice input…", systemImage: "mic.circle.fill")
                     }
                     .buttonStyle(.borderedProminent)
-                } footer: {
-                    Text("現場では声で項目を読み上げて入力できます。録音テキストは下の各フィールドに反映されます。")
                 }
 
-                // セッション系
+                // --- SESSION ---
                 Section("SESSION") {
-                    TextField("TRACK", text: $vm.meta.track)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                    TextField("DATE (ISO8601)", text: $vm.meta.date)
-                        .keyboardType(.numbersAndPunctuation)
+                    FieldRow(label: "TRACK", text: $vm.meta.track)
+                    FieldRow(label: "DATE (ISO8601)", text: $vm.meta.date, keyboard: .numbersAndPunctuation)
                     HStack {
-                        TextField("TIME", text: $vm.meta.time)
-                        Spacer(minLength: 12)
-                        TextField("LAP", text: $vm.meta.lap)
-                            .keyboardType(.numberPad)
+                        FieldRow(label: "TIME", text: $vm.meta.time)
+                        FieldRow(label: "LAP", text: $vm.meta.lap, keyboard: .numberPad)
                     }
                 }
 
-                // 車両・人
+                // --- CAR & PEOPLE ---
                 Section("CAR & PEOPLE") {
-                    TextField("CAR", text: $vm.meta.car)
-                    TextField("DRIVER", text: $vm.meta.driver)
-                    TextField("TYRE", text: $vm.meta.tyre)
+                    FieldRow(label: "CAR", text: $vm.meta.car)
+                    FieldRow(label: "DRIVER", text: $vm.meta.driver)
+                    FieldRow(label: "TYRE", text: $vm.meta.tyre)
                 }
 
-                // その他
+                // --- OTHER ---
                 Section("OTHER") {
-                    TextField("CHECKER", text: $vm.meta.checker)
+                    FieldRow(label: "CHECKER", text: $vm.meta.checker)
                     Toggle("Autofill Date/Time if empty", isOn: $settings.autofillDateTime)
                 }
             }
@@ -64,11 +57,60 @@ struct MetaEditorView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            // ここで音声エディタをシート表示
             .sheet(isPresented: $showVoiceEditor) {
-                MetaVoiceEditorView()
-                    .environmentObject(vm)
+                MetaVoiceEditorView().environmentObject(vm)
             }
         }
+    }
+}
+
+/// テキストフィールド + 右端に“その欄だけ音声入力”ボタン
+private struct FieldRow: View {
+    let label: String
+    @Binding var text: String
+    var keyboard: UIKeyboardType = .default
+
+    @StateObject private var speech = SpeechMemoManager()
+    @State private var interim: String = ""
+    @State private var isRecording = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TextField(label, text: $text)
+                .keyboardType(keyboard)
+
+            // マイクボタン
+            Button {
+                if isRecording {
+                    stopAndApply()
+                } else {
+                    start()
+                }
+            } label: {
+                Label(isRecording ? "Stop" : "Mic", systemImage: isRecording ? "stop.circle.fill" : "mic.fill")
+            }
+            .buttonStyle(.bordered)
+            .disabled(!speech.isAuthorized)
+        }
+        .onAppear { speech.requestAuth() }
+        .onDisappear { if isRecording { speech.stop() } }
+    }
+
+    private func start() {
+        interim.removeAll()
+        do {
+            // “どのホイールか”などの文脈は不要なので ダミーとして.FLを入れている
+            try speech.start(for: .FL)
+            isRecording = true
+        } catch {
+            isRecording = false
+        }
+    }
+
+    private func stopAndApply() {
+        speech.stop()
+        isRecording = false
+        let t = speech.takeFinalText().trimmingCharacters(in: .whitespacesAndNewlines)
+        if !t.isEmpty { text = t }
     }
 }

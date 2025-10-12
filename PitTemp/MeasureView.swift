@@ -50,20 +50,6 @@ struct MeasureView: View {
                 .padding()
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
-            // この画面だけで HID を稼働
-            .overlay(alignment: .bottomTrailing) {
-                HIDTextFieldCaptureView(
-                    onLine: { vm.ingestLine($0) },
-                    onSpecial: { vm.receiveSpecial($0) },
-                    onBuffer: { vm.ingestBufferSnapshot($0) },
-                    isActive: vm.isCaptureActive || showRaw,
-                    showField: $showRaw,
-                    focusTick: $focusTick
-                )
-                .frame(width: showRaw ? 280 : 1, height: showRaw ? 36 : 1)
-                .padding(Edge.Set.trailing, 12)              // ← ここを明示
-                .padding(Edge.Set.bottom, showRaw ? 64 : 12) // ← ここも明示
-            }
             .navigationTitle("TrackTemp")
             .toolbar {
                 Button("Edit") { showMetaEditor = true }

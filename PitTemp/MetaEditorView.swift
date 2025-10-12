@@ -46,7 +46,7 @@ struct MetaEditorView: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
-//            .background(HardwareKeyEater(isEnabled: blockExternalKeys))
+
         }
         .onAppear { vm.stopAll() }
     }

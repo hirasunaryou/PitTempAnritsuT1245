@@ -1,4 +1,4 @@
-//  PitTemp/Model/TemperatureFrame.swift
+//  PitTemp/Models/TemperatureFrame.swift
 import Foundation
 
 /// 1レコード = ID + 温度(℃) + ステータス

@@ -20,7 +20,6 @@ struct PitTempApp: App {
     @ViewBuilder
     private var root: some View {
         Group {
-            if onboarded {
                 MainTabView()
                     .environmentObject(vm)
                     .environmentObject(settings)
@@ -28,15 +27,6 @@ struct PitTempApp: App {
                     .environmentObject(ble)
                     .environmentObject(registry)
                     .onAppear { ble.registry = registry }
-            } else {
-                WelcomeView(onContinue: {
-                    Haptics.impactLight()
-                    onboarded = true
-                })
-                .environmentObject(settings)
-                .environmentObject(folderBM)
-                .environmentObject(registry)
-            }
         }
         // 起動時に一度だけBLE→Recorderを結線
         .onAppear {

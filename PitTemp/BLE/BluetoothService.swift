@@ -58,7 +58,10 @@ final class BluetoothService: NSObject, ObservableObject {
 
     // ポーリングをRunLoopではなくGCDで
     private var pollSrc: DispatchSourceTimer?
-
+    
+    // 自動ポーリングをするか否か
+    private let pollingEnabled = false // 以降の互換のため置いておくが、デフォルト停止
+    
     // 観測用カウンタ
     @Published var writeCount: Int = 0
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
@@ -151,66 +154,68 @@ final class BluetoothService: NSObject, ObservableObject {
 
     // ポーリング開始/停止
     func startPolling(hz: Double = 5.0) {
-        if hasWrite == false {
-            autoPollOnReady = true
-            print("[BLE] poll requested; will start when writeChar is ready")
-            return
-        }
-        if pollSrc != nil { return }
-
-        let interval = DispatchTimeInterval.milliseconds(Int(1000.0 / hz))
-        let src = DispatchSource.makeTimerSource(queue: bleQueue)
-        src.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.requestOnce()
-            if let t = self.lastNotifyAt, Date().timeIntervalSince(t) > 1.5 {
-                print("[BLE] watchdog: no notify > 1.5s")
-            }
-        }
-        src.schedule(deadline: .now() + .milliseconds(200), repeating: interval, leeway: .milliseconds(20))
-        pollSrc = src
-        src.activate()
-        print("[BLE] start polling GCD \(hz)Hz")
+        // no-op
+//        if hasWrite == false {
+//            autoPollOnReady = true
+//            print("[BLE] poll requested; will start when writeChar is ready")
+//            return
+//        }
+//        if pollSrc != nil { return }
+//
+//        let interval = DispatchTimeInterval.milliseconds(Int(1000.0 / hz))
+//        let src = DispatchSource.makeTimerSource(queue: bleQueue)
+//        src.setEventHandler { [weak self] in
+//            guard let self else { return }
+//            self.requestOnce()
+//            if let t = self.lastNotifyAt, Date().timeIntervalSince(t) > 1.5 {
+//                print("[BLE] watchdog: no notify > 1.5s")
+//            }
+//        }
+//        src.schedule(deadline: .now() + .milliseconds(200), repeating: interval, leeway: .milliseconds(20))
+//        pollSrc = src
+//        src.activate()
+//        print("[BLE] start polling GCD \(hz)Hz")
     }
 
     func stopPolling() {
-        pollSrc?.cancel()
-        pollSrc = nil
+        // no-op
+        //        pollSrc?.cancel()
+        // pollSrc = nil
     }
 
     private func startAutoTune() {
-        stopAutoTune()
-        let src = DispatchSource.makeTimerSource(queue: bleQueue)
-        src.setEventHandler { [weak self] in
-            guard let self else { return }
-            let delta = self.notifyCountBG - self.lastCountForAuto
-            self.lastCountForAuto = self.notifyCountBG
-            let hz = max(0, delta)
-            DispatchQueue.main.async { self.notifyHz = Double(hz) }
-
-            if hz >= 3 { self.fastTicks += 1; self.slowTicks = 0 }
-            else if hz < 2 { self.slowTicks += 1; self.fastTicks = 0 }
-            else { self.fastTicks = 0; self.slowTicks = 0 }
-
-            if self.fastTicks >= 2 {
-                self.fastTicks = 0
-                self.stopPolling()
-                self.streamModeUntil = Date().addingTimeInterval(3.0)
-            }
-            if let until = self.streamModeUntil, Date() < until { return }
-            if self.slowTicks >= 2 && self.pollSrc == nil && self.hasWrite {
-                self.slowTicks = 0
-                self.startPolling(hz: 5)
-            }
-        }
-        src.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1), leeway: .milliseconds(50))
-        autoTuneSrc = src
-        src.activate()
+        // no-op
+//        stopAutoTune()
+//        let src = DispatchSource.makeTimerSource(queue: bleQueue)
+//        src.setEventHandler { [weak self] in
+//            guard let self else { return }
+//            let delta = self.notifyCountBG - self.lastCountForAuto
+//            self.lastCountForAuto = self.notifyCountBG
+//            let hz = max(0, delta)
+//            DispatchQueue.main.async { self.notifyHz = Double(hz) }
+//
+//            if hz >= 3 { self.fastTicks += 1; self.slowTicks = 0 }
+//            else if hz < 2 { self.slowTicks += 1; self.fastTicks = 0 }
+//            else { self.fastTicks = 0; self.slowTicks = 0 }
+//
+//            if self.fastTicks >= 2 {
+//                self.fastTicks = 0
+//                self.stopPolling()
+//                self.streamModeUntil = Date().addingTimeInterval(3.0)
+//            }
+//            if let until = self.streamModeUntil, Date() < until { return }
+//            if self.slowTicks >= 2 && self.pollSrc == nil && self.hasWrite {
+//                self.slowTicks = 0
+//                self.startPolling(hz: 5)
+//            }
+//        }
+//        src.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1), leeway: .milliseconds(50))
+//        autoTuneSrc = src
+//        src.activate()
     }
 
     private func stopAutoTune() {
-        autoTuneSrc?.cancel()
-        autoTuneSrc = nil
+        // no-op
     }
 
     private func hex(_ data: Data) -> String {
@@ -274,7 +279,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {
         print("[BLE] connected to \(p.name ?? "?")")
-        startAutoTune()
+//        startAutoTune() // 自動チューニングの開始
         p.delegate = self
         p.discoverServices(nil)
     }
@@ -316,10 +321,6 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         wroteNotReadyCount = 0
         if readChar != nil {
             DispatchQueue.main.async { self.connectionState = .ready }
-        }
-        if autoPollOnReady && hasWrite {
-            autoPollOnReady = false
-            startPolling(hz: 5)
         }
         // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
         setDeviceTime()

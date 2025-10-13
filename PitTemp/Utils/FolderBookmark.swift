@@ -11,12 +11,24 @@
 import Foundation
 import SwiftUI
 
-enum UploadUIState { case idle, uploading, done, failed(String) }
+enum UploadUIState: Equatable {
+    case idle
+    case uploading
+    case done
+    case failed(String)
+}
+// 保存先の通知を出す
+extension Notification.Name {
+    static let pitUploadFinished = Notification.Name("PitTempUploadFinished")
+}
+
 
 final class FolderBookmark: ObservableObject {
     // UserDefaults に生の bookmarkData を保存（小サイズなので AppStorage でOK）
     @AppStorage("sharedFolder.bookmark") private var bookmarkData: Data?
 
+
+    
     // 復元済みのURL（UI表示用）
     @Published private(set) var folderURL: URL?
 
@@ -78,76 +90,48 @@ final class FolderBookmark: ObservableObject {
         }
     }
 
-    // MARK: Upload (CSV → 共有フォルダにコピー)
-    /// Export済みCSVをアップロード時刻を刻印してから共有フォルダへコピー。
-    /// - 連打吸収（statusLabel で制御）
-    /// - 同名があれば _1, _2 ... を付けて重複回避
+    @Published var lastUploadedDestination: URL? = nil
     func upload(file originalCSV: URL) {
         // 連打ガード
         guard case .idle = statusLabel else { return }
         statusLabel = .uploading
 
         // 保存先フォルダを復元（未設定なら failed）
-        guard let folder = folderURL ?? restore() else {
+        guard let baseFolder = folderURL ?? restore() else {
             statusLabel = .failed("No folder")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
             return
         }
 
-        // 刻印するアップロード時刻（ISO）
-        let uploadedISO: String = {
-            let f = ISO8601DateFormatter()
-            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return f.string(from: Date())
-        }()
+        // 日付フォルダ（YYYY-MM-DD）を「指定フォルダ直下」に作る
+        let day = ISO8601DateFormatter().string(from: Date()).prefix(10) // yyyy-MM-dd
+        let dayFolder = baseFolder.appendingPathComponent(String(day), isDirectory: true)
 
-        DispatchQueue.global().async {
-            // フォルダのセキュリティスコープを開く
-            let ok = folder.startAccessingSecurityScopedResource()
-            defer { if ok { folder.stopAccessingSecurityScopedResource() } }
+        do {
+            try FileManager.default.createDirectory(at: dayFolder, withIntermediateDirectories: true)
 
-            // 1) 一時ファイルに UPLOADED_AT_ISO を刻印
-            guard let stamped = self.makeUploadedStampedCopy(from: originalCSV, uploadedISO: uploadedISO) else {
-                DispatchQueue.main.async {
-                    self.statusLabel = .failed("Stamp failed")
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
-                }
-                return
+            let dest = dayFolder.appendingPathComponent(originalCSV.lastPathComponent)
+
+            // 既存があれば置換（原始的に remove → copy）
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try? FileManager.default.removeItem(at: dest)
             }
+            try FileManager.default.copyItem(at: originalCSV, to: dest)
 
-            // 2) 共有フォルダへコピー（同名回避）
-            let fm = FileManager.default
-            var dest = folder.appendingPathComponent(stamped.lastPathComponent)
-            if fm.fileExists(atPath: dest.path) {
-                let base = dest.deletingPathExtension().lastPathComponent
-                let ext  = dest.pathExtension
-                var i = 1
-                while fm.fileExists(atPath: dest.path) {
-                    let candidate = folder.appendingPathComponent("\(base)_\(i)" + (ext.isEmpty ? "" : ".\(ext)"))
-                    dest = candidate
-                    i += 1
-                }
-            }
+            print("[Upload] copied \(originalCSV.lastPathComponent) -> \(dest.path)")
+            self.lastUploadedDestination = dest
 
-            do {
-                try fm.copyItem(at: stamped, to: dest)
-                DispatchQueue.main.async {
-                    self.statusLabel = .done
-                    // 少し表示してから idle に戻す（UI固着回避）
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                        self.statusLabel = .idle
-                    }
-                }
-            } catch {
-                DispatchQueue.main.async {
-                    self.statusLabel = .failed(error.localizedDescription)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                        self.statusLabel = .idle
-                    }
-                }
-            }
+            // 成功 → done に
+            statusLabel = .done
+            // 数秒後に idle に戻す
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
+        } catch {
+            print("[Upload] failed:", error)
+            statusLabel = .failed("Copy error")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
         }
     }
+
 
     // MARK: - Helpers
 

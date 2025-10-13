@@ -1,3 +1,4 @@
+// PitTemp/Data/CSV/CSVExporter.swift
 import Foundation
 
 /// ライブ追記（time,value）と集計CSV(export)の両方に対応する実装
@@ -17,7 +18,7 @@ final class CSVExporter: CSVExporting {
         guard let h = handle else { return }
         let line = "\(dateFmt.string(from: sample.time)),\(sample.value)\n"
         if let d = line.data(using: .utf8) {
-            do { try h.write(contentsOf: d) } catch { /* 必要ならログ出力 */ }
+            do { try h.write(contentsOf: d) } catch { /* optional log */ }
         }
     }
 
@@ -26,49 +27,58 @@ final class CSVExporter: CSVExporting {
             do { try h.close() } catch { /* ignore */ }
         }
     }
-
-    // ---- 集計CSV（PitTempReports）用 ----
-    func export(
+    // MARK: - 旧形式（wflat）
+    func exportWFlat(
         meta: MeasureMeta,
         results: [MeasureResult],
         wheelMemos: [WheelPos: String],
-        sessionStart: Date
+        sessionStart: Date,
+        deviceName: String?
     ) throws -> URL {
 
         let base = documentsBase()
         let day = ISO8601DateFormatter().string(from: sessionStart).prefix(10) // yyyy-MM-dd
-        let dir = base.appendingPathComponent("PitTempReports/\(day)")
-
+        let dir = base.appendingPathComponent("PitTempUploads/\(day)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        let stamp = Int(sessionStart.timeIntervalSince1970)
-        let safeTrack = meta.track.replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
-        let url = dir.appendingPathComponent("report_\(safeTrack)_\(stamp).csv")
+        // ファイル名: track_session_flatwheel_<ISO>_<device>_<track>.csv
+        let ts = Self.fileStamp(sessionStart) // 例: 2025-10-13T12-06-19Z
+        let dev = (deviceName ?? "Unknown").replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
+        let trk = meta.track.replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
+        let url = dir.appendingPathComponent("track_session_flatwheel_\(ts)_\(dev)_\(trk).csv")
 
-        var csv = ""
-        csv += "# PitTemp Session Report\n"
-        csv += "# track,\(meta.track)\n"
-        csv += "# date,\(meta.date)\n"
-        csv += "# time,\(meta.time)\n"
-        csv += "# lap,\(meta.lap)\n"
-        csv += "# car,\(meta.car)\n"
-        csv += "# driver,\(meta.driver)\n"
-        csv += "# tyre,\(meta.tyre)\n"
-        csv += "# checker,\(meta.checker)\n"
-        csv += "\n"
-        csv += "wheel,zone,peakC,startedAt,endedAt,via,memo\n"
+        // ヘッダは旧資産に合わせる
+        // TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO
+        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO\n"
+
+        // wheelごとに OUT/CL/IN を詰める
+        struct Acc { var out="", cl="", inS="" }
+        var perWheel: [WheelPos:Acc] = [:]
+        for r in results {
+            var a = perWheel[r.wheel] ?? Acc()
+            switch r.zone {
+            case .OUT: a.out = r.peakC.isFinite ? String(format: "%.1f", r.peakC) : ""
+            case .CL:  a.cl  = r.peakC.isFinite ? String(format: "%.1f", r.peakC) : ""
+            case .IN:  a.inS = r.peakC.isFinite ? String(format: "%.1f", r.peakC) : ""
+            }
+            perWheel[r.wheel] = a
+        }
 
         let iso = ISO8601DateFormatter()
-        for r in results {
-            let memo = wheelMemos[r.wheel] ?? ""
+        let sessionISO  = iso.string(from: sessionStart)
+        let exportedISO = iso.string(from: Date())
+        let uploadedISO = "" // Upload時にアプリ側で埋める想定（空でOK）
+
+        // wheel順で安定化
+        let order: [WheelPos] = [.FL,.FR,.RL,.RR]
+        for w in order where perWheel[w] != nil {
+            let a = perWheel[w]!
+            let memo = wheelMemos[w] ?? ""
             let row = [
-                r.wheel.rawValue,
-                r.zone.rawValue,
-                r.peakC.isFinite ? String(format: "%.1f", r.peakC) : "",
-                iso.string(from: r.startedAt),
-                iso.string(from: r.endedAt),
-                r.via,
-                memo.replacingOccurrences(of: ",", with: " ")
+                meta.track, meta.date, meta.car, meta.driver, meta.tyre, meta.time, meta.lap, meta.checker,
+                w.rawValue, a.out, a.cl, a.inS,
+                memo.replacingOccurrences(of: ",", with: " "),
+                sessionISO, exportedISO, uploadedISO
             ].joined(separator: ",")
             csv += row + "\n"
         }
@@ -77,17 +87,24 @@ final class CSVExporter: CSVExporting {
         return url
     }
 
-    // ---- ヘルパ ----
-
-    /// iCloud Drive が有効なら /Documents、なければローカル Documents
+    // 共通: iCloud Documents or ローカル Documents
     private func documentsBase() -> URL {
-        if let ubiq = FileManager.default
-            .url(forUbiquityContainerIdentifier: nil)?
+        if let ubiq = FileManager.default.url(forUbiquityContainerIdentifier: nil)?
             .appendingPathComponent("Documents") {
             return ubiq
         }
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
+
+    private static func fileStamp(_ d: Date) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withYear,.withMonth,.withDay,.withTime,.withColonSeparatorInTime] // 2025-10-13T12:06:19Z
+        let s = f.string(from: d).replacingOccurrences(of: ":", with: "-")
+        return s // 2025-10-13T12-06-19Z
+    }
+
+
+    // ---- ヘルパ ----
 
     /// ライブ追記用ファイルのハンドルを lazy に準備
     private func ensureStreamingHandle() {

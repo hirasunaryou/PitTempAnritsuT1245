@@ -254,25 +254,36 @@ struct LibraryView: View {
     private func reloadFiles() {
         rows.removeAll(); rawPreview.removeAll()
         folderBM.withAccess { folder in
-            let all = (try? FileManager.default.contentsOfDirectory(
+            // 再帰的に enumerator で .csv を全部集める
+            let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey, .isDirectoryKey]
+            let e = FileManager.default.enumerator(
                 at: folder,
-                includingPropertiesForKeys: [.contentModificationDateKey],
-                options: [.skipsHiddenFiles])) ?? []
+                includingPropertiesForKeys: keys,
+                options: [.skipsHiddenFiles, .producesRelativePathURLs]
+            )
 
-            // CSVのみ。*_wflat_* や *_flat_* を優先表示
-            let csvs = all.filter{ $0.pathExtension.lowercased() == "csv" }
-            let sorted = csvs.sorted { a,b in
-                let aFlat = a.lastPathComponent.contains("_wflat_") || a.lastPathComponent.contains("_flat_")
-                let bFlat = b.lastPathComponent.contains("_wflat_") || b.lastPathComponent.contains("_flat_")
-                if aFlat != bFlat { return aFlat && !bFlat }
-                let da = (try? a.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
-                let db = (try? b.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            var found: [URL] = []
+            while let u = e?.nextObject() as? URL {
+                let rv = try? u.resourceValues(forKeys: Set(keys))
+                if rv?.isRegularFile == true, u.pathExtension.lowercased() == "csv" {
+                    found.append(u)
+                }
+            }
+
+            // 表示順：
+            // 1) *_wflat_* or *_flat_* を優先
+            // 2) 更新日が新しい順
+            let sorted = found.sorted { a,b in
+                let af = a.lastPathComponent.contains("_wflat_") || a.lastPathComponent.contains("_flat_")
+                let bf = b.lastPathComponent.contains("_wflat_") || b.lastPathComponent.contains("_flat_")
+                if af != bf { return af && !bf }
+                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
                 return da > db
             }
             files = sorted.map { FileItem(url: $0) }
         }
     }
-
     // MARK: - 一括読み込み
     private func loadAll() -> [LogRow] {
         var out: [LogRow] = []

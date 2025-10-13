@@ -44,7 +44,7 @@ final class SessionViewModel: ObservableObject {
     // 結果とCSV
     @Published private(set) var results: [MeasureResult] = []
     @Published private(set) var lastCSV: URL? = nil
-
+    @Published private(set) var lastLegacyCSV: URL? = nil
     // メモ（ホイール別の自由記述）
     @Published var wheelMemos: [WheelPos: String] = [:]
 
@@ -58,6 +58,7 @@ final class SessionViewModel: ObservableObject {
     private var minAdvanceSec: Double { settings.minAdvanceSec }
     private var autofillDateTime: Bool { settings.autofillDateTime }
 
+      
     // タイマ
     private var startedAt: Date? = nil
     private var timer: Timer? = nil
@@ -117,30 +118,30 @@ final class SessionViewModel: ObservableObject {
     }
 
     /// 既存CSVを返す。無ければ新規出力
-    func ensureCSV() -> URL? {
+    func ensureCSV(deviceName: String?) -> URL? {
         if let u = lastCSV { return u }
-        exportCSV()
+        exportCSV(deviceName: deviceName)
         return lastCSV
     }
 
-    /// CSV出力（ホイール1行＝OUT/CL/INの列）
-    func exportCSV() {
+    // 既定: wflat を保存（Library互換）
+    func exportCSV(deviceName: String? = nil) {
         let sessionStart = sessionBeganAt ?? Date()
 
-        // Dateが空欄かつ自動補完ONなら補完（元の挙動を踏襲）
         if autofillDateTime && meta.date.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             meta.date = Self.isoNoFrac.string(from: sessionStart)
         }
 
         do {
-            let url = try exporter.export(
+            let url = try exporter.exportWFlat(
                 meta: meta,
                 results: results,
                 wheelMemos: wheelMemos,
-                sessionStart: sessionStart
+                sessionStart: sessionStart,
+                deviceName: deviceName
             )
             lastCSV = url
-            print("CSV saved:", url)
+            print("CSV saved (wflat):", url.lastPathComponent)
         } catch {
             print("CSV export error:", error)
         }

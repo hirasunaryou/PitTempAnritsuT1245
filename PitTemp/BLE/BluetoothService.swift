@@ -321,6 +321,8 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
             autoPollOnReady = false
             startPolling(hz: 5)
         }
+        // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
+        setDeviceTime()
     }
 
     func peripheral(_ peripheral: CBPeripheral,

@@ -68,8 +68,12 @@ struct MeasureView: View {
             speech.requestAuth()
             ble.startScan()
             ble.autoConnectOnDiscover = settings.bleAutoConnect
+            // registry の autoConnect=true だけを優先対象に
+            let preferred = Set(registry.known.filter { $0.autoConnect }.map { $0.id })
+            ble.setPreferredIDs(preferred)   // ← ここを関数呼び出しに
             print("[UI] MeasureView appear")
         }
+
         .onDisappear {
             vm.stopAll()
         }

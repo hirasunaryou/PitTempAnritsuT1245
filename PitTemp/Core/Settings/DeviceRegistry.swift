@@ -1,11 +1,10 @@
 //
 //  DeviceRegistry.swift
 //  PitTemp
-//
 
 import Foundation
 
-/// 端末の記録（近傍で見つけた・別名・自動再接続フラグ・RSSI・最終見かけ時刻）
+/// 端末の記録（近傍で見かけた・別名・自動再接続・RSSI・最終見かけ時刻）
 struct DeviceRecord: Identifiable, Codable, Equatable {
     let id: String               // peripheral.identifier.uuidString
     var name: String             // 広告名（例: AnritsuM-P03953）
@@ -24,43 +23,62 @@ final class DeviceRegistry: ObservableObject {
     init() { load() }
 
     // MARK: - Query
-    /// ID（peripheral.identifier.uuidString）で検索
     func record(for id: String) -> DeviceRecord? {
-        known.first(where: { $0.id == id })
+        known.first { $0.id == id }
     }
 
-    /// 表示名（広告名 or エイリアス）で検索
     func record(forName name: String) -> DeviceRecord? {
-        known.first(where: { $0.name == name || $0.alias == name })
+        known.first { $0.name == name || $0.alias == name }
     }
 
     // MARK: - Mutations
-    /// スキャンで見かけたときに upsert
     func upsertSeen(id: String, name: String, rssi: Int?) {
-        if let idx = known.firstIndex(where: { $0.id == id }) {
-            known[idx].name = name
-            known[idx].lastSeenAt = Date()
-            known[idx].lastRSSI = rssi
-        } else {
-            known.append(DeviceRecord(
-                id: id, name: name, alias: nil, autoConnect: false,
-                lastSeenAt: Date(), lastRSSI: rssi
-            ))
+        let now = Date()
+        DispatchQueue.main.async {
+            if let idx = self.known.firstIndex(where: { $0.id == id }) {
+                self.known[idx].name = name
+                self.known[idx].lastSeenAt = now
+                self.known[idx].lastRSSI = rssi
+            } else {
+                self.known.append(DeviceRecord(
+                    id: id, name: name, alias: nil, autoConnect: false,
+                    lastSeenAt: now, lastRSSI: rssi
+                ))
+            }
+            self.save()
         }
-        save()
     }
 
     func setAlias(_ alias: String?, for id: String) {
-        mutate(id) { $0.alias = alias }
+        mutate(id) { rec in
+            var r = rec
+            r.alias = alias
+            return r
+        }
     }
 
     func setAutoConnect(_ on: Bool, for id: String) {
-        mutate(id) { $0.autoConnect = on }
+        mutate(id) { rec in
+            var r = rec
+            r.autoConnect = on
+            return r
+        }
     }
 
     func forget(id: String) {
-        known.removeAll { $0.id == id }
-        save()
+        DispatchQueue.main.async {
+            self.known.removeAll { $0.id == id }
+            self.save()
+        }
+    }
+
+    /// Main スレッドで「置換」する方式（inout ではなく変換を返す）
+    private func mutate(_ id: String, transform: @escaping (DeviceRecord) -> DeviceRecord) {
+        DispatchQueue.main.async {
+            guard let idx = self.known.firstIndex(where: { $0.id == id }) else { return }
+            self.known[idx] = transform(self.known[idx])
+            self.save()
+        }
     }
 
     // MARK: - Persistence
@@ -75,11 +93,5 @@ final class DeviceRegistry: ObservableObject {
         if let data = try? JSONEncoder().encode(known) {
             UserDefaults.standard.set(data, forKey: storeKey)
         }
-    }
-
-    private func mutate(_ id: String, _ f: (inout DeviceRecord) -> Void) {
-        guard let idx = known.firstIndex(where: { $0.id == id }) else { return }
-        f(&known[idx])
-        save()
     }
 }

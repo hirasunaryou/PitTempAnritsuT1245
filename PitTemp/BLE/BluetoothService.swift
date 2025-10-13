@@ -56,9 +56,6 @@ final class BluetoothService: NSObject, ObservableObject {
     private var wroteNotReadyCount = 0
     private var hasWrite: Bool { writeChar != nil }
 
-    // 既存の自動接続は維持
-    var autoConnectOnDiscover: Bool = true // BluetoothService の公開フラグ化 publicに変更
-
     // ポーリングをRunLoopではなくGCDで
     private var pollSrc: DispatchSourceTimer?
 
@@ -81,6 +78,16 @@ final class BluetoothService: NSObject, ObservableObject {
     private var fastTicks = 0
     private var slowTicks = 0
 
+    // Auto-connect の実装
+    @Published var autoConnectOnDiscover: Bool = false
+    private(set) var preferredIDs: Set<String> = []  // ← registry から設定（空なら「最初に見つけた1台」）
+
+    // UI から設定するためのセッターを用意
+    func setPreferredIDs(_ ids: Set<String>) {
+        // UIスレッドから来るのでそのまま代入でOK
+        preferredIDs = ids
+    }
+    
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: bleQueue)
@@ -231,14 +238,11 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                    ?? p.name ?? "Unknown"
         guard allowedNamePrefixes.contains(where: { name.hasPrefix($0) }) else { return }
 
-        // 1) レジストリ更新
+        // 1) レジストリ更新（別スレッドから来るのでOK。内部でMain適用に直します）
         registry?.upsertSeen(id: p.identifier.uuidString, name: name, rssi: RSSI.intValue)
 
-        // 2) 公開スキャン結果を更新
-        let entry = ScannedDevice(id: p.identifier.uuidString,
-                                  name: name,
-                                  rssi: RSSI.intValue,
-                                  lastSeenAt: Date())
+        // 2) 公開スキャン結果
+        let entry = ScannedDevice(id: p.identifier.uuidString, name: name, rssi: RSSI.intValue, lastSeenAt: Date())
         DispatchQueue.main.async {
             if let idx = self.scanned.firstIndex(where: { $0.id == entry.id }) {
                 self.scanned[idx] = entry
@@ -247,17 +251,25 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
             }
         }
 
-        // 3) 既存動作: 自動接続（将来のピッカー導入まで維持）
-        if autoConnectOnDiscover, connectionState == .scanning, peripheral == nil {
-            stopScan()
-            peripheral = p
-            DispatchQueue.main.async {
-                self.deviceName = name
-                self.connectionState = .connecting
+        // 3) Auto-connect（preferredIDs を優先。空なら「最初に見つけた1台」）
+        if autoConnectOnDiscover, peripheral == nil, connectionState == .scanning {
+            let pid = p.identifier.uuidString
+            if preferredIDs.isEmpty || preferredIDs.contains(pid) {
+                stopScan()
+                peripheral = p
+                DispatchQueue.main.async {
+                    self.deviceName = name
+                    self.connectionState = .connecting
+                }
+                print("[BLE] found \(name), auto-connecting…")
+                central.connect(p, options: nil)
+                return
             }
-            print("[BLE] found \(name), connecting…")
-            central.connect(p, options: nil)
         }
+
+        // （手動接続のためのスキャン継続はこのまま）
+    
+
     }
 
     func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {

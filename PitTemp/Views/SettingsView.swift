@@ -14,7 +14,9 @@ struct SettingsView: View {
     @EnvironmentObject var settings: SettingsStore   // ← 追加：設定は SettingsStore に集約
 
     @State private var showPicker = false
+    @EnvironmentObject var registry: DeviceRegistry
 
+    
     var body: some View {
         NavigationStack {
             Form {
@@ -97,6 +99,11 @@ struct SettingsView: View {
                             // 例）ble.autoConnectOnDiscover = newValue
                             // 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
                         }
+
+                    NavigationLink("Device Registry") {
+                        DeviceRegistryView()
+                            .environmentObject(registry) // MeasureView や App で注入済みなら OK
+                    }
 
                     Text("If ON, the app connects to the first matching device it discovers. Turn OFF to pick a device manually.")
                         .font(.footnote)

@@ -32,19 +32,31 @@ struct MeasureView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                    if let v = ble.latestTemperature {
-                        Text(String(format: "BLE Now: %.1f℃", v))
-                            .font(.title3).monospacedDigit()
-                    }
+//                    if let v = ble.latestTemperature {
+//                        Text(String(format: "BLE Now: %.1f℃", v))
+//                            .font(.title3).monospacedDigit()
+//                    }
 
                     headerReadOnly
                     grid
+                    
 
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        MiniTempChart(data: vm.live)
+
+                        ZStack {
+                            // 元のチャート
+                            MiniTempChart(data: vm.live)
+
+                            // 半透明の現在温度をオーバーレイ
+                            if let v = ble.latestTemperature {
+                                OverlayNow(value: v)   // ← 下の補助Viewを追加します
+                                    .allowsHitTesting(false) // 操作はチャートに通す
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
                 }
                 .padding()
@@ -262,4 +274,44 @@ struct MeasureView: View {
     private func scanOrDisconnect() {
         switch ble.connectionState { case .idle, .failed: ble.startScan(); default: ble.disconnect() }
     }
+    
+    // MARK: - Overlay big "Now" on chart
+    private struct OverlayNow: View {
+        @Environment(\.colorScheme) private var scheme
+        let value: Double
+
+        var body: some View {
+            // ダークは白、ライトは黒ベースの半透明
+            let color = (scheme == .dark ? Color.white : Color.black).opacity(0.35)
+
+            Text(String(format: "%.1f℃", value))
+                .font(.system(size: 78, weight: .black, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.3)
+                .foregroundStyle(color)
+                .shadow(color: .black.opacity(scheme == .dark ? 0.18 : 0.05), radius: 8, x: 0, y: 2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                .transition(.opacity.combined(with: .scale))
+                .animation(.easeInOut(duration: 0.2), value: value)
+        }
+    }
+
+//    // MARK: - Big Now Reading
+//    @ViewBuilder
+//    private var bigNow: some View {
+//        if let v = ble.latestTemperature {
+//            Text(String(format: "%.1f℃", v))
+//                .font(.system(size: 72, weight: .bold, design: .rounded))
+//                .monospacedDigit()
+//                .lineLimit(1)
+//                .minimumScaleFactor(0.5)
+//                .kerning(0.5)
+//                .frame(maxWidth: .infinity, alignment: .center)
+//                .padding(.vertical, 4)
+//                .transition(.opacity.combined(with: .scale))
+//        }
+//    }
+
+    
+    
 }

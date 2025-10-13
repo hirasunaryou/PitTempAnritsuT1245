@@ -207,45 +207,48 @@ struct MeasureView: View {
         return "--"
     }
 
+    // 置き換え: 下部バーは「Stop」「Next」「Export CSV」のみ
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            Button(showRaw ? "Hide Raw" : "Show Raw") { showRaw.toggle(); focusTick &+= 1 }.buttonStyle(.bordered)
-            Button("Stop") { vm.stopAll() }.buttonStyle(.bordered)
+            Button("Stop") { vm.stopAll() }
+                .buttonStyle(.bordered)
+
             Spacer()
-            Button("Next") { vm.receiveSpecial("<RET>") }.buttonStyle(.bordered)
-            Button {
-                if let url = vm.ensureCSV() { folderBM.upload(file: url) }
-            } label: {
-                switch folderBM.statusLabel {
-                case .idle: Text("Upload")
-                case .uploading: Label("Uploading…", systemImage: "icloud.and.arrow.up")
-                case .done: Label("Uploaded", systemImage: "checkmark.icloud")
-                case .failed: Label("Retry", systemImage: "exclamationmark.icloud")
-                }
-            }.buttonStyle(.borderedProminent)
-            Button("Export CSV") { vm.exportCSV() }.buttonStyle(.bordered)
+
+            Button("Next") { vm.receiveSpecial("<RET>") }
+                .buttonStyle(.bordered)
+
+            Button("Export CSV") { vm.exportCSV() } // 共有シートへ
+                .buttonStyle(.borderedProminent)
         }
-        .padding(.horizontal).padding(.vertical, 8).background(.ultraThinMaterial)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial)
     }
 
+
+    // 上部バーは「Scan/Disconnect」と「Devices…」だけに
     private var connectBar: some View {
         VStack(spacing: 8) {
             HStack {
                 Text("BLE: " + stateText()).font(.subheadline)
-                Spacer(); if let name = ble.deviceName { Text(name).font(.callout).foregroundStyle(.secondary) }
+                Spacer()
+                if let name = ble.deviceName {
+                    Text(name).font(.callout).foregroundStyle(.secondary)
+                }
             }
             HStack(spacing: 8) {
-                Button(scanButtonTitle()) { scanOrDisconnect() }.buttonStyle(.borderedProminent)
+                Button(scanButtonTitle()) { scanOrDisconnect() }
+                    .buttonStyle(.borderedProminent)
                 Button("Devices…") { showConnectSheet = true }
-                Button("DATA") { ble.requestOnce() }.disabled(ble.connectionState != .ready)
-                Button("TIME") { ble.setDeviceTime() }
-                Button("Poll 5Hz") { ble.startPolling(hz: 5) }.disabled(ble.connectionState != .ready)
-                Button("Stop") { ble.stopPolling() }
+                    .buttonStyle(.bordered)
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+        .background(RoundedRectangle(cornerRadius: 12)
+            .fill(Color(.secondarySystemBackground)))
     }
+
 
     private func stateText() -> String {
         switch ble.connectionState {

@@ -1,38 +1,42 @@
-//
 //  BluetoothService.swift
 //  PitTemp
-//
 
 import Foundation
 import CoreBluetooth
 import Combine
 
-/// BLEから温度を受け取り、DoubleとしてPublishするサービス
-final class BluetoothService: NSObject, ObservableObject {
+/// スキャンで拾った近傍デバイスの軽量ビュー
+struct ScannedDevice: Identifiable, Equatable {
+    let id: String            // peripheral.identifier.uuidString
+    var name: String          // 広告名
+    var rssi: Int             // dBm
+    var lastSeenAt: Date
+}
 
+/// BLEから温度を受け取り、DoubleとしてPublishするサービス。
+final class BluetoothService: NSObject, ObservableObject {
     enum ConnectionState: Equatable {
         case idle, scanning, connecting, ready, failed(String)
     }
 
-    // 公開状態（UI側は Main スレッド）
+    // 公開状態（UIは Main で触る）
     @Published var connectionState: ConnectionState = .idle
     @Published var latestTemperature: Double?
     @Published var deviceName: String?
-
-    // 可視化用
-    @Published var writeCount: Int = 0
-    @Published var notifyCountUI: Int = 0
-    @Published var notifyHz: Double = 0
-
-    /// VMへ橋渡し
     let temperatureStream = PassthroughSubject<TemperatureSample, Never>()
 
-    // UUID（安立仕様）
+    // スキャン結果公開（将来のデバイスピッカー用）
+    @Published var scanned: [ScannedDevice] = []
+
+    // 外部レジストリ（App から注入）
+    weak var registry: DeviceRegistry?
+
+    // UUID（安立様仕様）
     private let serviceUUID   = CBUUID(string: "ada98080-888b-4e9f-9a7f-07ddc240f3ce")
     private let readCharUUID  = CBUUID(string: "ada98081-888b-4e9f-9a7f-07ddc240f3ce")  // Notify
     private let writeCharUUID = CBUUID(string: "ada98082-888b-4e9f-9a7f-07ddc240f3ce")  // Write
 
-    // フィルタ
+    // デバイス名フィルタ
     private let allowedNamePrefixes = ["AnritsuM-"]
 
     // CoreBluetooth
@@ -41,27 +45,38 @@ final class BluetoothService: NSObject, ObservableObject {
     private var readChar: CBCharacteristic?
     private var writeChar: CBCharacteristic?
 
-    // 受信処理は専用キュー
+    // 受信処理用の専用キュー
     private let bleQueue = DispatchQueue(label: "BLE.AnritsuT1245")
 
     // Parser
     private let parser = TemperaturePacketParser()
 
-    // 書き込み可否
+    // 追加
+    private var autoPollOnReady = false
+    private var wroteNotReadyCount = 0
     private var hasWrite: Bool { writeChar != nil }
 
-    // ポーリング（GCD）
+    // 既存の自動接続は維持
+    private var autoConnectOnDiscover: Bool = true
+
+    // ポーリングをRunLoopではなくGCDで
     private var pollSrc: DispatchSourceTimer?
 
-    // Notify計測
-    private var notifyCountBG = 0
+    // 観測用カウンタ
+    @Published var writeCount: Int = 0
+    @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
+    private var notifyCountBG: Int = 0     // 実カウンタ（BGキュー）
     private var lastNotifyAt: Date?
+
+    // 実測レート可視化
+    @Published var notifyHz: Double = 0
+    private var prevNotifyAt: Date?
     private var emaInterval: Double?
     private let emaAlpha = 0.25
 
-    // 自動判定（HOLD連続/ポーリング）用
-    private var autoSrc: DispatchSourceTimer?
-    private var lastCountForAuto = 0
+    // 自動チューニング
+    private var autoTuneSrc: DispatchSourceTimer?
+    private var lastCountForAuto: Int = 0
     private var streamModeUntil: Date?
     private var fastTicks = 0
     private var slowTicks = 0
@@ -71,11 +86,15 @@ final class BluetoothService: NSObject, ObservableObject {
         central = CBCentralManager(delegate: self, queue: bleQueue)
     }
 
-    // MARK: - Public
+    // MARK: - Public API
 
     func startScan() {
         guard central.state == .poweredOn else { return }
-        DispatchQueue.main.async { self.connectionState = .scanning }
+        DispatchQueue.main.async {
+            self.connectionState = .scanning
+            self.scanned.removeAll()
+        }
+        // 全探索（広告にサービスを出さない端末も拾う）
         central.scanForPeripherals(withServices: nil,
                                    options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
@@ -85,10 +104,29 @@ final class BluetoothService: NSObject, ObservableObject {
     func disconnect() {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil; readChar = nil; writeChar = nil
-        stopPolling(); stopAuto()
+        stopPolling()
+        stopAutoTune()
         DispatchQueue.main.async { self.connectionState = .idle }
     }
 
+    /// 明示的に接続（デバイスピッカーから呼ぶ想定）
+    func connect(deviceID: String) {
+        // 1) 既にスキャン済みならその peripheral を使う
+        if let found = central.retrievePeripherals(withIdentifiers: [UUID(uuidString: deviceID)!]).first {
+            stopScan()
+            peripheral = found
+            DispatchQueue.main.async {
+                self.deviceName = found.name ?? "Unknown"
+                self.connectionState = .connecting
+            }
+            central.connect(found, options: nil)
+            return
+        }
+        // 2) 未取得なら、一度スキャン開始（UI側は “Scan→Connect” ボタン連携を想定）
+        startScan()
+    }
+
+    // 単発要求
     func requestOnce() {
         guard let p = peripheral, let w = writeChar else { return }
         let cmd = parser.buildDATARequest()
@@ -97,20 +135,24 @@ final class BluetoothService: NSObject, ObservableObject {
         DispatchQueue.main.async { self.writeCount &+= 1 }
     }
 
+    // 時刻設定
     func setDeviceTime(to date: Date = Date()) {
         guard let p = peripheral, let w = writeChar else { return }
         let cmd = parser.buildTIMESet(date: date)
         p.writeValue(cmd, for: w, type: .withResponse)
     }
 
+    // ポーリング開始/停止
     func startPolling(hz: Double = 5.0) {
-        guard hasWrite else { return }
+        if hasWrite == false {
+            autoPollOnReady = true
+            print("[BLE] poll requested; will start when writeChar is ready")
+            return
+        }
         if pollSrc != nil { return }
-        let intervalMs = max(1, Int(1000.0 / hz))
+
+        let interval = DispatchTimeInterval.milliseconds(Int(1000.0 / hz))
         let src = DispatchSource.makeTimerSource(queue: bleQueue)
-        src.schedule(deadline: .now() + .milliseconds(200),
-                     repeating: .milliseconds(intervalMs),
-                     leeway: .milliseconds(20))
         src.setEventHandler { [weak self] in
             guard let self else { return }
             self.requestOnce()
@@ -118,9 +160,10 @@ final class BluetoothService: NSObject, ObservableObject {
                 print("[BLE] watchdog: no notify > 1.5s")
             }
         }
+        src.schedule(deadline: .now() + .milliseconds(200), repeating: interval, leeway: .milliseconds(20))
         pollSrc = src
         src.activate()
-        print("[BLE] start polling \(hz)Hz")
+        print("[BLE] start polling GCD \(hz)Hz")
     }
 
     func stopPolling() {
@@ -128,12 +171,9 @@ final class BluetoothService: NSObject, ObservableObject {
         pollSrc = nil
     }
 
-    // MARK: - Auto (HOLD/ポーリング自動切替)
-
-    private func startAuto() {
-        stopAuto()
+    private func startAutoTune() {
+        stopAutoTune()
         let src = DispatchSource.makeTimerSource(queue: bleQueue)
-        src.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1), leeway: .milliseconds(50))
         src.setEventHandler { [weak self] in
             guard let self else { return }
             let delta = self.notifyCountBG - self.lastCountForAuto
@@ -148,27 +188,30 @@ final class BluetoothService: NSObject, ObservableObject {
             if self.fastTicks >= 2 {
                 self.fastTicks = 0
                 self.stopPolling()
-                self.streamModeUntil = Date().addingTimeInterval(3.0) // クールダウン
+                self.streamModeUntil = Date().addingTimeInterval(3.0)
             }
-
             if let until = self.streamModeUntil, Date() < until { return }
-
             if self.slowTicks >= 2 && self.pollSrc == nil && self.hasWrite {
                 self.slowTicks = 0
                 self.startPolling(hz: 5)
             }
         }
-        autoSrc = src
+        src.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1), leeway: .milliseconds(50))
+        autoTuneSrc = src
         src.activate()
     }
 
-    private func stopAuto() {
-        autoSrc?.cancel()
-        autoSrc = nil
+    private func stopAutoTune() {
+        autoTuneSrc?.cancel()
+        autoTuneSrc = nil
+    }
+
+    private func hex(_ data: Data) -> String {
+        data.map { String(format: "%02X", $0) }.joined(separator: " ")
     }
 }
 
-// MARK: - CoreBluetooth
+// MARK: - CoreBluetooth delegates
 extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
@@ -187,21 +230,41 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
                    ?? p.name ?? "Unknown"
         guard allowedNamePrefixes.contains(where: { name.hasPrefix($0) }) else { return }
-        stopScan()
-        peripheral = p
+
+        // 1) レジストリ更新
+        registry?.upsertSeen(id: p.identifier.uuidString, name: name, rssi: RSSI.intValue)
+
+        // 2) 公開スキャン結果を更新
+        let entry = ScannedDevice(id: p.identifier.uuidString,
+                                  name: name,
+                                  rssi: RSSI.intValue,
+                                  lastSeenAt: Date())
         DispatchQueue.main.async {
-            self.deviceName = name
-            self.connectionState = .connecting
+            if let idx = self.scanned.firstIndex(where: { $0.id == entry.id }) {
+                self.scanned[idx] = entry
+            } else {
+                self.scanned.append(entry)
+            }
         }
-        print("[BLE] found \(name), connecting…")
-        central.connect(p, options: nil)
+
+        // 3) 既存動作: 自動接続（将来のピッカー導入まで維持）
+        if autoConnectOnDiscover, connectionState == .scanning, peripheral == nil {
+            stopScan()
+            peripheral = p
+            DispatchQueue.main.async {
+                self.deviceName = name
+                self.connectionState = .connecting
+            }
+            print("[BLE] found \(name), connecting…")
+            central.connect(p, options: nil)
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {
         print("[BLE] connected to \(p.name ?? "?")")
+        startAutoTune()
         p.delegate = self
-        p.discoverServices(nil) // まず全部
-        startAuto()
+        p.discoverServices(nil)
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -217,7 +280,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
             DispatchQueue.main.async { self.connectionState = .failed("Service discovery: \(e.localizedDescription)") }
             return
         }
-        guard let services = peripheral.services, !services.isEmpty else { return }
+        let services = peripheral.services ?? []
         print("[BLE] services:", services.map { $0.uuid.uuidString })
 
         guard let svc = services.first(where: { $0.uuid == serviceUUID }) else {
@@ -238,14 +301,18 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
             if ch.uuid == readCharUUID { readChar = ch; peripheral.setNotifyValue(true, for: ch) }
             if ch.uuid == writeCharUUID { writeChar = ch }
         }
+        wroteNotReadyCount = 0
         if readChar != nil {
             DispatchQueue.main.async { self.connectionState = .ready }
+        }
+        if autoPollOnReady && hasWrite {
+            autoPollOnReady = false
+            startPolling(hz: 5)
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral,
-                    didUpdateNotificationStateFor characteristic: CBCharacteristic,
-                    error: Error?) {
+                    didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         if let e = error {
             print("[BLE] notify state error:", e.localizedDescription)
             return
@@ -258,26 +325,27 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
 
-        // UIカウンタ
         DispatchQueue.main.async { self.notifyCountUI &+= 1 }
-
-        // BGカウンタ & 時刻
         notifyCountBG &+= 1
+        lastNotifyAt = Date()
+
         let now = Date()
-        lastNotifyAt = now
-
-        // EMAでHzを滑らかに
-        if let prev = emaInterval {
-            // prevは平均間隔(s)
-            let dt = max(0.0, now.timeIntervalSinceNow + prev) // 安全側に
-            let new = prev * (1 - emaAlpha) + dt * emaAlpha
-            emaInterval = new
-            if new > 0 { DispatchQueue.main.async { self.notifyHz = 1.0 / new } }
-        } else {
-            emaInterval = 0.3
+        if let prev = prevNotifyAt {
+            let dt = now.timeIntervalSince(prev)
+            if dt > 0 {
+                if let ema = emaInterval {
+                    emaInterval = ema * (1 - emaAlpha) + dt * emaAlpha
+                } else {
+                    emaInterval = dt
+                }
+                if let iv = emaInterval, iv > 0 {
+                    let hz = 1.0 / iv
+                    DispatchQueue.main.async { self.notifyHz = hz }
+                }
+            }
         }
+        prevNotifyAt = now
 
-        // 解析 → UIへ
         let frames = parser.parseFrames(data)
         guard !frames.isEmpty else { return }
         DispatchQueue.main.async {

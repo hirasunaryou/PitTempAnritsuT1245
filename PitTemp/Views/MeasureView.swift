@@ -2,6 +2,7 @@
 // BLEの Now/Hz/W/N の小さなヘッダ、
 // ライブグラフ、接続ボタン群、BLESampleの購読(onReceive) を含む。
 import SwiftUI
+import UIKit
 
 struct MeasureView: View {
     @EnvironmentObject var vm: SessionViewModel
@@ -15,7 +16,12 @@ struct MeasureView: View {
     @State private var focusTick = 0
     @State private var showMetaEditor = false
     @State private var showConnectSheet = false
-
+    @State private var shareURL: URL?
+    @State private var showUploadAlert = false
+    @State private var uploadedPathText = ""
+    @State private var uploadMessage = ""
+    
+    
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -62,7 +68,7 @@ struct MeasureView: View {
                 .padding()
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
-            .navigationTitle("TrackTemp")
+            .navigationTitle(appTitle)
             .toolbar { Button("Edit") { showMetaEditor = true } }
             .sheet(isPresented: $showMetaEditor) {
                 MetaEditorView()
@@ -74,7 +80,14 @@ struct MeasureView: View {
                     .environmentObject(ble)
                     .environmentObject(registry)
             }
-
+            .sheet(isPresented: Binding(
+                get: { shareURL != nil },
+                set: { if !$0 { shareURL = nil } }
+            )) {
+                if let url = shareURL {
+                    ActivityView(items: [url])
+                }
+            }
         }
         .onAppear {
             speech.requestAuth()
@@ -92,12 +105,34 @@ struct MeasureView: View {
         .onReceive(ble.temperatureStream) { sample in
             vm.ingestBLESample(sample)
         }
-        // ← iOS17 形式の onChange（2引数）
-        .onChange(of: settings.bleAutoConnect) { _, newValue in
-            ble.autoConnectOnDiscover = newValue
+        .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
+            if let url = note.userInfo?["url"] as? URL {
+                let comps = url.pathComponents.suffix(2).joined(separator: "/")
+                uploadMessage = "Saved to: \(comps)"
+                showUploadAlert = true
+            }
         }
-
-        
+        .onChange(of: folderBM.statusLabel) { _, newVal in
+            if case .done = newVal, let p = folderBM.lastUploadedDestination {
+                let hint = p.deletingLastPathComponent().lastPathComponent
+                uploadMessage = "Uploaded to: \(hint)"
+                showUploadAlert = true
+            }
+        }
+        // アラートはこれ1つに
+        .alert("Upload complete", isPresented: $showUploadAlert) {
+            Button("OK", role: .cancel) { }
+        } message: { Text(uploadMessage) }
+        .onChange(of: folderBM.statusLabel) { _, newVal in
+            if case .done = newVal {
+                let p = folderBM.lastUploadedDestination
+                // 例: "iCloud/YourFolder/2025-10-13"
+                let parent = p?.deletingLastPathComponent()
+                let hint = parent?.lastPathComponent ?? ""
+                uploadMessage = "Uploaded to: \(hint)"
+                showUploadAlert = true
+            }
+        }
     }
 
     // --- 以降はUI部品（元のまま） ---
@@ -220,6 +255,7 @@ struct MeasureView: View {
     }
 
     // 置き換え: 下部バーは「Stop」「Next」「Export CSV」のみ
+    // MeasureView.swift の bottomBar 内
     private var bottomBar: some View {
         HStack(spacing: 12) {
             Button("Stop") { vm.stopAll() }
@@ -230,13 +266,22 @@ struct MeasureView: View {
             Button("Next") { vm.receiveSpecial("<RET>") }
                 .buttonStyle(.bordered)
 
-            Button("Export CSV") { vm.exportCSV() } // 共有シートへ
-                .buttonStyle(.borderedProminent)
+            Button("Export CSV") {
+                // 1) CSVを両フォーマットで生成（デバイス名を付与）
+                vm.exportCSV(deviceName: ble.deviceName)
+
+                // 2) アップロード先は「旧フォーマット優先」（ライブラリ互換）
+                if let url = vm.lastLegacyCSV ?? vm.lastCSV {
+                    folderBM.upload(file: url)
+                }
+            }
+            .buttonStyle(.borderedProminent)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
     }
+
 
 
     // 上部バーは「Scan/Disconnect」と「Devices…」だけに
@@ -295,6 +340,20 @@ struct MeasureView: View {
                 .animation(.easeInOut(duration: 0.2), value: value)
         }
     }
+    // MeasureView.swift
+    private var appTitle: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+        ?? "PitTemp" // フォールバック
+    }
+
+    struct ActivityView: UIViewControllerRepresentable {
+        let items: [Any]
+        func makeUIViewController(context: Context) -> UIActivityViewController {
+            UIActivityViewController(activityItems: items, applicationActivities: nil)
+        }
+        func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+    }
+
 
 //    // MARK: - Big Now Reading
 //    @ViewBuilder

@@ -1,4 +1,7 @@
-//  PitTemp/Core/Settings/DeviceRegistry.swift
+//
+//  DeviceRegistry.swift
+//  PitTemp
+//
 
 import Foundation
 
@@ -15,16 +18,24 @@ struct DeviceRecord: Identifiable, Codable, Equatable {
 /// 既知デバイスのレジストリ。UserDefaultsへJSON保存。
 final class DeviceRegistry: ObservableObject {
     @Published private(set) var known: [DeviceRecord] = []
+
     private let storeKey = "ble.deviceRegistry.v1"
 
     init() { load() }
 
     // MARK: - Query
+    /// ID（peripheral.identifier.uuidString）で検索
     func record(for id: String) -> DeviceRecord? {
         known.first(where: { $0.id == id })
     }
 
+    /// 表示名（広告名 or エイリアス）で検索
+    func record(forName name: String) -> DeviceRecord? {
+        known.first(where: { $0.name == name || $0.alias == name })
+    }
+
     // MARK: - Mutations
+    /// スキャンで見かけたときに upsert
     func upsertSeen(id: String, name: String, rssi: Int?) {
         if let idx = known.firstIndex(where: { $0.id == id }) {
             known[idx].name = name

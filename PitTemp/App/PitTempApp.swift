@@ -27,6 +27,7 @@ struct PitTempApp: App {
                     .environmentObject(folderBM)
                     .environmentObject(ble)
                     .environmentObject(registry)
+                    .onAppear { ble.registry = registry }
             } else {
                 WelcomeView(onContinue: {
                     Haptics.impactLight()

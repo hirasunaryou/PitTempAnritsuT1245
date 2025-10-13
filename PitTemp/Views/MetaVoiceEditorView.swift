@@ -157,7 +157,7 @@ struct MetaVoiceEditorView: View {
     /// transcript から各メタ項目を抽出して vm.meta に反映（区切りなしにも強い版）
     private func applyTranscriptToMeta() {
         // 1) 正規化（全角→半角、全角スペース→半角、全角コロン→半角）
-        var text = transcript
+        let text = transcript // Variable 'text' was never mutated; consider changing to 'let' constant
             .replacingOccurrences(of: "　", with: " ")
             .replacingOccurrences(of: "：", with: ":")
             .replacingOccurrences(of: "＝", with: "=")

@@ -89,7 +89,21 @@ struct SettingsView: View {
                         }
                     }
                 }
+                
+                Section("Bluetooth") {
+                    Toggle("Auto connect first seen device", isOn: $settings.bleAutoConnect)
+                        .onChange(of: settings.bleAutoConnect) { _, newValue in
+                            // ここは必要なら反映を書く（MeasureView 側で反映しているなら何もしなくてOK）
+                            // 例）ble.autoConnectOnDiscover = newValue
+                            // 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+                        }
 
+                    Text("If ON, the app connects to the first matching device it discovers. Turn OFF to pick a device manually.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                
                 // デバイス & ロケーション
                 Section("Device & Location") {
                     TextField("HR2500 ID (label / asset tag)", text: $settings.hr2500ID)

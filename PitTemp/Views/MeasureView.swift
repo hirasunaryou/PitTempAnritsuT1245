@@ -8,11 +8,13 @@ struct MeasureView: View {
     @EnvironmentObject var folderBM: FolderBookmark
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var ble: BluetoothService
+    @EnvironmentObject var registry: DeviceRegistry
 
     @StateObject private var speech = SpeechMemoManager()
     @State private var showRaw = false
     @State private var focusTick = 0
     @State private var showMetaEditor = false
+    @State private var showConnectSheet = false
 
     var body: some View {
         NavigationStack {
@@ -55,10 +57,31 @@ struct MeasureView: View {
                     .environmentObject(vm)
                     .presentationDetents([.medium, .large])
             }
+            .sheet(isPresented: $showConnectSheet) {
+                ConnectView()
+                    .environmentObject(ble)
+                    .environmentObject(registry)
+            }
+
         }
-        .onAppear { speech.requestAuth(); ble.startScan(); print("[UI] MeasureView appear") }
-        .onDisappear { vm.stopAll() }
-        .onReceive(ble.temperatureStream) { sample in vm.ingestBLESample(sample) }
+        .onAppear {
+            speech.requestAuth()
+            ble.startScan()
+            ble.autoConnectOnDiscover = settings.bleAutoConnect
+            print("[UI] MeasureView appear")
+        }
+        .onDisappear {
+            vm.stopAll()
+        }
+        .onReceive(ble.temperatureStream) { sample in
+            vm.ingestBLESample(sample)
+        }
+        // ← iOS17 形式の onChange（2引数）
+        .onChange(of: settings.bleAutoConnect) { _, newValue in
+            ble.autoConnectOnDiscover = newValue
+        }
+
+        
     }
 
     // --- 以降はUI部品（元のまま） ---
@@ -209,6 +232,7 @@ struct MeasureView: View {
             }
             HStack(spacing: 8) {
                 Button(scanButtonTitle()) { scanOrDisconnect() }.buttonStyle(.borderedProminent)
+                Button("Devices…") { showConnectSheet = true }
                 Button("DATA") { ble.requestOnce() }.disabled(ble.connectionState != .ready)
                 Button("TIME") { ble.setDeviceTime() }
                 Button("Poll 5Hz") { ble.startPolling(hz: 5) }.disabled(ble.connectionState != .ready)

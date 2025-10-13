@@ -57,7 +57,7 @@ final class BluetoothService: NSObject, ObservableObject {
     private var hasWrite: Bool { writeChar != nil }
 
     // 既存の自動接続は維持
-    private var autoConnectOnDiscover: Bool = true
+    var autoConnectOnDiscover: Bool = true // BluetoothService の公開フラグ化 publicに変更
 
     // ポーリングをRunLoopではなくGCDで
     private var pollSrc: DispatchSourceTimer?

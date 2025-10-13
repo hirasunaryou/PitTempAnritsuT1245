@@ -8,7 +8,8 @@ struct PitTempApp: App {
     @AppStorage("onboarded") private var onboarded: Bool = false
     @StateObject private var recorder = SessionRecorder()
     @StateObject private var ble = BluetoothService()
-
+    @StateObject private var registry = DeviceRegistry()
+    
     init() {
         let s = SettingsStore()
         _settings = StateObject(wrappedValue: s)
@@ -25,6 +26,7 @@ struct PitTempApp: App {
                     .environmentObject(settings)
                     .environmentObject(folderBM)
                     .environmentObject(ble)
+                    .environmentObject(registry)
             } else {
                 WelcomeView(onContinue: {
                     Haptics.impactLight()
@@ -32,6 +34,7 @@ struct PitTempApp: App {
                 })
                 .environmentObject(settings)
                 .environmentObject(folderBM)
+                .environmentObject(registry)
             }
         }
         // 起動時に一度だけBLE→Recorderを結線

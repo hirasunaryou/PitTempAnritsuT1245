@@ -5,6 +5,31 @@
 
 import SwiftUI
 
+private enum MetaField: String, CaseIterable, Identifiable {
+    case track, date, time, car, driver, tyre, lap, checker
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .track: return "Track"
+        case .date: return "Date"
+        case .time: return "Time"
+        case .car: return "Car"
+        case .driver: return "Driver"
+        case .tyre: return "Tyre"
+        case .lap: return "Lap"
+        case .checker: return "Checker"
+        }
+    }
+}
+
+private struct VoiceAttempt: Identifiable {
+    let id = UUID()
+    let timestamp: Date
+    let transcript: String
+    let matched: [MetaField: String]
+    let missing: [MetaField]
+}
+
 /// 既存の SpeechMemoManager を使って音声 → テキスト化し、
 /// そのテキストから各メタ項目(Track/Car/Driver/…）を抽出・反映する簡易エディタ。
 struct MetaVoiceEditorView: View {
@@ -16,6 +41,7 @@ struct MetaVoiceEditorView: View {
     @State private var transcript: String = ""
     @State private var lastError: String?
     @State private var debugParsed: [String:String] = [:]
+    @State private var attempts: [VoiceAttempt] = []
 
     var body: some View {
         NavigationStack {
@@ -82,13 +108,19 @@ struct MetaVoiceEditorView: View {
                         applyTranscriptToMeta()
                     } label: {
                         Label("テキストから反映", systemImage: "text.badge.plus")
-                    }
-                    .buttonStyle(.borderedProminent)
                 }
+                .buttonStyle(.borderedProminent)
+            }
 
-                // 現在のメタ（読み取り専用プレビュー）
-                VStack(alignment: .leading, spacing: 6) {
-                    metaRow("TRACK", vm.meta.track)
+            keywordGuide
+
+            if !attempts.isEmpty {
+                attemptLog
+            }
+
+            // 現在のメタ（読み取り専用プレビュー）
+            VStack(alignment: .leading, spacing: 6) {
+                metaRow("TRACK", vm.meta.track)
                     metaRow("DATE", vm.meta.date)
                     metaRow("TIME", vm.meta.time)
                     metaRow("CAR", vm.meta.car)
@@ -135,6 +167,57 @@ struct MetaVoiceEditorView: View {
         }
     }
 
+    private var keywordGuide: some View {
+        let keywords = MetaField.allCases.map { $0.displayName.lowercased() }.joined(separator: ", ")
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("ヒント").font(.caption).foregroundStyle(.secondary)
+            Text("各項目の前にキーワードを付けて話してください。例: \"track 鈴鹿\", \"driver 佐藤\", \"lap 5\"。")
+                .font(.footnote)
+            Text("認識するキーワード: \(keywords)")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+    }
+
+    private var attemptLog: some View {
+        let recentAttempts = Array(attempts.suffix(5).reversed())
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("解析履歴").font(.caption).foregroundStyle(.secondary)
+            ForEach(recentAttempts) { attempt in
+                attemptRow(attempt)
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.tertiarySystemBackground)))
+            }
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
+    }
+
+    private func attemptRow(_ attempt: VoiceAttempt) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(attempt.timestamp.formatted(date: .omitted, time: .standard))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(attempt.transcript)
+                .font(.footnote)
+            if !attempt.matched.isEmpty {
+                let pairs = attempt.matched.map { "\($0.key.displayName)=\($0.value)" }.sorted().joined(separator: ", ")
+                Text("抽出: \(pairs)")
+                    .font(.caption2)
+                    .foregroundStyle(.green)
+            }
+            if !attempt.missing.isEmpty {
+                let missing = attempt.missing.map(\.displayName).joined(separator: ", ")
+                Text("未抽出: \(missing)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
     private func metaRow(_ label: String, _ value: String) -> some View {
         HStack {
             Text(label).font(.caption).foregroundStyle(.secondary)
@@ -169,8 +252,7 @@ struct MetaVoiceEditorView: View {
         let lower = text.lowercased()
 
         // 2) キー語辞書（同義語をまとめて一意キーへ）
-        enum Field: String { case track, date, time, car, driver, tyre, lap, checker }
-        let dict: [(Field, [String])] = [
+        let dict: [(MetaField, [String])] = [
             (.track,  ["track","コース","トラック","サーキット"]),
             (.date,   ["date","日付","日にち"]),
             (.time,   ["time","時刻","タイム"]),
@@ -182,7 +264,7 @@ struct MetaVoiceEditorView: View {
         ]
 
         // 3) すべてのキー語のマッチ位置を集める
-        struct Hit { let field: Field; let range: Range<String.Index> }
+        struct Hit { let field: MetaField; let range: Range<String.Index> }
         var hits: [Hit] = []
 
         for (field, keys) in dict {
@@ -198,6 +280,9 @@ struct MetaVoiceEditorView: View {
 
         guard !hits.isEmpty else {
             print("[MetaVoice] no keys found in transcript")
+            lastError = "キーワードが見つかりませんでした。例: \"track 鈴鹿\" \"driver 佐藤\" のように項目名を付けてください。"
+            let attempt = VoiceAttempt(timestamp: Date(), transcript: transcript, matched: [:], missing: MetaField.allCases)
+            attempts = Array((attempts + [attempt]).suffix(20))
             return
         }
 
@@ -213,7 +298,7 @@ struct MetaVoiceEditorView: View {
             return String(trimmed)
         }
 
-        var results: [Field: String] = [:]
+        var results: [MetaField: String] = [:]
 
         for (idx, hit) in hits.enumerated() {
             let valueStart0 = hit.range.upperBound
@@ -247,17 +332,23 @@ struct MetaVoiceEditorView: View {
         if let v = results[.time]    { vm.meta.time    = v }
         if let v = results[.checker] { vm.meta.checker = v }
         if let v = results[.date]    { vm.meta.date    = v }
-        
-        self.debugParsed = [
-            "TRACK": vm.meta.track,
-            "CAR": vm.meta.car,
-            "DRIVER": vm.meta.driver,
-            "TYRE": vm.meta.tyre,
-            "LAP": vm.meta.lap,
-            "TIME": vm.meta.time,
-            "CHECKER": vm.meta.checker,
-            "DATE": vm.meta.date
-        ]
+
+        let matched = results
+        let missing = MetaField.allCases.filter { matched[$0] == nil || (matched[$0]?.isEmpty ?? true) }
+        let attempt = VoiceAttempt(timestamp: Date(), transcript: transcript, matched: matched, missing: missing)
+        attempts = Array((attempts + [attempt]).suffix(20))
+        if matched.isEmpty {
+            lastError = "値が抽出できませんでした。項目名の直後に値を続けてください。"
+        } else if !missing.isEmpty {
+            let missingLabel = missing.map(\.displayName).joined(separator: ", ")
+            lastError = "未抽出: \(missingLabel)"
+        } else {
+            lastError = nil
+        }
+
+        debugParsed = Dictionary(uniqueKeysWithValues: MetaField.allCases.map { field in
+            (field.displayName.uppercased(), matched[field] ?? "")
+        })
 
     }
 }

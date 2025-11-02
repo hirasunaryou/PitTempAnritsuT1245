@@ -12,6 +12,7 @@ struct MeasureView: View {
     @EnvironmentObject var registry: DeviceRegistry
 
     @StateObject private var speech = SpeechMemoManager()
+    @State private var selectedWheel: WheelPos = .FL
     @State private var showRaw = false
     @State private var focusTick = 0
     @State private var showMetaEditor = false
@@ -44,9 +45,8 @@ struct MeasureView: View {
 //                    }
 
                     headerReadOnly
-                    grid
-                    
-
+                    wheelSelector
+                    selectedWheelSection(selectedWheel)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
                             .font(.caption)
@@ -96,6 +96,9 @@ struct MeasureView: View {
             // registry の autoConnect=true だけを優先対象に
             let preferred = Set(registry.known.filter { $0.autoConnect }.map { $0.id })
             ble.setPreferredIDs(preferred)   // ← ここを関数呼び出しに
+            if let current = vm.currentWheel {
+                selectedWheel = current
+            }
             print("[UI] MeasureView appear")
         }
 
@@ -104,6 +107,9 @@ struct MeasureView: View {
         }
         .onReceive(ble.temperatureStream) { sample in
             vm.ingestBLESample(sample)
+        }
+        .onReceive(vm.$currentWheel) { newWheel in
+            if let newWheel { selectedWheel = newWheel }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
             if let url = note.userInfo?["url"] as? URL {
@@ -158,87 +164,236 @@ struct MeasureView: View {
         HStack { Text(label).font(.caption).foregroundStyle(.secondary); Spacer(); Text(value.isEmpty ? "-" : value).font(.headline) }
     }
 
-    private var grid: some View {
-        let cols = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-        return LazyVGrid(columns: cols, spacing: 12) {
-            wheelCard(.FL); wheelCard(.FR); wheelCard(.RL); wheelCard(.RR)
+    private var wheelSelector: some View {
+        let wheels: [WheelPos] = [.FL, .FR, .RL, .RR]
+        let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Tyre position").font(.caption).foregroundStyle(.secondary)
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(wheels, id: \.self) { wheelButton($0) }
+            }
         }
     }
 
-    private func wheelCard(_ w: WheelPos) -> some View {
+    private func wheelButton(_ wheel: WheelPos) -> some View {
+        let isSelected = selectedWheel == wheel
+        return Button {
+            let (prevWheel, prevText) = speech.stopAndTakeText()
+            if let pw = prevWheel, !prevText.isEmpty {
+                let vmRef = vm
+                Task { @MainActor in vmRef.appendMemo(prevText, to: pw) }
+            }
+            selectedWheel = wheel
+            Haptics.impactLight()
+        } label: {
+            wheelCard(for: wheel, isSelected: isSelected)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title(wheel))
+    }
+
+    @ViewBuilder
+    private func wheelCard(for wheel: WheelPos, isSelected: Bool) -> some View {
+        let zones = zoneOrder(for: wheel)
+
+        VStack(alignment: .leading, spacing: 10) {
+            wheelCardHeader(for: wheel)
+            wheelCardSummary(for: wheel, zones: zones)
+            wheelCardMemo(for: wheel)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 110)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(isSelected ? Color.accentColor.opacity(0.20) : Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3),
+                        lineWidth: isSelected ? 2 : 1)
+        )
+    }
+
+    @ViewBuilder
+    private func wheelCardHeader(for wheel: WheelPos) -> some View {
+        HStack {
+            Text(title(wheel)).font(.headline)
+            Spacer()
+            if vm.currentWheel == wheel {
+                Label("active", systemImage: "dot.radiowaves.left.and.right")
+                    .font(.caption2)
+                    .labelStyle(.iconOnly)
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func wheelCardSummary(for wheel: WheelPos, zones: [Zone]) -> some View {
+        HStack(spacing: 8) {
+            ForEach(zones, id: \.self) { zone in
+                summaryChip(for: zone, wheel: wheel)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func wheelCardMemo(for wheel: WheelPos) -> some View {
+        if let memo = vm.wheelMemos[wheel], !memo.isEmpty {
+            Text(memo)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+    }
+
+    private func selectedWheelSection(_ wheel: WheelPos) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            zoneSelector(for: wheel)
+            voiceMemoSection(for: wheel)
+        }
+        .animation(.easeInOut(duration: 0.2), value: wheel)
+    }
+
+    private func zoneSelector(for wheel: WheelPos) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("\(title(wheel)) zones").font(.caption).foregroundStyle(.secondary)
+            ForEach(zoneOrder(for: wheel), id: \.self) { zone in
+                zoneButton(wheel, zone)
+            }
+        }
+    }
+
+    private func zoneOrder(for wheel: WheelPos) -> [Zone] {
+        if wheel == .FL || wheel == .RL {
+            return [.OUT, .CL, .IN]
+        } else {
+            return [.IN, .CL, .OUT]
+        }
+    }
+
+    private func voiceMemoSection(for wheel: WheelPos) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(title(w)).font(.headline)
-            // 音声メモ（元の挙動）
             HStack {
-                Text("I.P.").font(.caption2); Spacer()
-                if speech.isRecording && speech.currentWheel == w {
+                Text("Voice memo").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                if speech.isRecording && speech.currentWheel == wheel {
                     Circle().fill(.red).frame(width: 8, height: 8)
+                    Text("Recording…").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                if speech.isRecording && speech.currentWheel == wheel {
                     Button("Stop") {
                         speech.stop()
-                        let t = speech.takeFinalText()
-                        if !t.isEmpty { let vmRef = vm; Task { @MainActor in vmRef.appendMemo(t, to: w) } }
-                    }.buttonStyle(.bordered)
+                        let text = speech.takeFinalText()
+                        if !text.isEmpty {
+                            let vmRef = vm
+                            Task { @MainActor in vmRef.appendMemo(text, to: wheel) }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
                 } else {
                     Button {
                         let (pw, prevText) = speech.stopAndTakeText()
                         if let pw, !prevText.isEmpty {
-                            let vmRef = vm; Task { @MainActor in vmRef.appendMemo(prevText, to: pw) }
+                            let vmRef = vm
+                            Task { @MainActor in vmRef.appendMemo(prevText, to: pw) }
                         }
-                        try? speech.start(for: w); Haptics.impactLight()
-                    } label: { Label("MEMO", systemImage: "mic.fill") }
+                        try? speech.start(for: wheel)
+                        Haptics.impactLight()
+                    } label: {
+                        Label("Record memo", systemImage: "mic.fill")
+                    }
                     .buttonStyle(.bordered)
                     .disabled(!speech.isAuthorized)
                 }
+                Spacer()
             }
-            if let memo = vm.wheelMemos[w], !memo.isEmpty {
-                Text(memo).font(.footnote).lineLimit(3).textSelection(.enabled)
-            }
-
-            Text("TEMP.").font(.caption2)
-            HStack(spacing: 8) {
-                let zones: [Zone] = (w == .FL || w == .RL) ? [.OUT, .CL, .IN] : [.IN, .CL, .OUT]
-                ForEach(zones, id: \.self) { z in zoneButton(w, z) }
+            if let memo = vm.wheelMemos[wheel], !memo.isEmpty {
+                Text(memo)
+                    .font(.footnote)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color(.secondarySystemBackground)))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.secondary.opacity(0.5), lineWidth: 1))
+        .background(
+            RoundedRectangle(cornerRadius: 12).fill(Color(.tertiarySystemBackground))
+        )
     }
 
-    private func zoneButton(_ w: WheelPos, _ z: Zone) -> some View {
-        Button {
-            vm.tapCell(wheel: w, zone: z); focusTick &+= 1
+    private func summaryChip(for zone: Zone, wheel: WheelPos) -> some View {
+        let value = displayValue(w: wheel, z: zone)
+        return HStack(spacing: 6) {
+            Text(zoneDisplayName(zone))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.callout)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule().fill(Color(.systemBackground).opacity(0.7))
+        )
+    }
+
+    private func zoneButton(_ wheel: WheelPos, _ zone: Zone) -> some View {
+        let isRunning = vm.currentWheel == wheel && vm.currentZone == zone
+        let valueText = displayValue(w: wheel, z: zone)
+        let progress = min(vm.elapsed / Double(settings.durationSec), 1.0)
+
+        return Button {
+            selectedWheel = wheel
+            vm.tapCell(wheel: wheel, zone: zone)
+            focusTick &+= 1
         } label: {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12).fill(Color.blue.opacity(0.18))
-                HStack { Text(z.rawValue).font(.caption2).opacity(0.85); Spacer(minLength: 0) }
-                    .padding(.horizontal, 10).padding(.vertical, 12)
-            }
-            .frame(maxWidth: .infinity, minHeight: 68)
-            .overlay(alignment: .bottomLeading) {
-                if vm.currentWheel == w && vm.currentZone == z {
-                    let p = min(vm.elapsed / Double(settings.durationSec), 1.0)
-                    ZStack(alignment: .leading) {
-                        Capsule().foregroundStyle(.white.opacity(0.08)).frame(height: 4)
-                        Capsule().foregroundStyle(.blue.opacity(0.6)).frame(width: CGFloat(p) * 80, height: 4)
-                    }
-                    .padding(.bottom, 6)
-                    HStack(spacing: 6) {
-                        Circle().fill(.red).frame(width: 6, height: 6)
-                        Text(String(format: "%.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
-                            .font(.caption2).monospacedDigit()
-                    }
-                    .padding(.top, 6)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text(zoneDisplayName(zone))
+                        .font(.headline)
+                    Spacer()
+                    Text(valueText)
+                        .font(.system(size: 36, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.5)
+                }
+                if isRunning {
+                    ProgressView(value: progress)
+                        .progressViewStyle(.linear)
+                    Text(String(format: "Remaining %.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(valueText == "--" ? "Tap to capture" : "Last captured")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .overlay {
-                let y: CGFloat = (z == .OUT ? -18 : (z == .CL ? 0 : 18))
-                Text(displayValue(w: w, z: z))
-                    .font(.system(size: 40, weight: .semibold, design: .rounded))
-                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.3).offset(y: y)
-                    .allowsHitTesting(false)
-            }
-        }.buttonStyle(.plain)
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(isRunning ? Color.accentColor.opacity(0.25) : Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 18)
+                    .stroke(isRunning ? Color.accentColor : Color.secondary.opacity(0.3),
+                            lineWidth: isRunning ? 2 : 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title(wheel)) \(zoneDisplayName(zone)) button")
+    }
+
+    private func zoneDisplayName(_ zone: Zone) -> String {
+        switch zone {
+        case .IN: return "IN"
+        case .CL: return "CENTER"
+        case .OUT: return "OUT"
+        }
     }
 
     private func title(_ w: WheelPos) -> String {

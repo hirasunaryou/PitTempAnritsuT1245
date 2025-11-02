@@ -14,6 +14,12 @@ import Combine
 @MainActor
 final class SessionViewModel: ObservableObject {
 
+    enum NextSessionCarryOver {
+        case keepAllMeta
+        case keepCarIdentity
+        case resetEverything
+    }
+
     // MARK: - 依存（DI）
     private let settings: SessionSettingsProviding
     private let exporter: CSVExporting
@@ -67,6 +73,7 @@ final class SessionViewModel: ObservableObject {
         didSet { scheduleAutosave(reason: .memoUpdated) }
     }
     @Published private(set) var autosaveStatusEntry: UILogEntry? = nil
+    @Published private(set) var sessionResetID = UUID()
 
     // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
     private var durationSec: Int { settings.validatedDurationSec }
@@ -107,6 +114,53 @@ final class SessionViewModel: ObservableObject {
         finalize(via: "manual")
         isCaptureActive = false
         scheduleAutosave(reason: .stateChange)
+    }
+
+    func prepareForNextSession(carryOver: NextSessionCarryOver) {
+        timer?.invalidate(); timer = nil
+
+        let preservedMeta: MeasureMeta
+        switch carryOver {
+        case .keepAllMeta:
+            preservedMeta = meta
+        case .keepCarIdentity:
+            var base = MeasureMeta()
+            base.car = meta.car
+            base.carNo = meta.carNo
+            base.carNoAndMemo = meta.carNoAndMemo
+            preservedMeta = base
+        case .resetEverything:
+            preservedMeta = MeasureMeta()
+        }
+
+        sessionBeganAt = nil
+        startedAt = nil
+        lastSampleAt = nil
+        elapsed = 0
+        peakC = .nan
+        latestValueText = "--"
+        live.removeAll()
+        currentWheel = nil
+        currentZone = nil
+        isCaptureActive = false
+
+        results = []
+        wheelMemos = [:]
+        meta = preservedMeta
+        lastCSV = nil
+        lastLegacyCSV = nil
+
+        autosaveStore.clear()
+        persistAutosaveNow()
+
+        sessionResetID = UUID()
+
+        let entry = UILogEntry(
+            message: messageForNextSession(carryOver: carryOver),
+            level: .info,
+            category: .general
+        )
+        publishAutosaveStatus(entry)
     }
 
     /// 手動入力で値を確定させる
@@ -403,5 +457,16 @@ final class SessionViewModel: ObservableObject {
     private func publishAutosaveStatus(_ entry: UILogEntry) {
         autosaveStatusEntry = entry
         uiLog?.publish(entry)
+    }
+
+    private func messageForNextSession(carryOver: NextSessionCarryOver) -> String {
+        switch carryOver {
+        case .keepAllMeta:
+            return "計測結果をクリアしました（メタ情報は保持）。\nCleared results while keeping meta fields."
+        case .keepCarIdentity:
+            return "計測結果をクリアし、車両Noのみ引き継ぎました。\nCleared results and kept only the car number."
+        case .resetEverything:
+            return "計測結果とメタ情報をすべて初期化しました。\nReset results and meta for the next vehicle."
+        }
     }
 }

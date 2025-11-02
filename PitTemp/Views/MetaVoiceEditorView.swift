@@ -377,7 +377,15 @@ struct MetaVoiceEditorView: View {
             HStack {
                 Text("解析履歴").font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                ShareLink(item: AttemptCSVDocument(attempts: attempts)) {
+                ShareLink(
+                    item: AttemptCSVDocument(attempts: attempts),
+                    subject: Text("MetaVoice Attempts"),
+                    message: nil,
+                    preview: SharePreview(
+                        Text("MetaVoice Attempts"),
+                        icon: Image(systemName: "square.and.arrow.up")
+                    )
+                ) {
                     Label("CSVエクスポート", systemImage: "square.and.arrow.up")
                 }
                 .disabled(attempts.isEmpty)

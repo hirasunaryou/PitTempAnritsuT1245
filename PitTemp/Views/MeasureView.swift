@@ -21,8 +21,22 @@ struct MeasureView: View {
     @State private var showUploadAlert = false
     @State private var uploadedPathText = ""
     @State private var uploadMessage = ""
-    
-    
+    @State private var isManualMode = false
+    @State private var manualValues: [WheelPos: [Zone: String]] = [:]
+    @State private var manualErrors: [WheelPos: [Zone: String]] = [:]
+    @State private var manualSuccess: [WheelPos: [Zone: Date]] = [:]
+    @State private var manualMemos: [WheelPos: String] = [:]
+    @State private var manualMemoSuccess: [WheelPos: Date] = [:]
+
+    private let manualTemperatureRange: ClosedRange<Double> = -50...200
+    private static let manualTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        formatter.dateStyle = .none
+        return formatter
+    }()
+
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -46,6 +60,7 @@ struct MeasureView: View {
 
                     headerReadOnly
                     wheelSelector
+                    manualModeToggle
                     selectedWheelSection(selectedWheel)
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
@@ -111,6 +126,26 @@ struct MeasureView: View {
         .onReceive(vm.$currentWheel) { newWheel in
             if let newWheel { selectedWheel = newWheel }
         }
+        .onChange(of: isManualMode) { _, newValue in
+            if newValue {
+                clearManualFeedback(for: selectedWheel)
+                syncManualDefaults(for: selectedWheel)
+            } else {
+                clearManualFeedback()
+            }
+        }
+        .onChange(of: selectedWheel) { _, newWheel in
+            if isManualMode {
+                clearManualFeedback(for: newWheel)
+                syncManualDefaults(for: newWheel)
+            }
+        }
+        .onReceive(vm.$results) { _ in
+            if isManualMode { syncManualDefaults(for: selectedWheel) }
+        }
+        .onReceive(vm.$wheelMemos) { _ in
+            if isManualMode { syncManualMemo(for: selectedWheel) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
             if let url = note.userInfo?["url"] as? URL {
                 let comps = url.pathComponents.suffix(2).joined(separator: "/")
@@ -142,6 +177,13 @@ struct MeasureView: View {
     }
 
     // --- 以降はUI部品（元のまま） ---
+    private var manualModeToggle: some View {
+        Toggle(isOn: $isManualMode) {
+            Label("Manual Mode", systemImage: "hand.tap.fill")
+        }
+        .toggleStyle(.switch)
+    }
+
     private var headerReadOnly: some View {
         VStack(alignment: .leading, spacing: 6) {
             MetaRow(label: "TRACK", value: vm.meta.track)
@@ -250,6 +292,9 @@ struct MeasureView: View {
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             zoneSelector(for: wheel)
+            if isManualMode {
+                manualEntrySection(for: wheel)
+            }
             voiceMemoSection(for: wheel)
         }
         .animation(.easeInOut(duration: 0.2), value: wheel)
@@ -261,6 +306,261 @@ struct MeasureView: View {
             ForEach(zoneOrder(for: wheel), id: \.self) { zone in
                 zoneButton(wheel, zone)
             }
+        }
+    }
+
+    private func manualEntrySection(for wheel: WheelPos) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Manual entry for \(title(wheel))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(zoneOrder(for: wheel), id: \.self) { zone in
+                manualZoneRow(for: wheel, zone: zone)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Wheel memo")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                TextField("Memo (optional)", text: manualMemoBinding(for: wheel))
+                    .textFieldStyle(.roundedBorder)
+                    .disableAutocorrection(true)
+
+                Button {
+                    persistManualMemo(for: wheel)
+                } label: {
+                    Label("Save memo", systemImage: "square.and.arrow.down")
+                }
+                .buttonStyle(.bordered)
+
+                if let savedAt = manualMemoSuccessDate(for: wheel) {
+                    Text("Memo saved \(Self.manualTimeFormatter.string(from: savedAt))")
+                        .font(.caption)
+                        .foregroundStyle(Color.green)
+                }
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.tertiarySystemBackground)))
+    }
+
+    private func manualZoneRow(for wheel: WheelPos, zone: Zone) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(zoneDisplayName(zone))
+                    .font(.headline)
+                Spacer()
+                Button {
+                    commitManualEntry(wheel: wheel, zone: zone)
+                } label: {
+                    Label("Save", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            TextField("85.0", text: manualValueBinding(for: wheel, zone: zone))
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.decimalPad)
+                .disableAutocorrection(true)
+                .onSubmit { commitManualEntry(wheel: wheel, zone: zone) }
+
+            Stepper(value: manualStepperBinding(for: wheel, zone: zone), in: manualTemperatureRange, step: 0.5) {
+                Text("Adjust: \(manualValueDisplay(for: wheel, zone: zone))℃")
+                    .monospacedDigit()
+            }
+
+            if let error = manualError(for: wheel, zone: zone) {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Color.red)
+            } else if let savedAt = manualSuccessDate(for: wheel, zone: zone) {
+                Text("Saved \(Self.manualTimeFormatter.string(from: savedAt))")
+                    .font(.caption)
+                    .foregroundStyle(Color.green)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground).opacity(0.6)))
+    }
+
+    private func manualValueBinding(for wheel: WheelPos, zone: Zone) -> Binding<String> {
+        Binding(
+            get: { manualValues[wheel]?[zone] ?? "" },
+            set: { newValue in updateManualValue(newValue, for: wheel, zone: zone) }
+        )
+    }
+
+    private func manualStepperBinding(for wheel: WheelPos, zone: Zone) -> Binding<Double> {
+        Binding(
+            get: {
+                if let text = manualValues[wheel]?[zone], let parsed = parseManualValue(text) {
+                    return parsed
+                }
+                return defaultManualValue(for: wheel, zone: zone)
+            },
+            set: { newValue in
+                updateManualValue(String(format: "%.1f", newValue), for: wheel, zone: zone)
+            }
+        )
+    }
+
+    private func manualValueDisplay(for wheel: WheelPos, zone: Zone) -> String {
+        if let text = manualValues[wheel]?[zone], !text.isEmpty {
+            return text
+        }
+        if let existing = vm.results.first(where: { $0.wheel == wheel && $0.zone == zone }), existing.peakC.isFinite {
+            return String(format: "%.1f", existing.peakC)
+        }
+        return "--"
+    }
+
+    private func manualError(for wheel: WheelPos, zone: Zone) -> String? {
+        manualErrors[wheel]?[zone]
+    }
+
+    private func manualSuccessDate(for wheel: WheelPos, zone: Zone) -> Date? {
+        manualSuccess[wheel]?[zone]
+    }
+
+    private func manualMemoBinding(for wheel: WheelPos) -> Binding<String> {
+        Binding(
+            get: { manualMemos[wheel] ?? vm.wheelMemos[wheel] ?? "" },
+            set: { newValue in
+                manualMemos[wheel] = newValue
+                manualMemoSuccess.removeValue(forKey: wheel)
+            }
+        )
+    }
+
+    private func manualMemoSuccessDate(for wheel: WheelPos) -> Date? {
+        manualMemoSuccess[wheel]
+    }
+
+    private func updateManualValue(_ value: String, for wheel: WheelPos, zone: Zone) {
+        var zoneMap = manualValues[wheel] ?? [:]
+        zoneMap[zone] = value
+        manualValues[wheel] = zoneMap
+
+        setManualError(nil, for: wheel, zone: zone)
+        setManualSuccess(nil, for: wheel, zone: zone)
+    }
+
+    private func defaultManualValue(for wheel: WheelPos, zone: Zone) -> Double {
+        if let existing = vm.results.first(where: { $0.wheel == wheel && $0.zone == zone }), existing.peakC.isFinite {
+            return existing.peakC
+        }
+        return 60.0
+    }
+
+    private func setManualError(_ message: String?, for wheel: WheelPos, zone: Zone) {
+        var zoneMap = manualErrors[wheel] ?? [:]
+        if let message {
+            zoneMap[zone] = message
+        } else {
+            zoneMap.removeValue(forKey: zone)
+        }
+        manualErrors[wheel] = zoneMap.isEmpty ? nil : zoneMap
+    }
+
+    private func setManualSuccess(_ date: Date?, for wheel: WheelPos, zone: Zone) {
+        var zoneMap = manualSuccess[wheel] ?? [:]
+        if let date {
+            zoneMap[zone] = date
+        } else {
+            zoneMap.removeValue(forKey: zone)
+        }
+        manualSuccess[wheel] = zoneMap.isEmpty ? nil : zoneMap
+    }
+
+    private func commitManualEntry(wheel: WheelPos, zone: Zone) {
+        let rawText = manualValues[wheel]?[zone] ?? ""
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            setManualError("Enter a temperature", for: wheel, zone: zone)
+            setManualSuccess(nil, for: wheel, zone: zone)
+            return
+        }
+
+        guard let value = parseManualValue(trimmed) else {
+            setManualError("Invalid number", for: wheel, zone: zone)
+            setManualSuccess(nil, for: wheel, zone: zone)
+            return
+        }
+
+        guard manualTemperatureRange.contains(value) else {
+            let minText = String(format: "%.0f", manualTemperatureRange.lowerBound)
+            let maxText = String(format: "%.0f", manualTemperatureRange.upperBound)
+            setManualError("Value must be between \(minText)℃ and \(maxText)℃", for: wheel, zone: zone)
+            setManualSuccess(nil, for: wheel, zone: zone)
+            return
+        }
+
+        let formatted = String(format: "%.1f", value)
+        var memo = manualMemos[wheel] ?? vm.wheelMemos[wheel] ?? ""
+        memo = memo.trimmingCharacters(in: .whitespacesAndNewlines)
+        manualMemos[wheel] = memo
+
+        vm.commitManualValue(
+            wheel: wheel,
+            zone: zone,
+            value: value,
+            memo: memo,
+            timestamp: Date()
+        )
+
+        updateManualValue(formatted, for: wheel, zone: zone)
+        setManualError(nil, for: wheel, zone: zone)
+        setManualSuccess(Date(), for: wheel, zone: zone)
+        manualMemoSuccess[wheel] = Date()
+    }
+
+    private func parseManualValue(_ text: String) -> Double? {
+        let normalized = text.replacingOccurrences(of: ",", with: ".")
+        return Double(normalized)
+    }
+
+    private func persistManualMemo(for wheel: WheelPos) {
+        let trimmed = (manualMemos[wheel] ?? vm.wheelMemos[wheel] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        manualMemos[wheel] = trimmed
+        if trimmed.isEmpty {
+            vm.wheelMemos.removeValue(forKey: wheel)
+        } else {
+            vm.wheelMemos[wheel] = trimmed
+        }
+        manualMemoSuccess[wheel] = Date()
+    }
+
+    private func syncManualDefaults(for wheel: WheelPos) {
+        var zoneMap = manualValues[wheel] ?? [:]
+        for zone in Zone.allCases {
+            if let existing = vm.results.first(where: { $0.wheel == wheel && $0.zone == zone }), existing.peakC.isFinite {
+                zoneMap[zone] = String(format: "%.1f", existing.peakC)
+            } else {
+                zoneMap[zone] = zoneMap[zone] ?? ""
+            }
+        }
+        manualValues[wheel] = zoneMap
+        manualMemos[wheel] = vm.wheelMemos[wheel] ?? manualMemos[wheel] ?? ""
+    }
+
+    private func syncManualMemo(for wheel: WheelPos) {
+        manualMemos[wheel] = vm.wheelMemos[wheel] ?? manualMemos[wheel] ?? ""
+    }
+
+    private func clearManualFeedback(for wheel: WheelPos? = nil) {
+        if let wheel {
+            manualErrors[wheel] = nil
+            manualSuccess[wheel] = nil
+            manualMemoSuccess[wheel] = nil
+        } else {
+            manualErrors.removeAll()
+            manualSuccess.removeAll()
+            manualMemoSuccess.removeAll()
         }
     }
 

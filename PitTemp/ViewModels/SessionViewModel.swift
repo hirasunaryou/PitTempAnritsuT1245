@@ -15,19 +15,23 @@ import Combine
 final class SessionViewModel: ObservableObject {
 
     // MARK: - 依存（DI）
-    private let settings: SettingsStore
+    private let settings: SessionSettingsProviding
     private let exporter: CSVExporting
-    private let autosaveStore: SessionAutosaveStore
+    private let autosaveStore: SessionAutosaveHandling
     private var autosaveWorkItem: DispatchWorkItem?
     private var isRestoringAutosave = false
 
     init(exporter: CSVExporting = CSVExporter(),
-         settings: SettingsStore? = nil,
-         autosaveStore: SessionAutosaveStore = SessionAutosaveStore()) {
+         settings: SessionSettingsProviding? = nil,
+         autosaveStore: SessionAutosaveHandling = SessionAutosaveStore()) {
         self.exporter = exporter
         self.autosaveStore = autosaveStore
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
-        self.settings = settings ?? SettingsStore()
+        if let settings {
+            self.settings = settings
+        } else {
+            self.settings = SettingsStore()
+        }
         restoreAutosaveIfAvailable()
     }
 
@@ -62,7 +66,6 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
     private var durationSec: Int { settings.validatedDurationSec }
-    // private var zoneOrder: Int { settings.zoneOr*/derRaw } // 既存ロジック都合で Int のまま
     private var chartWindowSec: Double { settings.chartWindowSec }
     private var advanceWithGreater: Bool { settings.advanceWithGreater }
     private var advanceWithRightArrow: Bool { settings.advanceWithRightArrow }
@@ -100,6 +103,39 @@ final class SessionViewModel: ObservableObject {
         finalize(via: "manual")
         isCaptureActive = false
         scheduleAutosave(reason: .stateChange)
+    }
+
+    /// 手動入力で値を確定させる
+    func commitManualValue(wheel: WheelPos,
+                           zone: Zone,
+                           value: Double,
+                           memo: String? = nil,
+                           timestamp: Date = Date()) {
+        sessionBeganAt = sessionBeganAt ?? timestamp
+
+        let manualResult = MeasureResult(
+            wheel: wheel,
+            zone: zone,
+            peakC: value,
+            startedAt: timestamp,
+            endedAt: timestamp,
+            via: "manual"
+        )
+
+        results.removeAll { $0.wheel == wheel && $0.zone == zone }
+        results.append(manualResult)
+        results.sort { ($0.wheel.rawValue, $0.zone.rawValue) < ($1.wheel.rawValue, $1.zone.rawValue) }
+
+        if let memo {
+            let trimmed = memo.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                wheelMemos.removeValue(forKey: wheel)
+            } else {
+                wheelMemos[wheel] = trimmed
+            }
+        }
+
+        Haptics.success()
     }
 
     /// HIDからの「行確定」
@@ -208,7 +244,7 @@ final class SessionViewModel: ObservableObject {
     private func autoAdvance() {
         guard let w = currentWheel, let z = currentZone else { isCaptureActive = false; return }
 //        let order: [Zone] = (zoneOrder == 0) ? [.IN, .CL, .OUT] : [.OUT, .CL, .IN]
-        let order: [Zone] = settings.zoneOrderEnum.sequence
+        let order: [Zone] = settings.zoneOrderSequence
         if let idx = order.firstIndex(of: z) {
             let nextIdx = idx + 1
             if nextIdx < order.count {

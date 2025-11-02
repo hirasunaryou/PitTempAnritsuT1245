@@ -17,16 +17,24 @@ final class SessionViewModel: ObservableObject {
     // MARK: - 依存（DI）
     private let settings: SettingsStore
     private let exporter: CSVExporting
+    private let autosaveStore: SessionAutosaveStore
+    private var autosaveWorkItem: DispatchWorkItem?
+    private var isRestoringAutosave = false
 
     init(exporter: CSVExporting = CSVExporter(),
-         settings: SettingsStore? = nil) {
+         settings: SettingsStore? = nil,
+         autosaveStore: SessionAutosaveStore = SessionAutosaveStore()) {
         self.exporter = exporter
+        self.autosaveStore = autosaveStore
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
         self.settings = settings ?? SettingsStore()
+        restoreAutosaveIfAvailable()
     }
 
     // MARK: - メタ & ライブ
-    @Published var meta = MeasureMeta()
+    @Published var meta = MeasureMeta() {
+        didSet { scheduleAutosave(reason: .metaUpdated) }
+    }
     @Published private(set) var latestValueText: String = "--"
     @Published private(set) var live: [TempSample] = []
     private var lastSampleAt: Date? = nil
@@ -42,11 +50,15 @@ final class SessionViewModel: ObservableObject {
     private var sessionBeganAt: Date?
 
     // 結果とCSV
-    @Published private(set) var results: [MeasureResult] = []
+    @Published private(set) var results: [MeasureResult] = [] {
+        didSet { scheduleAutosave(reason: .resultsUpdated) }
+    }
     @Published private(set) var lastCSV: URL? = nil
     @Published private(set) var lastLegacyCSV: URL? = nil
     // メモ（ホイール別の自由記述）
-    @Published var wheelMemos: [WheelPos: String] = [:]
+    @Published var wheelMemos: [WheelPos: String] = [:] {
+        didSet { scheduleAutosave(reason: .memoUpdated) }
+    }
 
     // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
     private var durationSec: Int { settings.validatedDurationSec }
@@ -87,6 +99,7 @@ final class SessionViewModel: ObservableObject {
     func stopAll() {
         finalize(via: "manual")
         isCaptureActive = false
+        scheduleAutosave(reason: .stateChange)
     }
 
     /// HIDからの「行確定」
@@ -142,6 +155,7 @@ final class SessionViewModel: ObservableObject {
             )
             lastCSV = url
             print("CSV saved (wflat):", url.lastPathComponent)
+            autosaveStore.archiveLatest()
         } catch {
             print("CSV export error:", error)
         }
@@ -149,7 +163,12 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - 内部処理
     private func start(wheel: WheelPos, zone: Zone) {
-        if sessionBeganAt == nil { sessionBeganAt = Date() }
+        if sessionBeganAt == nil {
+            sessionBeganAt = Date()
+            scheduleAutosave(reason: .sessionBegan)
+        } else {
+            scheduleAutosave(reason: .stateChange)
+        }
 
         finalize(via: "auto") // 既存の計測があれば閉じる
         currentWheel = wheel
@@ -222,6 +241,69 @@ final class SessionViewModel: ObservableObject {
         if let idx = live.firstIndex(where: { $0.ts >= cutoff }) {
             if idx > 0 { live.removeFirst(idx) }
         }
+    }
+
+    // MARK: - Autosave
+    private enum AutosaveReason {
+        case metaUpdated
+        case resultsUpdated
+        case memoUpdated
+        case sessionBegan
+        case stateChange
+    }
+
+    @discardableResult
+    func restoreAutosaveIfAvailable() -> Bool {
+        guard let snapshot = autosaveStore.load() else { return false }
+        isRestoringAutosave = true
+        meta = snapshot.meta
+        results = snapshot.results
+        wheelMemos = snapshot.wheelMemos
+        sessionBeganAt = snapshot.sessionBeganAt
+        isCaptureActive = false
+        currentWheel = nil
+        currentZone = nil
+        elapsed = 0
+        peakC = .nan
+        isRestoringAutosave = false
+        return true
+    }
+
+    private func scheduleAutosave(reason: AutosaveReason) {
+        guard !isRestoringAutosave else { return }
+        autosaveWorkItem?.cancel()
+
+        let work = DispatchWorkItem { [weak self] in
+            self?.persistAutosave()
+        }
+        autosaveWorkItem = work
+
+        let delay: DispatchTimeInterval
+        switch reason {
+        case .sessionBegan:
+            delay = .milliseconds(150)
+        case .metaUpdated, .memoUpdated:
+            delay = .milliseconds(300)
+        case .resultsUpdated, .stateChange:
+            delay = .milliseconds(100)
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func persistAutosave() {
+        let snapshot = SessionSnapshot(
+            meta: meta,
+            results: results,
+            wheelMemos: wheelMemos,
+            sessionBeganAt: sessionBeganAt
+        )
+        autosaveStore.save(snapshot)
+    }
+
+    func clearAutosave() {
+        autosaveWorkItem?.cancel()
+        autosaveStore.clear()
     }
 
     // MARK: - 小物

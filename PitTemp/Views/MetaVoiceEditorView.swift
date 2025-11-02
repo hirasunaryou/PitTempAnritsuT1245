@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 private enum MetaField: String, CaseIterable, Identifiable {
     case track, date, time, car, driver, tyre, lap, checker
@@ -23,11 +24,163 @@ private enum MetaField: String, CaseIterable, Identifiable {
 }
 
 private struct VoiceAttempt: Identifiable {
+    struct Segment: Identifiable {
+        let id = UUID()
+        let index: Int
+        let text: String
+        let timestamp: TimeInterval
+        let duration: TimeInterval
+        let confidence: Double
+    }
+
+    struct KeywordHit: Identifiable {
+        let id = UUID()
+        let field: MetaField
+        let keyword: String
+    }
+
     let id = UUID()
     let timestamp: Date
     let transcript: String
     let matched: [MetaField: String]
     let missing: [MetaField]
+    let keywordHits: [KeywordHit]
+    let score: Double
+    let averageConfidence: Double?
+    let wheel: WheelPos?
+    let errorDescription: String?
+    let segments: [Segment]
+}
+
+private struct AttemptCSVDocument: Transferable {
+    let attempts: [VoiceAttempt]
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .commaSeparatedText) { value in
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(Self.filenameFormatter.string(from: Date()))
+                .appendingPathExtension("csv")
+            try value.makeCSV().write(to: url, atomically: true, encoding: .utf8)
+            return SentTransferredFile(url)
+        }
+    }
+
+    private static let filenameFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "'MetaVoiceAttempts-'yyyyMMdd-HHmmss"
+        return f
+    }()
+
+    private static let timestampFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private func escapeCSV(_ value: String) -> String {
+        var escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+        if escaped.contains(",") || escaped.contains("\n") {
+            escaped = "\"" + escaped + "\""
+        }
+        return escaped
+    }
+
+    private func row(for attempt: VoiceAttempt) -> String {
+        let timestamp = Self.timestampFormatter.string(from: attempt.timestamp)
+        let wheel = attempt.wheel?.rawValue ?? ""
+        let matched = attempt.matched
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .map { "\($0.key.rawValue)=\($0.value)" }
+            .joined(separator: "; ")
+        let missing = attempt.missing.map(\.rawValue).joined(separator: "; ")
+        let keywords = attempt.keywordHits
+            .map { "\($0.field.rawValue):\($0.keyword)" }
+            .joined(separator: "; ")
+        let score = String(format: "%.2f", attempt.score)
+        let confidence = attempt.averageConfidence.map { String(format: "%.2f", $0) } ?? ""
+        let error = attempt.errorDescription ?? ""
+
+        let columns = [
+            timestamp,
+            wheel,
+            attempt.transcript,
+            matched,
+            missing,
+            keywords,
+            score,
+            confidence,
+            error
+        ].map(escapeCSV)
+
+        return columns.joined(separator: ",")
+    }
+
+    private func makeCSV() -> String {
+        let header = [
+            "timestamp",
+            "wheel",
+            "transcript",
+            "matched",
+            "missing",
+            "keywords",
+            "score",
+            "average_confidence",
+            "error"
+        ].joined(separator: ",")
+
+        let rows = attempts.map(row)
+        return ([header] + rows).joined(separator: "\n")
+    }
+}
+
+private final class SpeechMemoEventHub: ObservableObject, SpeechMemoManagerDelegate {
+    struct StartEvent: Identifiable {
+        let id = UUID()
+        let wheel: WheelPos
+    }
+    struct RecognitionEvent: Identifiable {
+        let id = UUID()
+        let wheel: WheelPos?
+        let telemetry: SpeechMemoManager.RecognitionTelemetry
+    }
+
+    struct ErrorEvent: Identifiable {
+        let id = UUID()
+        let wheel: WheelPos?
+        let error: SpeechMemoManager.RecordingError
+        let telemetry: SpeechMemoManager.RecognitionTelemetry?
+    }
+
+    @Published var startEvent: StartEvent?
+    @Published var recognitionEvent: RecognitionEvent?
+    @Published var errorEvent: ErrorEvent?
+
+    func speechMemoManagerDidStartRecording(_ manager: SpeechMemoManager, wheel: WheelPos) {
+        DispatchQueue.main.async {
+            self.startEvent = StartEvent(wheel: wheel)
+        }
+    }
+
+    func speechMemoManager(_ manager: SpeechMemoManager, didFinishRecording telemetry: SpeechMemoManager.RecognitionTelemetry, wheel: WheelPos?) {
+        DispatchQueue.main.async {
+            self.recognitionEvent = RecognitionEvent(wheel: wheel, telemetry: telemetry)
+        }
+    }
+
+    func speechMemoManager(_ manager: SpeechMemoManager, didFailWith error: SpeechMemoManager.RecordingError, telemetry: SpeechMemoManager.RecognitionTelemetry?, wheel: WheelPos?) {
+        DispatchQueue.main.async {
+            self.errorEvent = ErrorEvent(wheel: wheel, error: error, telemetry: telemetry)
+        }
+    }
+}
+
+private struct ParseArtifacts {
+    let matched: [MetaField: String]
+    let missing: [MetaField]
+    let keywordHits: [VoiceAttempt.KeywordHit]
+    let score: Double
+    let debugMap: [String: String]
+    let message: String?
 }
 
 /// 既存の SpeechMemoManager を使って音声 → テキスト化し、
@@ -37,11 +190,13 @@ struct MetaVoiceEditorView: View {
     @EnvironmentObject var vm: SessionViewModel
 
     @StateObject private var speech = SpeechMemoManager()
+    @StateObject private var speechEvents = SpeechMemoEventHub()
 
     @State private var transcript: String = ""
     @State private var lastError: String?
     @State private var debugParsed: [String:String] = [:]
     @State private var attempts: [VoiceAttempt] = []
+    @State private var microphoneAvailable = true
 
     var body: some View {
         NavigationStack {
@@ -64,7 +219,7 @@ struct MetaVoiceEditorView: View {
 
                     if speech.isRecording {
                         Button {
-                            stopRecordingAndAppend()
+                            stopRecording()
                         } label: {
                             Label("Stop", systemImage: "stop.circle.fill")
                         }
@@ -73,7 +228,15 @@ struct MetaVoiceEditorView: View {
                         Button {
                             // SpeechMemoManager.start(for:) が WheelPos 必須のため
                             // メタ入力ではダミーで .FL を渡して録音のみ利用する
-                            do { try speech.start(for: .FL) } catch {
+                            do {
+                                lastError = nil
+                                try speech.start(for: .FL)
+                            } catch let error as SpeechMemoManager.RecordingError {
+                                lastError = error.errorDescription
+                                if case .microphoneUnavailable = error {
+                                    microphoneAvailable = false
+                                }
+                            } catch {
                                 lastError = error.localizedDescription
                             }
                         } label: {
@@ -82,6 +245,18 @@ struct MetaVoiceEditorView: View {
                         .buttonStyle(.borderedProminent)
                         .disabled(!speech.isAuthorized)
                     }
+                }
+
+                if !microphoneAvailable {
+                    Text("シミュレータやマイク非搭載環境では録音を開始できません。画面下部のCSVエクスポートから解析ログを共有できます。")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .padding(.bottom, 4)
+                } else if !speech.isAuthorized {
+                    Text("マイクと音声認識の許可が必要です。設定アプリで PitTemp のマイク・音声認識を有効にしてください。")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .padding(.bottom, 4)
                 }
 
                 // 音声→テキスト結果
@@ -162,8 +337,27 @@ struct MetaVoiceEditorView: View {
                         .disabled(speech.isRecording)
                 }
             }
-            .onAppear { speech.requestAuth() }
-            .onDisappear { if speech.isRecording { speech.stop() } }
+            .onReceive(speechEvents.$startEvent) { _ in
+                microphoneAvailable = true
+                lastError = nil
+            }
+            .onReceive(speechEvents.$recognitionEvent) { event in
+                guard let event else { return }
+                handleRecognitionEvent(event)
+            }
+            .onReceive(speechEvents.$errorEvent) { event in
+                guard let event else { return }
+                handleErrorEvent(event)
+            }
+            .onAppear {
+                speech.delegate = speechEvents
+                speech.requestAuth()
+                microphoneAvailable = true
+            }
+            .onDisappear {
+                if speech.isRecording { speech.stop() }
+                speech.delegate = nil
+            }
         }
     }
 
@@ -184,7 +378,22 @@ struct MetaVoiceEditorView: View {
     private var attemptLog: some View {
         let recentAttempts = Array(attempts.suffix(5).reversed())
         return VStack(alignment: .leading, spacing: 8) {
-            Text("解析履歴").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Text("解析履歴").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                ShareLink(
+                    item: AttemptCSVDocument(attempts: attempts),
+                    subject: Text("MetaVoice Attempts"),
+                    message: nil,
+                    preview: SharePreview(
+                        Text("MetaVoice Attempts"),
+                        icon: Image(systemName: "square.and.arrow.up")
+                    )
+                ) {
+                    Label("CSVエクスポート", systemImage: "square.and.arrow.up")
+                }
+                .disabled(attempts.isEmpty)
+            }
             ForEach(recentAttempts) { attempt in
                 attemptRow(attempt)
                     .padding(.vertical, 4)
@@ -198,11 +407,38 @@ struct MetaVoiceEditorView: View {
 
     private func attemptRow(_ attempt: VoiceAttempt) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(attempt.timestamp.formatted(date: .omitted, time: .standard))
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(attempt.timestamp.formatted(date: .omitted, time: .standard))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let wheel = attempt.wheel {
+                    Text("Wheel: \(wheel.rawValue)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(String(format: "Score %.0f%%", attempt.score * 100))
+                    .font(.caption2)
+                    .foregroundStyle(.blue)
+            }
+            if let confidence = attempt.averageConfidence {
+                Text(String(format: "信頼度(平均): %.0f%%", confidence * 100))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let error = attempt.errorDescription, !error.isEmpty {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
             Text(attempt.transcript)
                 .font(.footnote)
+            if !attempt.keywordHits.isEmpty {
+                let keywords = attempt.keywordHits.map { "\($0.field.displayName)=\($0.keyword)" }.joined(separator: ", ")
+                Text("Keywords: \(keywords)")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
             if !attempt.matched.isEmpty {
                 let pairs = attempt.matched.map { "\($0.key.displayName)=\($0.value)" }.sorted().joined(separator: ", ")
                 Text("抽出: \(pairs)")
@@ -226,21 +462,30 @@ struct MetaVoiceEditorView: View {
         }
     }
 
-    /// Stop → 認識テキストを transcript に追記
-    private func stopRecordingAndAppend() {
+    /// Stop recording gracefully.
+    private func stopRecording() {
         speech.stop()
-        let t = speech.takeFinalText()
-        if !t.isEmpty {
-            if transcript.isEmpty { transcript = t }
-            else { transcript += "\n" + t }
-        }
     }
 
     /// transcript から簡易に各メタ項目を抽出して vm.meta に反映
-    /// transcript から各メタ項目を抽出して vm.meta に反映（区切りなしにも強い版）
     private func applyTranscriptToMeta() {
-        // 1) 正規化（全角→半角、全角スペース→半角、全角コロン→半角）
-        let text = transcript // Variable 'text' was never mutated; consider changing to 'let' constant
+        let parse = parseTranscript(transcript)
+
+        if let v = parse.matched[.track]   { vm.meta.track   = v }
+        if let v = parse.matched[.car]     { vm.meta.car     = v }
+        if let v = parse.matched[.driver]  { vm.meta.driver  = v }
+        if let v = parse.matched[.tyre]    { vm.meta.tyre    = v }
+        if let v = parse.matched[.lap]     { vm.meta.lap     = v }
+        if let v = parse.matched[.time]    { vm.meta.time    = v }
+        if let v = parse.matched[.checker] { vm.meta.checker = v }
+        if let v = parse.matched[.date]    { vm.meta.date    = v }
+
+        lastError = parse.message
+        debugParsed = parse.debugMap
+    }
+
+    private func parseTranscript(_ rawText: String) -> ParseArtifacts {
+        let text = rawText
             .replacingOccurrences(of: "　", with: " ")
             .replacingOccurrences(of: "：", with: ":")
             .replacingOccurrences(of: "＝", with: "=")
@@ -248,10 +493,8 @@ struct MetaVoiceEditorView: View {
             .replacingOccurrences(of: "ー", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // 大文字/小文字の影響がある英字だけ lowercased（日本語はそのままでもOK）
         let lower = text.lowercased()
 
-        // 2) キー語辞書（同義語をまとめて一意キーへ）
         let dict: [(MetaField, [String])] = [
             (.track,  ["track","コース","トラック","サーキット"]),
             (.date,   ["date","日付","日にち"]),
@@ -263,8 +506,7 @@ struct MetaVoiceEditorView: View {
             (.checker,["checker","チェッカー","担当","記録者","計測者"])
         ]
 
-        // 3) すべてのキー語のマッチ位置を集める
-        struct Hit { let field: MetaField; let range: Range<String.Index> }
+        struct Hit { let field: MetaField; let keyword: String; let range: Range<String.Index> }
         var hits: [Hit] = []
 
         for (field, keys) in dict {
@@ -272,7 +514,7 @@ struct MetaVoiceEditorView: View {
                 var start = lower.startIndex
                 while start < lower.endIndex,
                       let r = lower.range(of: k, range: start..<lower.endIndex) {
-                    hits.append(Hit(field: field, range: r))
+                    hits.append(Hit(field: field, keyword: k, range: r))
                     start = r.upperBound
                 }
             }
@@ -280,17 +522,19 @@ struct MetaVoiceEditorView: View {
 
         guard !hits.isEmpty else {
             print("[MetaVoice] no keys found in transcript")
-            lastError = "キーワードが見つかりませんでした。例: \"track 鈴鹿\" \"driver 佐藤\" のように項目名を付けてください。"
-            let attempt = VoiceAttempt(timestamp: Date(), transcript: transcript, matched: [:], missing: MetaField.allCases)
-            attempts = Array((attempts + [attempt]).suffix(20))
-            return
+            let debug = Dictionary(uniqueKeysWithValues: MetaField.allCases.map { ($0.displayName.uppercased(), "") })
+            return ParseArtifacts(
+                matched: [:],
+                missing: MetaField.allCases,
+                keywordHits: [],
+                score: 0,
+                debugMap: debug,
+                message: "キーワードが見つかりませんでした。例: \"track 鈴鹿\" \"driver 佐藤\" のように項目名を付けてください。"
+            )
         }
 
-        // 4) 先頭位置でソート
         hits.sort { $0.range.lowerBound < $1.range.lowerBound }
 
-        // 5) 各キー語の終端から「次のキー語の始端」までを値として切り出し
-        //    「:」「=」「は」「→」などの直後から開始できるようスキップ
         func trimValue(_ s: Substring) -> String {
             let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
                 .trimmingCharacters(in: CharacterSet(charactersIn: ":=：＝-ー→〜〜は、。,."))
@@ -302,7 +546,6 @@ struct MetaVoiceEditorView: View {
 
         for (idx, hit) in hits.enumerated() {
             let valueStart0 = hit.range.upperBound
-            // キーの直後に区切りがあればスキップ
             var valueStart = valueStart0
             while valueStart < lower.endIndex,
                   [":","=","-","→","は"," "].contains(String(lower[valueStart])) {
@@ -312,43 +555,94 @@ struct MetaVoiceEditorView: View {
             let valueEnd = (idx + 1 < hits.count) ? hits[idx + 1].range.lowerBound : lower.endIndex
             guard valueStart < valueEnd else { continue }
 
-            let rawSlice = text[valueStart..<valueEnd] // 元テキストから切る（大小/日本語保持）
+            let rawSlice = text[valueStart..<valueEnd]
             let value = trimValue(rawSlice)
             if !value.isEmpty {
-                // 既に値がある場合は“後勝ち”にする（最後に言ったものを優先）
                 results[hit.field] = value
             }
         }
 
-        // 6) デバッグ出力
         print("[MetaVoice] parse results:", results.map { "\($0.key.rawValue)=\($0.value)" }.joined(separator: " | "))
 
-        // 7) 反映（空でなければ上書き）
-        if let v = results[.track]   { vm.meta.track   = v }
-        if let v = results[.car]     { vm.meta.car     = v }
-        if let v = results[.driver]  { vm.meta.driver  = v }
-        if let v = results[.tyre]    { vm.meta.tyre    = v }
-        if let v = results[.lap]     { vm.meta.lap     = v }
-        if let v = results[.time]    { vm.meta.time    = v }
-        if let v = results[.checker] { vm.meta.checker = v }
-        if let v = results[.date]    { vm.meta.date    = v }
-
         let matched = results
-        let missing = MetaField.allCases.filter { matched[$0] == nil || (matched[$0]?.isEmpty ?? true) }
-        let attempt = VoiceAttempt(timestamp: Date(), transcript: transcript, matched: matched, missing: missing)
-        attempts = Array((attempts + [attempt]).suffix(20))
-        if matched.isEmpty {
-            lastError = "値が抽出できませんでした。項目名の直後に値を続けてください。"
-        } else if !missing.isEmpty {
-            let missingLabel = missing.map(\.displayName).joined(separator: ", ")
-            lastError = "未抽出: \(missingLabel)"
-        } else {
-            lastError = nil
-        }
-
-        debugParsed = Dictionary(uniqueKeysWithValues: MetaField.allCases.map { field in
+        let missing = MetaField.allCases.filter { matched[$0]?.isEmpty ?? true }
+        let keywordHits = hits.map { VoiceAttempt.KeywordHit(field: $0.field, keyword: $0.keyword) }
+        let debug = Dictionary(uniqueKeysWithValues: MetaField.allCases.map { field in
             (field.displayName.uppercased(), matched[field] ?? "")
         })
 
+        let score = Double(matched.count) / Double(MetaField.allCases.count)
+
+        let message: String?
+        if matched.isEmpty {
+            message = "値が抽出できませんでした。項目名の直後に値を続けてください。"
+        } else if !missing.isEmpty {
+            let missingLabel = missing.map(\.displayName).joined(separator: ", ")
+            message = "未抽出: \(missingLabel)"
+        } else {
+            message = nil
+        }
+
+        return ParseArtifacts(
+            matched: matched,
+            missing: missing,
+            keywordHits: keywordHits,
+            score: score,
+            debugMap: debug,
+            message: message
+        )
+    }
+
+    private func appendTranscriptChunk(_ chunk: String) {
+        guard !chunk.isEmpty else { return }
+        if transcript.isEmpty { transcript = chunk }
+        else { transcript += "\n" + chunk }
+    }
+
+    private func recordAttempt(transcript chunk: String, telemetry: SpeechMemoManager.RecognitionTelemetry?, wheel: WheelPos?, errorDescription: String?) {
+        let parse = parseTranscript(chunk)
+        let segments = telemetry?.segments.map { seg in
+            VoiceAttempt.Segment(index: seg.index, text: seg.text, timestamp: seg.timestamp, duration: seg.duration, confidence: seg.confidence)
+        } ?? []
+
+        let attempt = VoiceAttempt(
+            timestamp: Date(),
+            transcript: chunk,
+            matched: parse.matched,
+            missing: parse.missing,
+            keywordHits: parse.keywordHits,
+            score: parse.score,
+            averageConfidence: telemetry?.averageConfidence,
+            wheel: wheel,
+            errorDescription: errorDescription ?? parse.message,
+            segments: segments
+        )
+
+        attempts = Array((attempts + [attempt]).suffix(20))
+        debugParsed = parse.debugMap
+        lastError = errorDescription ?? parse.message
+    }
+
+    private func handleRecognitionEvent(_ event: SpeechMemoEventHub.RecognitionEvent) {
+        let trimmed = event.telemetry.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            _ = speech.takeFinalText()
+            return
+        }
+        appendTranscriptChunk(trimmed)
+        recordAttempt(transcript: trimmed, telemetry: event.telemetry, wheel: event.wheel, errorDescription: nil)
+        _ = speech.takeFinalText()
+    }
+
+    private func handleErrorEvent(_ event: SpeechMemoEventHub.ErrorEvent) {
+        if case .microphoneUnavailable = event.error {
+            microphoneAvailable = false
+        }
+        let partial = event.telemetry?.transcript.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !partial.isEmpty {
+            appendTranscriptChunk(partial)
+        }
+        recordAttempt(transcript: partial, telemetry: event.telemetry, wheel: event.wheel, errorDescription: event.error.errorDescription)
+        _ = speech.takeFinalText()
     }
 }

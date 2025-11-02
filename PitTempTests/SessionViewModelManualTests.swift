@@ -55,6 +55,7 @@ private final class AutosaveStoreSpy: SessionAutosaveHandling {
     func archiveLatest() {}
 }
 
+@MainActor
 private struct StubSettings: SessionSettingsProviding {
     var validatedDurationSec: Int = 10
     var chartWindowSec: Double = 6

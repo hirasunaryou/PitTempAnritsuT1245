@@ -11,6 +11,7 @@
 import Foundation
 import SwiftUI
 
+@MainActor
 protocol SessionSettingsProviding {
     var validatedDurationSec: Int { get }
     var chartWindowSec: Double { get }

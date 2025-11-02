@@ -27,8 +27,10 @@ struct MeasureView: View {
     @State private var manualSuccess: [WheelPos: [Zone: Date]] = [:]
     @State private var manualMemos: [WheelPos: String] = [:]
     @State private var manualMemoSuccess: [WheelPos: Date] = [:]
+    @State private var showNextSessionDialog = false
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
+    private let zoneButtonHeight: CGFloat = 128
     private static let manualTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .medium
@@ -149,6 +151,16 @@ struct MeasureView: View {
         .onReceive(vm.$wheelMemos) { _ in
             if isManualMode { syncManualMemo(for: selectedWheel) }
         }
+        .onReceive(vm.$sessionResetID) { _ in
+            selectedWheel = .FL
+            manualValues.removeAll()
+            manualMemos.removeAll()
+            clearManualFeedback()
+            if isManualMode {
+                syncManualDefaults(for: .FL)
+                syncManualMemo(for: .FL)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
             if let url = note.userInfo?["url"] as? URL {
                 let comps = url.pathComponents.suffix(2).joined(separator: "/")
@@ -176,6 +188,24 @@ struct MeasureView: View {
                 uploadMessage = "Uploaded to: \(hint)"
                 showUploadAlert = true
             }
+        }
+        .confirmationDialog(
+            "次の測定の準備 / Prepare next measurement",
+            isPresented: $showNextSessionDialog,
+            titleVisibility: .visible
+        ) {
+            Button("結果のみクリア / Clear results") {
+                handleNextSessionChoice(.keepAllMeta)
+            }
+            Button("車両Noのみ保持 / Keep car number") {
+                handleNextSessionChoice(.keepCarIdentity)
+            }
+            Button("すべて初期化 / Reset everything", role: .destructive) {
+                handleNextSessionChoice(.resetEverything)
+            }
+            Button("キャンセル / Cancel", role: .cancel) { }
+        } message: {
+            Text("次の車両に移る際のリセット方法を選択してください。\nChoose how to reset before the next vehicle arrives.")
         }
     }
 
@@ -444,19 +474,34 @@ struct MeasureView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    ForEach(zones, id: \.self) { zone in
-                        zoneButton(wheel, zone)
-                    }
-                }
+            GeometryReader { proxy in
+                let spacing: CGFloat = 12
+                let totalSpacing = spacing * CGFloat(max(zones.count - 1, 0))
+                let availableWidth = proxy.size.width - totalSpacing
+                let minWidth: CGFloat = 124
+                let idealWidth = zones.isEmpty ? 0 : availableWidth / CGFloat(zones.count)
 
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                    ForEach(zones, id: \.self) { zone in
-                        zoneButton(wheel, zone)
+                if idealWidth >= minWidth {
+                    HStack(spacing: spacing) {
+                        ForEach(zones, id: \.self) { zone in
+                            zoneButton(wheel, zone)
+                        }
                     }
+                    .frame(width: proxy.size.width, alignment: .leading)
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: spacing) {
+                            ForEach(zones, id: \.self) { zone in
+                                zoneButton(wheel, zone)
+                                    .frame(width: minWidth)
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                    }
+                    .frame(width: proxy.size.width)
                 }
             }
+            .frame(height: zoneButtonHeight + 16)
         }
     }
 
@@ -827,9 +872,9 @@ struct MeasureView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.vertical, 20)
+            .padding(.vertical, 18)
             .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+            .frame(maxWidth: .infinity, minHeight: zoneButtonHeight, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(isRunning ? Color.accentColor.opacity(0.25) : Color(.secondarySystemBackground))
@@ -866,6 +911,21 @@ struct MeasureView: View {
         return "--"
     }
 
+    private func handleNextSessionChoice(_ option: SessionViewModel.NextSessionCarryOver) {
+        let (prevWheel, prevText) = speech.stopAndTakeText()
+        if let pw = prevWheel, !prevText.isEmpty {
+            let vmRef = vm
+            Task { @MainActor in vmRef.appendMemo(prevText, to: pw) }
+        }
+
+        vm.prepareForNextSession(carryOver: option)
+        isManualMode = false
+        manualValues.removeAll()
+        manualMemos.removeAll()
+        clearManualFeedback()
+        Haptics.impactMedium()
+    }
+
     // 置き換え: 下部バーは「Stop」「Next」「Export CSV」のみ
     // MeasureView.swift の bottomBar 内
     private var bottomBar: some View {
@@ -877,6 +937,13 @@ struct MeasureView: View {
 
             Button("Next") { vm.receiveSpecial("<RET>") }
                 .buttonStyle(.bordered)
+
+            Button {
+                showNextSessionDialog = true
+            } label: {
+                Label("Next vehicle", systemImage: "arrowshape.turn.up.right.circle")
+            }
+            .buttonStyle(.bordered)
 
             Button("Export CSV") {
                 // 1) CSVを両フォーマットで生成（デバイス名を付与）

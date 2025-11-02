@@ -200,134 +200,144 @@ struct MetaVoiceEditorView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
 
-                // 録音状態表示 + 操作
-                HStack(spacing: 12) {
-                    Group {
-                        if speech.isRecording {
-                            Label("録音中…", systemImage: "record.circle.fill")
-                                .foregroundStyle(.red)
-                        } else {
-                            Label("待機中", systemImage: "mic")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.headline)
-
-                    Spacer()
-
-                    if speech.isRecording {
-                        Button {
-                            stopRecording()
-                        } label: {
-                            Label("Stop", systemImage: "stop.circle.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                    } else {
-                        Button {
-                            // SpeechMemoManager.start(for:) が WheelPos 必須のため
-                            // メタ入力ではダミーで .FL を渡して録音のみ利用する
-                            do {
-                                lastError = nil
-                                try speech.start(for: .FL)
-                            } catch let error as SpeechMemoManager.RecordingError {
-                                lastError = error.errorDescription
-                                if case .microphoneUnavailable = error {
-                                    microphoneAvailable = false
-                                }
-                            } catch {
-                                lastError = error.localizedDescription
+                    // 録音状態表示 + 操作
+                    HStack(spacing: 12) {
+                        Group {
+                            if speech.isRecording {
+                                Label("録音中…", systemImage: "record.circle.fill")
+                                    .foregroundStyle(.red)
+                            } else {
+                                Label("待機中", systemImage: "mic")
+                                    .foregroundStyle(.secondary)
                             }
+                        }
+                        .font(.headline)
+
+                        Spacer()
+
+                        if speech.isRecording {
+                            Button {
+                                stopRecording()
+                            } label: {
+                                Label("Stop", systemImage: "stop.circle.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                        } else {
+                            Button {
+                                // SpeechMemoManager.start(for:) が WheelPos 必須のため
+                                // メタ入力ではダミーで .FL を渡して録音のみ利用する
+                                do {
+                                    lastError = nil
+                                    try speech.start(for: .FL)
+                                } catch let error as SpeechMemoManager.RecordingError {
+                                    lastError = error.errorDescription
+                                    if case .microphoneUnavailable = error {
+                                        microphoneAvailable = false
+                                    }
+                                } catch {
+                                    lastError = error.localizedDescription
+                                }
+                            } label: {
+                                Label("Start", systemImage: "mic.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!speech.isAuthorized)
+                        }
+                    }
+                    .controlSize(.large)
+
+                    if !microphoneAvailable {
+                        Text("シミュレータやマイク非搭載環境では録音を開始できません。画面下部のCSVエクスポートから解析ログを共有できます。")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    } else if !speech.isAuthorized {
+                        Text("マイクと音声認識の許可が必要です。設定アプリで PitTemp のマイク・音声認識を有効にしてください。")
+                            .font(.footnote)
+                            .foregroundStyle(.orange)
+                    }
+
+                    // 音声→テキスト結果
+                    TextEditor(text: $transcript)
+                        .font(.body)
+                        .frame(minHeight: 200)
+                        .padding(10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(.secondary.opacity(0.25), lineWidth: 1)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(.secondarySystemBackground))
+                                )
+                        )
+
+                    HStack {
+                        Button {
+                            transcript.removeAll()
                         } label: {
-                            Label("Start", systemImage: "mic.fill")
+                            Label("Clear", systemImage: "trash")
+                        }
+                        .buttonStyle(.bordered)
+
+                        Spacer()
+
+                        Button {
+                            applyTranscriptToMeta()
+                        } label: {
+                            Label("テキストから反映", systemImage: "text.badge.plus")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!speech.isAuthorized)
                     }
-                }
 
-                if !microphoneAvailable {
-                    Text("シミュレータやマイク非搭載環境では録音を開始できません。画面下部のCSVエクスポートから解析ログを共有できます。")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                        .padding(.bottom, 4)
-                } else if !speech.isAuthorized {
-                    Text("マイクと音声認識の許可が必要です。設定アプリで PitTemp のマイク・音声認識を有効にしてください。")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                        .padding(.bottom, 4)
-                }
+                    keywordGuide
 
-                // 音声→テキスト結果
-                TextEditor(text: $transcript)
-                    .font(.body)
-                    .frame(minHeight: 180)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(.secondary.opacity(0.25), lineWidth: 1)
-                    )
-                    .padding(.top, 4)
-
-                HStack {
-                    Button {
-                        transcript.removeAll()
-                    } label: {
-                        Label("Clear", systemImage: "trash")
+                    if !attempts.isEmpty {
+                        attemptLog
                     }
-                    .buttonStyle(.bordered)
 
-                    Spacer()
+                    // 現在のメタ（読み取り専用プレビュー）
+                    VStack(alignment: .leading, spacing: 6) {
+                        metaRow("TRACK", vm.meta.track)
+                        metaRow("DATE", vm.meta.date)
+                        metaRow("TIME", vm.meta.time)
+                        metaRow("CAR", vm.meta.car)
+                        metaRow("DRIVER", vm.meta.driver)
+                        metaRow("TYRE", vm.meta.tyre)
+                        metaRow("LAP", vm.meta.lap)
+                        metaRow("CHECKER", vm.meta.checker)
+                    }
+                    .padding(12)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
 
-                    Button {
-                        applyTranscriptToMeta()
-                    } label: {
-                        Label("テキストから反映", systemImage: "text.badge.plus")
-                }
-                .buttonStyle(.borderedProminent)
-            }
+                    if let e = lastError {
+                        Text("Error: \(e)")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
 
-            keywordGuide
-
-            if !attempts.isEmpty {
-                attemptLog
-            }
-
-            // 現在のメタ（読み取り専用プレビュー）
-            VStack(alignment: .leading, spacing: 6) {
-                metaRow("TRACK", vm.meta.track)
-                    metaRow("DATE", vm.meta.date)
-                    metaRow("TIME", vm.meta.time)
-                    metaRow("CAR", vm.meta.car)
-                    metaRow("DRIVER", vm.meta.driver)
-                    metaRow("TYRE", vm.meta.tyre)
-                    metaRow("LAP", vm.meta.lap)
-                    metaRow("CHECKER", vm.meta.checker)
-                }
-                .padding(12)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
-
-                if let e = lastError {
-                    Text("Error: \(e)")
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-                
-                if !debugParsed.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Parsed (debug)").font(.caption).foregroundStyle(.secondary)
-                        ForEach(debugParsed.keys.sorted(), id: \.self) { k in
-                            HStack { Text(k).frame(width: 80, alignment: .leading).foregroundStyle(.secondary); Text(debugParsed[k] ?? "-") }
+                    if !debugParsed.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Parsed (debug)").font(.caption).foregroundStyle(.secondary)
+                            ForEach(debugParsed.keys.sorted(), id: \.self) { k in
+                                HStack { Text(k).frame(width: 80, alignment: .leading).foregroundStyle(.secondary); Text(debugParsed[k] ?? "-") }
+                            }
                         }
+                        .padding(10)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
                     }
-                    .padding(10)
-                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                }
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 16)
             }
-            .padding()
+            .scrollIndicators(.hidden)
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("Meta (Voice)")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }

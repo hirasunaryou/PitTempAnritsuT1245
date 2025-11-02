@@ -79,10 +79,35 @@ final class SpeechMemoManager: NSObject, ObservableObject {
     private var latestSegments: [RecognitionTelemetry.Segment] = []
     private var hasNotifiedCompletion = false
     private var tapInstalled = false
+    private var didRequestRecordPermission = false
+
+    private var hasSpeechAuthorization = false {
+        didSet { updateAuthorizationState() }
+    }
+    private var hasMicrophonePermission = false {
+        didSet { updateAuthorizationState() }
+    }
 
     func requestAuth() {
         SFSpeechRecognizer.requestAuthorization { st in
-            DispatchQueue.main.async { self.isAuthorized = (st == .authorized) }
+            DispatchQueue.main.async { self.hasSpeechAuthorization = (st == .authorized) }
+        }
+
+        let session = AVAudioSession.sharedInstance()
+        switch session.recordPermission {
+        case .granted:
+            DispatchQueue.main.async { self.hasMicrophonePermission = true }
+        case .denied:
+            DispatchQueue.main.async { self.hasMicrophonePermission = false }
+        case .undetermined:
+            if !didRequestRecordPermission {
+                didRequestRecordPermission = true
+                session.requestRecordPermission { granted in
+                    DispatchQueue.main.async { self.hasMicrophonePermission = granted }
+                }
+            }
+        @unknown default:
+            DispatchQueue.main.async { self.hasMicrophonePermission = false }
         }
     }
 
@@ -106,8 +131,16 @@ final class SpeechMemoManager: NSObject, ObservableObject {
     }
 
     func start(for wheel: WheelPos) throws {
-        guard isAuthorized else { throw RecordingError.permissionDenied }
-        guard recognizer.isAvailable else { throw RecordingError.recognizerUnavailable }
+        guard isAuthorized else {
+            let error = RecordingError.permissionDenied
+            notifyFailure(error, telemetry: nil, wheel: wheel)
+            throw error
+        }
+        guard recognizer.isAvailable else {
+            let error = RecordingError.recognizerUnavailable
+            notifyFailure(error, telemetry: nil, wheel: wheel)
+            throw error
+        }
 
         do {
             try resetAudioSessionState()
@@ -242,6 +275,13 @@ final class SpeechMemoManager: NSObject, ObservableObject {
     private func notifyFailure(_ error: RecordingError, telemetry: RecognitionTelemetry?, wheel: WheelPos?) {
         DispatchQueue.main.async {
             self.delegate?.speechMemoManager(self, didFailWith: error, telemetry: telemetry, wheel: wheel)
+        }
+    }
+
+    private func updateAuthorizationState() {
+        let combined = hasSpeechAuthorization && hasMicrophonePermission
+        if combined != isAuthorized {
+            isAuthorized = combined
         }
     }
 }

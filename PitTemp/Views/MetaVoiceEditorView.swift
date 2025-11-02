@@ -253,6 +253,11 @@ struct MetaVoiceEditorView: View {
                         .font(.footnote)
                         .foregroundStyle(.orange)
                         .padding(.bottom, 4)
+                } else if !speech.isAuthorized {
+                    Text("マイクと音声認識の許可が必要です。設定アプリで PitTemp のマイク・音声認識を有効にしてください。")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .padding(.bottom, 4)
                 }
 
                 // 音声→テキスト結果

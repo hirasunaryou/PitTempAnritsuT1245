@@ -150,7 +150,7 @@ final class SpeechMemoManager: NSObject, ObservableObject {
                         text: seg.substring,
                         timestamp: seg.timestamp,
                         duration: seg.duration,
-                        confidence: seg.confidence
+                        confidence: Double(seg.confidence)
                     )
                 }
                 if result.isFinal {

@@ -191,6 +191,7 @@ AnritsuM (BLE)
 * スキャン一覧でRSSI/last seenが更新される
 * Auto-connect ONで preferred IDs が優先される
 * Metaの音声入力（項目別/まとめ取り→反映）が動く
+* Manual Mode の手動入力値が Autosave と CSV の両方に反映される
 
 ---
 

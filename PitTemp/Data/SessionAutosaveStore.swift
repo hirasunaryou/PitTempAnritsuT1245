@@ -8,6 +8,13 @@
 
 import Foundation
 
+protocol SessionAutosaveHandling {
+    func save(_ snapshot: SessionSnapshot)
+    func load() -> SessionSnapshot?
+    func clear()
+    func archiveLatest()
+}
+
 struct SessionSnapshot: Codable {
     var meta: MeasureMeta
     var results: [MeasureResult]
@@ -60,7 +67,7 @@ struct SessionSnapshot: Codable {
     }
 }
 
-final class SessionAutosaveStore {
+final class SessionAutosaveStore: SessionAutosaveHandling {
     private let fileManager: FileManager
     private let autosaveURL: URL
     private let archiveDirectory: URL

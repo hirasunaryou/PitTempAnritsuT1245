@@ -11,6 +11,17 @@
 import Foundation
 import SwiftUI
 
+protocol SessionSettingsProviding {
+    var validatedDurationSec: Int { get }
+    var chartWindowSec: Double { get }
+    var advanceWithGreater: Bool { get }
+    var advanceWithRightArrow: Bool { get }
+    var advanceWithReturn: Bool { get }
+    var minAdvanceSec: Double { get }
+    var zoneOrderSequence: [Zone] { get }
+    var autofillDateTime: Bool { get }
+}
+
 @MainActor
 final class SettingsStore: ObservableObject {
 
@@ -71,4 +82,8 @@ final class SettingsStore: ObservableObject {
         set { metaInputModeRaw = newValue.rawValue }
     }
     
+}
+
+extension SettingsStore: SessionSettingsProviding {
+    var zoneOrderSequence: [Zone] { zoneOrderEnum.sequence }
 }

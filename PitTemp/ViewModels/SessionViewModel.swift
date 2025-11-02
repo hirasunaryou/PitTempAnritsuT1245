@@ -18,14 +18,17 @@ final class SessionViewModel: ObservableObject {
     private let settings: SessionSettingsProviding
     private let exporter: CSVExporting
     private let autosaveStore: SessionAutosaveHandling
+    private let uiLog: UILogPublishing?
     private var autosaveWorkItem: DispatchWorkItem?
     private var isRestoringAutosave = false
 
     init(exporter: CSVExporting = CSVExporter(),
          settings: SessionSettingsProviding? = nil,
-         autosaveStore: SessionAutosaveHandling = SessionAutosaveStore()) {
+         autosaveStore: SessionAutosaveHandling = SessionAutosaveStore(),
+         uiLog: UILogPublishing? = nil) {
         self.exporter = exporter
         self.autosaveStore = autosaveStore
+        self.uiLog = uiLog
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
         if let settings {
             self.settings = settings
@@ -63,6 +66,7 @@ final class SessionViewModel: ObservableObject {
     @Published var wheelMemos: [WheelPos: String] = [:] {
         didSet { scheduleAutosave(reason: .memoUpdated) }
     }
+    @Published private(set) var autosaveStatusEntry: UILogEntry? = nil
 
     // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
     private var durationSec: Int { settings.validatedDurationSec }
@@ -290,7 +294,25 @@ final class SessionViewModel: ObservableObject {
 
     @discardableResult
     func restoreAutosaveIfAvailable() -> Bool {
-        guard let snapshot = autosaveStore.load() else { return false }
+        if !autosaveStore.hasSnapshot() {
+            let entry = UILogEntry(
+                message: "No autosave snapshot found to restore.",
+                level: .info,
+                category: .autosave
+            )
+            publishAutosaveStatus(entry)
+            return false
+        }
+
+        guard let snapshot = autosaveStore.load() else {
+            let entry = UILogEntry(
+                message: "Autosave snapshot exists but failed to load.",
+                level: .error,
+                category: .autosave
+            )
+            publishAutosaveStatus(entry)
+            return false
+        }
         isRestoringAutosave = true
         meta = snapshot.meta
         results = snapshot.results
@@ -302,7 +324,19 @@ final class SessionViewModel: ObservableObject {
         elapsed = 0
         peakC = .nan
         isRestoringAutosave = false
+        let created = Self.autosaveStatusFormatter.string(from: snapshot.createdAt)
+        let entry = UILogEntry(
+            message: "Restored autosave created at \(created).",
+            level: .success,
+            category: .autosave
+        )
+        publishAutosaveStatus(entry)
         return true
+    }
+
+    func persistAutosaveNow() {
+        autosaveWorkItem?.cancel()
+        persistAutosave()
     }
 
     private func scheduleAutosave(reason: AutosaveReason) {
@@ -340,6 +374,12 @@ final class SessionViewModel: ObservableObject {
     func clearAutosave() {
         autosaveWorkItem?.cancel()
         autosaveStore.clear()
+        let entry = UILogEntry(
+            message: "Cleared autosave snapshot manually.",
+            level: .info,
+            category: .autosave
+        )
+        publishAutosaveStatus(entry)
     }
 
     // MARK: - 小物
@@ -353,4 +393,15 @@ final class SessionViewModel: ObservableObject {
         f.formatOptions = [.withInternetDateTime]
         return f
     }()
+    private static let autosaveStatusFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .medium
+        return f
+    }()
+
+    private func publishAutosaveStatus(_ entry: UILogEntry) {
+        autosaveStatusEntry = entry
+        uiLog?.publish(entry)
+    }
 }

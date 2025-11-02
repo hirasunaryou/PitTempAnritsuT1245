@@ -41,6 +41,9 @@ struct MeasureView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
+                    if let entry = vm.autosaveStatusEntry {
+                        autosaveBanner(entry)
+                    }
                     connectBar
                     HStack(spacing: 12) {
                         Text(String(format: "Hz: %.1f", ble.notifyHz))
@@ -177,6 +180,32 @@ struct MeasureView: View {
     }
 
     // --- 以降はUI部品（元のまま） ---
+    private func autosaveBanner(_ entry: UILogEntry) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: entry.level.iconName)
+                .foregroundStyle(entry.level.tintColor)
+                .font(.title3)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.message)
+                    .font(.footnote)
+                    .foregroundStyle(entry.level.tintColor)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(entry.createdAt, style: .time)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(entry.level.tintColor.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(entry.level.tintColor.opacity(0.25))
+        )
+    }
     private var manualModeToggle: some View {
         Toggle(isOn: $isManualMode) {
             Label("Manual Mode", systemImage: "hand.tap.fill")

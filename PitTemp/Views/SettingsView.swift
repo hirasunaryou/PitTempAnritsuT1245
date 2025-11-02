@@ -15,6 +15,7 @@ struct SettingsView: View {
 
     @State private var showPicker = false
     @EnvironmentObject var registry: DeviceRegistry
+    @EnvironmentObject var uiLog: UILogStore
 
     
     var body: some View {
@@ -123,6 +124,47 @@ struct SettingsView: View {
                         Button("Enable") { LocationLogger.shared.request() }
                     }
                 }
+
+                Section("Autosave") {
+                    Button(role: .destructive) {
+                        vm.clearAutosave()
+                    } label: {
+                        Label("Reset Autosave Snapshot", systemImage: "trash")
+                    }
+
+                    if let entry = vm.autosaveStatusEntry {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Latest status: \(entry.message)")
+                                .font(.footnote)
+                                .foregroundStyle(entry.level.tintColor)
+                            Text(entry.createdAt, style: .time)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+
+                    if recentAutosaveEntries.isEmpty {
+                        Text("No autosave activity logged yet.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(recentAutosaveEntries) { entry in
+                            HStack(spacing: 12) {
+                                Image(systemName: entry.level.iconName)
+                                    .foregroundStyle(entry.level.tintColor)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.message)
+                                        .font(.footnote)
+                                    Text(entry.createdAt, style: .time)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                    }
+                }
             }
             .navigationTitle("Settings")
         }
@@ -138,5 +180,10 @@ struct SettingsView: View {
                 print("Folder pick failed:", error)
             }
         }
+    }
+
+    private var recentAutosaveEntries: [UILogEntry] {
+        let autosaveEntries = uiLog.entries.filter { $0.category == .autosave }
+        return Array(autosaveEntries.suffix(5).reversed())
     }
 }

@@ -194,6 +194,9 @@ AnritsuM (BLE)
 * Auto-connect ONで preferred IDs が優先される
 * Metaの音声入力（項目別/まとめ取り→反映）が動く
 * Manual Mode の手動入力値が Autosave と CSV の両方に反映される
+* Autosave バックアップ:
+  * 計測結果を入力した状態でアプリをバックグラウンド→終了し、再起動時に Measure 画面上部のバナーで復元ステータスが表示されること。
+  * Settings > Autosave セクションの **Reset Autosave Snapshot** ボタンでバックアップを削除し、同セクションのログと Measure のバナーが更新されること。
 
 ---
 

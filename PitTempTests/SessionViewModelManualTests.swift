@@ -50,9 +50,11 @@ private final class AutosaveStoreSpy: SessionAutosaveHandling {
 
     func load() -> SessionSnapshot? { nil }
 
-    func clear() {}
+    func clear() { savedSnapshots.removeAll() }
 
     func archiveLatest() {}
+
+    func hasSnapshot() -> Bool { !savedSnapshots.isEmpty }
 }
 
 @MainActor

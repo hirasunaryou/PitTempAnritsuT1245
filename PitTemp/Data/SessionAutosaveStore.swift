@@ -13,6 +13,7 @@ protocol SessionAutosaveHandling {
     func load() -> SessionSnapshot?
     func clear()
     func archiveLatest()
+    func hasSnapshot() -> Bool
 }
 
 struct SessionSnapshot: Codable {
@@ -74,10 +75,21 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
     private let autosaveCSVURL: URL
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let uiLogger: UILogPublishing?
+    private let dataWriter: (Data, URL) throws -> Void
 
-    init(fileManager: FileManager = .default) {
+    typealias DataWriter = (Data, URL) throws -> Void
+
+    init(fileManager: FileManager = .default,
+         autosaveDirectory: URL? = nil,
+         uiLogger: UILogPublishing? = nil,
+         dataWriter: @escaping DataWriter = { data, url in
+             try data.write(to: url, options: .atomic)
+         }) {
         self.fileManager = fileManager
-        let base = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        self.uiLogger = uiLogger
+        self.dataWriter = dataWriter
+        let base = autosaveDirectory ?? fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let autosaveDir = base.appendingPathComponent("PitTempAutosaves", isDirectory: true)
         self.autosaveURL = autosaveDir.appendingPathComponent("latest.json")
         self.archiveDirectory = autosaveDir.appendingPathComponent("archive", isDirectory: true)
@@ -96,10 +108,15 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
     func save(_ snapshot: SessionSnapshot) {
         do {
             let data = try encoder.encode(snapshot)
-            try data.write(to: autosaveURL, options: .atomic)
-            writeCSV(snapshot)
+            try dataWriter(data, autosaveURL)
+            try writeCSV(snapshot)
         } catch {
             print("[Autosave] save failed:", error)
+            uiLogger?.publish(UILogEntry(
+                message: "Failed to autosave session: \(error.localizedDescription)",
+                level: .error,
+                category: .autosave
+            ))
         }
     }
 
@@ -110,6 +127,11 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
             return try decoder.decode(SessionSnapshot.self, from: data)
         } catch {
             print("[Autosave] load failed:", error)
+            uiLogger?.publish(UILogEntry(
+                message: "Failed to load autosave snapshot: \(error.localizedDescription)",
+                level: .error,
+                category: .autosave
+            ))
             return nil
         }
     }
@@ -123,6 +145,11 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
             }
         } catch {
             print("[Autosave] clear failed:", error)
+            uiLogger?.publish(UILogEntry(
+                message: "Failed to clear autosave snapshot: \(error.localizedDescription)",
+                level: .error,
+                category: .autosave
+            ))
         }
     }
 
@@ -147,10 +174,19 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
             }
         } catch {
             print("[Autosave] archive failed:", error)
+            uiLogger?.publish(UILogEntry(
+                message: "Failed to archive autosave snapshot: \(error.localizedDescription)",
+                level: .error,
+                category: .autosave
+            ))
         }
     }
 
-    private func writeCSV(_ snapshot: SessionSnapshot) {
+    func hasSnapshot() -> Bool {
+        fileManager.fileExists(atPath: autosaveURL.path)
+    }
+
+    private func writeCSV(_ snapshot: SessionSnapshot) throws {
         struct Accumulator { var out = ""; var center = ""; var inner = "" }
         var perWheel: [WheelPos: Accumulator] = [:]
         for result in snapshot.results {
@@ -202,6 +238,12 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
             try csv.write(to: autosaveCSVURL, atomically: true, encoding: .utf8)
         } catch {
             print("[Autosave] write csv failed:", error)
+            uiLogger?.publish(UILogEntry(
+                message: "Failed to write autosave CSV: \(error.localizedDescription)",
+                level: .error,
+                category: .autosave
+            ))
+            throw error
         }
     }
 }

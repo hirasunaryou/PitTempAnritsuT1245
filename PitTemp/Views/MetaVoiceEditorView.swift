@@ -4,7 +4,6 @@
 //
 
 import SwiftUI
-import AVFoundation
 import UniformTypeIdentifiers
 
 private enum MetaField: String, CaseIterable, Identifiable {
@@ -244,7 +243,7 @@ struct MetaVoiceEditorView: View {
                             Label("Start", systemImage: "mic.fill")
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!speech.isAuthorized || !microphoneAvailable)
+                        .disabled(!speech.isAuthorized)
                     }
                 }
 
@@ -353,7 +352,7 @@ struct MetaVoiceEditorView: View {
             .onAppear {
                 speech.delegate = speechEvents
                 speech.requestAuth()
-                microphoneAvailable = AVAudioSession.sharedInstance().isInputAvailable
+                microphoneAvailable = true
             }
             .onDisappear {
                 if speech.isRecording { speech.stop() }

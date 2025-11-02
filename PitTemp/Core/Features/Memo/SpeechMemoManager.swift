@@ -149,12 +149,6 @@ final class SpeechMemoManager: NSObject, ObservableObject {
             throw error
         }
 
-        guard AVAudioSession.sharedInstance().isInputAvailable else {
-            let error = RecordingError.microphoneUnavailable
-            notifyFailure(error, telemetry: nil, wheel: wheel)
-            throw error
-        }
-
         currentWheel = wheel
         transcript = ""
         latestSegments = []
@@ -168,6 +162,19 @@ final class SpeechMemoManager: NSObject, ObservableObject {
             let wrapped = RecordingError.audioSession(error: error)
             notifyFailure(wrapped, telemetry: nil, wheel: currentWheel)
             throw wrapped
+        }
+
+        guard session.isInputAvailable else {
+            do {
+                try session.setActive(false, options: .notifyOthersOnDeactivation)
+            } catch {
+                let wrapped = RecordingError.audioSession(error: error)
+                notifyFailure(wrapped, telemetry: nil, wheel: currentWheel)
+                throw wrapped
+            }
+            let error = RecordingError.microphoneUnavailable
+            notifyFailure(error, telemetry: nil, wheel: currentWheel)
+            throw error
         }
 
         let input = audioEngine.inputNode

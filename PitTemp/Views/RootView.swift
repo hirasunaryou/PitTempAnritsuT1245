@@ -25,7 +25,16 @@ struct RootView: View {
 }
 
 #Preview {
-    RootView()
+    let settings = SettingsStore()
+    let log = UILogStore()
+    let vm = SessionViewModel(settings: settings,
+                              autosaveStore: SessionAutosaveStore(uiLogger: log),
+                              uiLog: log)
+    return RootView()
         .environmentObject(FolderBookmark())
-        .environmentObject(SessionViewModel())
+        .environmentObject(vm)
+        .environmentObject(settings)
+        .environmentObject(BluetoothService())
+        .environmentObject(DeviceRegistry())
+        .environmentObject(log)
 }

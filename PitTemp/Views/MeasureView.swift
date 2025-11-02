@@ -237,17 +237,63 @@ struct MeasureView: View {
 
     private var wheelSelector: some View {
         let wheels: [WheelPos] = [.FL, .FR, .RL, .RR]
-        let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Tyre position").font(.caption).foregroundStyle(.secondary)
-            LazyVGrid(columns: columns, spacing: 12) {
-                ForEach(wheels, id: \.self) { wheelButton($0) }
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("Tyre position")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 0) {
+                wheelSegments(wheels)
+
+                Divider()
+
+                wheelDetailCard(for: selectedWheel)
             }
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(Color(.secondarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.18))
+            )
+            .accessibilityElement(children: .contain)
         }
     }
 
-    private func wheelButton(_ wheel: WheelPos) -> some View {
+    private func wheelSegments(_ wheels: [WheelPos]) -> some View {
+        HStack(spacing: 0) {
+            ForEach(Array(wheels.enumerated()), id: \.element) { index, wheel in
+                wheelSegmentButton(for: wheel)
+                    .overlay(alignment: .trailing) {
+                        if index < wheels.count - 1 {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.12))
+                                .frame(width: 1)
+                                .padding(.vertical, 10)
+                                .accessibilityHidden(true)
+                        }
+                    }
+            }
+        }
+        .padding(4)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.systemBackground).opacity(0.85))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.secondary.opacity(0.15))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func wheelSegmentButton(for wheel: WheelPos) -> some View {
         let isSelected = selectedWheel == wheel
+        let headlineFont = Font.system(.headline, design: .rounded)
+        let isActive = vm.currentWheel == wheel
+        let temperature = primaryTemperature(for: wheel)
+
         return Button {
             let (prevWheel, prevText) = speech.stopAndTakeText()
             if let pw = prevWheel, !prevText.isEmpty {
@@ -257,43 +303,75 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            wheelCard(for: wheel, isSelected: isSelected)
+            VStack(spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(shortTitle(wheel))
+                        .font(headlineFont.weight(.semibold))
+                        .minimumScaleFactor(0.7)
+                        .accessibilityLabel(title(wheel))
+
+                    if isActive {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.caption)
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityHidden(true)
+                    }
+                }
+
+                Text(temperature)
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.6)
+                    .foregroundStyle(.primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(title(wheel))
+        .accessibilityHint("Double tap to select \(title(wheel))")
     }
 
     @ViewBuilder
-    private func wheelCard(for wheel: WheelPos, isSelected: Bool) -> some View {
+    private func wheelDetailCard(for wheel: WheelPos) -> some View {
         let zones = zoneOrder(for: wheel)
 
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             wheelCardHeader(for: wheel)
             wheelCardSummary(for: wheel, zones: zones)
             wheelCardMemo(for: wheel)
         }
-        .padding(16)
-        .frame(maxWidth: .infinity, minHeight: 110)
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(isSelected ? Color.accentColor.opacity(0.20) : Color(.secondarySystemBackground))
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.systemBackground).opacity(0.65))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3),
-                        lineWidth: isSelected ? 2 : 1)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12))
         )
     }
 
     @ViewBuilder
     private func wheelCardHeader(for wheel: WheelPos) -> some View {
-        HStack {
-            Text(title(wheel)).font(.headline)
-            Spacer()
+        HStack(alignment: .firstTextBaseline) {
+            Text(title(wheel))
+                .font(.title3.weight(.semibold))
+                .minimumScaleFactor(0.7)
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 8)
+
             if vm.currentWheel == wheel {
-                Label("active", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.caption2)
-                    .labelStyle(.iconOnly)
+                Label("Capturing", systemImage: "dot.radiowaves.left.and.right")
+                    .font(.caption.weight(.semibold))
+                    .labelStyle(.titleAndIcon)
                     .foregroundStyle(Color.accentColor)
             }
         }
@@ -301,9 +379,17 @@ struct MeasureView: View {
 
     @ViewBuilder
     private func wheelCardSummary(for wheel: WheelPos, zones: [Zone]) -> some View {
-        HStack(spacing: 8) {
-            ForEach(zones, id: \.self) { zone in
-                summaryChip(for: zone, wheel: wheel)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                ForEach(zones, id: \.self) { zone in
+                    summaryChip(for: zone, wheel: wheel)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(zones, id: \.self) { zone in
+                    summaryChip(for: zone, wheel: wheel)
+                }
             }
         }
     }
@@ -312,10 +398,31 @@ struct MeasureView: View {
     private func wheelCardMemo(for wheel: WheelPos) -> some View {
         if let memo = vm.wheelMemos[wheel], !memo.isEmpty {
             Text(memo)
-                .font(.footnote)
+                .font(.callout)
                 .foregroundStyle(.secondary)
-                .lineLimit(2)
+                .lineLimit(3)
+                .textSelection(.enabled)
         }
+    }
+
+    private func shortTitle(_ wheel: WheelPos) -> String {
+        switch wheel {
+        case .FL: return "Front Left"
+        case .FR: return "Front Right"
+        case .RL: return "Rear Left"
+        case .RR: return "Rear Right"
+        }
+    }
+
+    private func primaryTemperature(for wheel: WheelPos) -> String {
+        for zone in zoneOrder(for: wheel) {
+            let value = displayValue(w: wheel, z: zone)
+            if value != "--" { return value }
+        }
+        if vm.currentWheel == wheel {
+            return vm.latestValueText.isEmpty ? "--" : vm.latestValueText
+        }
+        return "--"
     }
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
@@ -330,10 +437,25 @@ struct MeasureView: View {
     }
 
     private func zoneSelector(for wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("\(title(wheel)) zones").font(.caption).foregroundStyle(.secondary)
-            ForEach(zoneOrder(for: wheel), id: \.self) { zone in
-                zoneButton(wheel, zone)
+        let zones = zoneOrder(for: wheel)
+
+        return VStack(alignment: .leading, spacing: 12) {
+            Text("\(title(wheel)) zones")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    ForEach(zones, id: \.self) { zone in
+                        zoneButton(wheel, zone)
+                    }
+                }
+
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    ForEach(zones, id: \.self) { zone in
+                        zoneButton(wheel, zone)
+                    }
+                }
             }
         }
     }
@@ -656,16 +778,16 @@ struct MeasureView: View {
         let value = displayValue(w: wheel, z: zone)
         return HStack(spacing: 6) {
             Text(zoneDisplayName(zone))
-                .font(.caption2)
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.callout)
+                .font(.body.monospacedDigit())
                 .monospacedDigit()
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(
-            Capsule().fill(Color(.systemBackground).opacity(0.7))
+            Capsule().fill(Color.accentColor.opacity(0.12))
         )
     }
 
@@ -679,42 +801,48 @@ struct MeasureView: View {
             vm.tapCell(wheel: wheel, zone: zone)
             focusTick &+= 1
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline) {
                     Text(zoneDisplayName(zone))
-                        .font(.headline)
-                    Spacer()
+                        .font(.title3.weight(.bold))
+                        .textCase(.uppercase)
+                    Spacer(minLength: 8)
                     Text(valueText)
-                        .font(.system(size: 36, weight: .semibold, design: .rounded))
+                        .font(.system(size: 34, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .minimumScaleFactor(0.5)
+                        .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
                 }
+
                 if isRunning {
                     ProgressView(value: progress)
                         .progressViewStyle(.linear)
+                        .tint(Color.accentColor)
                     Text(String(format: "Remaining %.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 } else {
                     Text(valueText == "--" ? "Tap to capture" : "Last captured")
-                        .font(.caption2)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 20)
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 18)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(isRunning ? Color.accentColor.opacity(0.25) : Color(.secondarySystemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18)
-                    .stroke(isRunning ? Color.accentColor : Color.secondary.opacity(0.3),
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isRunning ? Color.accentColor : Color.secondary.opacity(0.25),
                             lineWidth: isRunning ? 2 : 1)
             )
         }
         .buttonStyle(.plain)
         .accessibilityLabel("\(title(wheel)) \(zoneDisplayName(zone)) button")
+        .accessibilityHint(isRunning ? "Capturing" : "Double tap to start capture")
     }
 
     private func zoneDisplayName(_ zone: Zone) -> String {
@@ -855,6 +983,30 @@ struct MeasureView: View {
 //        }
 //    }
 
-    
-    
+
+
+}
+
+#Preview("MeasureView – Light") {
+    let fixtures = MeasureViewPreviewFixtures()
+    return MeasureView()
+        .environmentObject(fixtures.viewModel)
+        .environmentObject(fixtures.folderBookmark)
+        .environmentObject(fixtures.settings)
+        .environmentObject(fixtures.bluetooth)
+        .environmentObject(fixtures.registry)
+        .environmentObject(fixtures.logStore)
+}
+
+#Preview("MeasureView – Accessibility", traits: .sizeThatFitsLayout) {
+    let fixtures = MeasureViewPreviewFixtures()
+    return MeasureView()
+        .environmentObject(fixtures.viewModel)
+        .environmentObject(fixtures.folderBookmark)
+        .environmentObject(fixtures.settings)
+        .environmentObject(fixtures.bluetooth)
+        .environmentObject(fixtures.registry)
+        .environmentObject(fixtures.logStore)
+        .environment(\.dynamicTypeSize, .accessibility3)
+        .preferredColorScheme(.dark)
 }

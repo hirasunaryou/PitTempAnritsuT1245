@@ -5,6 +5,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import Foundation
 
 private enum MetaField: String, CaseIterable, Identifiable {
     case track, date, time, car, driver, tyre, lap, checker
@@ -198,6 +199,7 @@ struct MetaVoiceEditorView: View {
     @State private var debugParsed: [String:String] = [:]
     @State private var attempts: [VoiceAttempt] = []
     @State private var microphoneAvailable = true
+    @FocusState private var focusedField: MetaField?
 
     var body: some View {
         NavigationStack {
@@ -311,6 +313,8 @@ struct MetaVoiceEditorView: View {
                     }
                     .padding(12)
                     .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+
+                    manualEditSection
 
                     if let e = lastError {
                         Text("Error: \(e)")
@@ -487,6 +491,47 @@ struct MetaVoiceEditorView: View {
         }
     }
 
+    private func binding(for field: MetaField) -> Binding<String> {
+        switch field {
+        case .track: return $vm.meta.track
+        case .date: return $vm.meta.date
+        case .time: return $vm.meta.time
+        case .car: return $vm.meta.car
+        case .driver: return $vm.meta.driver
+        case .tyre: return $vm.meta.tyre
+        case .lap: return $vm.meta.lap
+        case .checker: return $vm.meta.checker
+        }
+    }
+
+    private var manualEditSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("手動で微調整")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("検出結果は下のフィールドから直接編集できます。音声入力後の誤認識を素早く修正してください。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(MetaField.allCases) { field in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(field.displayName.uppercased())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField(field.displayName, text: binding(for: field))
+                            .textFieldStyle(.roundedBorder)
+                            .focused($focusedField, equals: field)
+                            .submitLabel(.done)
+                            .onSubmit { focusedField = nil }
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+    }
+
     /// Stop recording gracefully.
     private func stopRecording() {
         speech.stop()
@@ -521,7 +566,6 @@ struct MetaVoiceEditorView: View {
             .replacingOccurrences(of: "：", with: ":")
             .replacingOccurrences(of: "＝", with: "=")
             .replacingOccurrences(of: "‐", with: "-")
-            .replacingOccurrences(of: "ー", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         let lower = text.lowercased()
@@ -581,8 +625,9 @@ struct MetaVoiceEditorView: View {
 
             let rawSlice = text[valueStart..<valueEnd]
             let value = trimValue(rawSlice)
-            if !value.isEmpty {
-                results[hit.field] = value
+            let refined = hit.field.refinedValue(from: value)
+            if !refined.isEmpty {
+                results[hit.field] = refined
             }
         }
 
@@ -671,6 +716,56 @@ struct MetaVoiceEditorView: View {
     }
 }
 
+private enum MetaValueRefiner {
+    private static let colonTimeRegex = try! NSRegularExpression(pattern: #"^\s*\d{1,3}\s*[:：]\s*\d{1,2}(?:[.,]\d+)?"#, options: [.caseInsensitive])
+    private static let minuteSecondRegex = try! NSRegularExpression(pattern: #"^\s*\d+\s*分\s*\d*(?:\.\d+)?\s*秒?"#, options: [])
+    private static let secondsRegex = try! NSRegularExpression(pattern: #"^\s*\d+(?:\.\d+)?\s*秒"#, options: [])
+    private static let englishSecondsRegex = try! NSRegularExpression(pattern: #"^\s*\d+(?:\.\d+)?\s*(?:s|sec|secs|second|seconds)"#, options: [.caseInsensitive])
+    private static let plainNumberRegex = try! NSRegularExpression(pattern: #"^\s*\d+(?:[.,]\d+)?"#, options: [])
+    private static let leadingDigitsRegex = try! NSRegularExpression(pattern: #"^\s*\d+"#, options: [])
+
+    static func refine(_ raw: String, for field: MetaField) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let firstLine = trimmed.split(whereSeparator: { $0.isNewline }).first.map(String.init) ?? trimmed
+
+        switch field {
+        case .time:
+            if let candidate = timeValue(from: firstLine) {
+                return candidate
+            }
+            return firstLine
+        case .lap:
+            if let digits = match(leadingDigitsRegex, in: firstLine) {
+                return digits
+            }
+            return firstLine
+        default:
+            return firstLine
+        }
+    }
+
+    private static func timeValue(from raw: String) -> String? {
+        let normalized = raw.replacingOccurrences(of: "，", with: ",")
+        for regex in [colonTimeRegex, minuteSecondRegex, secondsRegex, englishSecondsRegex, plainNumberRegex] {
+            if let match = match(regex, in: normalized) {
+                return match.replacingOccurrences(of: ",", with: ".")
+                    .trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
+    }
+
+    private static func match(_ regex: NSRegularExpression, in text: String) -> String? {
+        let range = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let result = regex.firstMatch(in: text, options: [], range: range), result.range.location == 0,
+              let swiftRange = Range(result.range, in: text) else {
+            return nil
+        }
+        return String(text[swiftRange]).trimmingCharacters(in: .whitespaces)
+    }
+}
+
 private extension MetaField {
     var settingsField: SettingsStore.MetaVoiceField {
         switch self {
@@ -683,5 +778,9 @@ private extension MetaField {
         case .lap: return .lap
         case .checker: return .checker
         }
+    }
+
+    func refinedValue(from raw: String) -> String {
+        MetaValueRefiner.refine(raw, for: self)
     }
 }

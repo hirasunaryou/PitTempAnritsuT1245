@@ -26,6 +26,10 @@ protocol SessionSettingsProviding {
 @MainActor
 final class SettingsStore: ObservableObject {
 
+    init() {
+        migrateMetaVoiceKeywordsIfNeeded()
+    }
+
     // 既存キー（互換維持）
     @AppStorage("pref.durationSec") var durationSec: Int = 10
     @AppStorage("pref.chartWindowSec") var chartWindowSec: Double = 6
@@ -59,12 +63,15 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    private static let legacyCarKeywords = ["car", "カー", "車", "クルマ", "車両", "ゼッケン", "ゼッケン番号", "エントリー番号", "ナンバー", "番号"]
+    private static let legacyDriverKeywords = ["driver", "ドライバー", "レーサー", "ライダー", "運転手"]
+
     static let defaultMetaVoiceKeywords: [MetaVoiceField: [String]] = [
         .track: ["track", "コース", "トラック", "サーキット", "レース会場"],
         .date: ["date", "日付", "日にち"],
         .time: ["time", "時刻", "タイム"],
-        .car: ["car", "カー", "車", "クルマ", "車両", "ゼッケン", "ゼッケン番号", "エントリー番号", "ナンバー", "番号"],
-        .driver: ["driver", "ドライバー", "レーサー", "ライダー", "運転手"],
+        .car: ["car", "カー", "車", "クルマ", "車両", "ゼッケン", "ゼッケン番号", "エントリー番号", "ナンバー", "番号", "石鹸"],
+        .driver: ["driver", "ドライバー", "ドライバ", "レーサー", "ライダー", "運転手"],
         .tyre: ["tyre", "タイヤ", "タイア", "タイヤ種"],
         .lap: ["lap", "ラップ", "周回", "周回数"],
         .checker: ["checker", "チェッカー", "担当", "記録者", "計測者", "測定者", "確認者"]
@@ -183,6 +190,20 @@ final class SettingsStore: ObservableObject {
     private func normalizeKeywordInput(_ input: String) -> String {
         let components = parseKeywordList(input)
         return components.joined(separator: components.isEmpty ? "" : ", ")
+    }
+
+    private func migrateMetaVoiceKeywordsIfNeeded() {
+        let defaultCar = Self.defaultMetaVoiceKeywords[.car]?.joined(separator: ", ") ?? ""
+        let legacyCar = Self.legacyCarKeywords.joined(separator: ", ")
+        if metaKeywordCarRaw == legacyCar {
+            metaKeywordCarRaw = defaultCar
+        }
+
+        let defaultDriver = Self.defaultMetaVoiceKeywords[.driver]?.joined(separator: ", ") ?? ""
+        let legacyDriver = Self.legacyDriverKeywords.joined(separator: ", ")
+        if metaKeywordDriverRaw == legacyDriver {
+            metaKeywordDriverRaw = defaultDriver
+        }
     }
 
 }

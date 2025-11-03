@@ -66,6 +66,10 @@ struct SettingsView: View {
                             Text(m.label).tag(m)
                         }
                     }
+
+                    NavigationLink("Voice Keywords") {
+                        MetaVoiceKeywordSettingsView()
+                    }
                 }
 
 
@@ -185,5 +189,45 @@ struct SettingsView: View {
     private var recentAutosaveEntries: [UILogEntry] {
         let autosaveEntries = uiLog.entries.filter { $0.category == .autosave }
         return Array(autosaveEntries.suffix(5).reversed())
+    }
+}
+
+private struct MetaVoiceKeywordSettingsView: View {
+    @EnvironmentObject var settings: SettingsStore
+
+    var body: some View {
+        Form {
+            Section("How it works") {
+                Text("各項目の前に複数のキーワードを設定できます。カンマ（,）または改行で区切ってください。空欄にするとデフォルト値が使われます。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Keywords") {
+                ForEach(SettingsStore.MetaVoiceField.allCases) { field in
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(field.label.uppercased())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        TextField(
+                            "Keywords",
+                            text: settings.bindingForMetaVoiceKeyword(field: field),
+                            prompt: Text(settings.defaultMetaVoiceKeywords(for: field).joined(separator: ", "))
+                        )
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+
+            Section {
+                Button("Restore defaults") {
+                    settings.resetMetaVoiceKeywords()
+                }
+                .tint(.orange)
+            }
+        }
+        .navigationTitle("Voice Keywords")
     }
 }

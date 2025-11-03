@@ -188,6 +188,7 @@ private struct ParseArtifacts {
 struct MetaVoiceEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var vm: SessionViewModel
+    @EnvironmentObject var settings: SettingsStore
 
     @StateObject private var speech = SpeechMemoManager()
     @StateObject private var speechEvents = SpeechMemoEventHub()
@@ -372,14 +373,28 @@ struct MetaVoiceEditorView: View {
     }
 
     private var keywordGuide: some View {
-        let keywords = MetaField.allCases.map { $0.displayName.lowercased() }.joined(separator: ", ")
-        return VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("ヒント").font(.caption).foregroundStyle(.secondary)
             Text("各項目の前にキーワードを付けて話してください。例: \"track 鈴鹿\", \"driver 佐藤\", \"lap 5\"。")
                 .font(.footnote)
-            Text("認識するキーワード: \(keywords)")
+            Text("キーワードは Settings → Meta Input → Voice Keywords で変更できます。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(MetaField.allCases) { field in
+                    let words = settings.metaVoiceKeywords(for: field.settingsField)
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(field.displayName.uppercased())
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 80, alignment: .leading)
+                        Text(words.joined(separator: ", "))
+                            .font(.caption)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
@@ -494,6 +509,12 @@ struct MetaVoiceEditorView: View {
         debugParsed = parse.debugMap
     }
 
+    private func keywordDictionary() -> [(MetaField, [String])] {
+        MetaField.allCases.map { field in
+            (field, settings.metaVoiceKeywords(for: field.settingsField))
+        }
+    }
+
     private func parseTranscript(_ rawText: String) -> ParseArtifacts {
         let text = rawText
             .replacingOccurrences(of: "　", with: " ")
@@ -505,26 +526,19 @@ struct MetaVoiceEditorView: View {
 
         let lower = text.lowercased()
 
-        let dict: [(MetaField, [String])] = [
-            (.track,  ["track","コース","トラック","サーキット"]),
-            (.date,   ["date","日付","日にち"]),
-            (.time,   ["time","時刻","タイム"]),
-            (.car,    ["car","車","車両","クルマ","ゼッケン","ナンバー","番号"]),
-            (.driver, ["driver","ドライバー","運転手","ドライバ"]),
-            (.tyre,   ["tyre","タイヤ","タイア","タイヤ種"]),
-            (.lap,    ["lap","ラップ","周回"]),
-            (.checker,["checker","チェッカー","担当","記録者","計測者"])
-        ]
+        let dict = keywordDictionary()
 
         struct Hit { let field: MetaField; let keyword: String; let range: Range<String.Index> }
         var hits: [Hit] = []
 
         for (field, keys) in dict {
-            for k in keys {
+            for keyword in keys {
+                let normalized = keyword.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !normalized.isEmpty else { continue }
                 var start = lower.startIndex
                 while start < lower.endIndex,
-                      let r = lower.range(of: k, range: start..<lower.endIndex) {
-                    hits.append(Hit(field: field, keyword: k, range: r))
+                      let r = lower.range(of: normalized, range: start..<lower.endIndex) {
+                    hits.append(Hit(field: field, keyword: keyword, range: r))
                     start = r.upperBound
                 }
             }
@@ -654,5 +668,20 @@ struct MetaVoiceEditorView: View {
         }
         recordAttempt(transcript: partial, telemetry: event.telemetry, wheel: event.wheel, errorDescription: event.error.errorDescription)
         _ = speech.takeFinalText()
+    }
+}
+
+private extension MetaField {
+    var settingsField: SettingsStore.MetaVoiceField {
+        switch self {
+        case .track: return .track
+        case .date: return .date
+        case .time: return .time
+        case .car: return .car
+        case .driver: return .driver
+        case .tyre: return .tyre
+        case .lap: return .lap
+        case .checker: return .checker
+        }
     }
 }

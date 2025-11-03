@@ -58,7 +58,9 @@ struct MetaEditorView: View {
                 }
             }
             .sheet(isPresented: $showVoiceEditor) {
-                MetaVoiceEditorView().environmentObject(vm)
+                MetaVoiceEditorView()
+                    .environmentObject(vm)
+                    .environmentObject(settings)
             }
         }
     }

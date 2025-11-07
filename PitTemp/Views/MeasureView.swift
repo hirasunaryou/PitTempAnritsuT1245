@@ -30,7 +30,7 @@ struct MeasureView: View {
     @State private var showNextSessionDialog = false
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
-    private let zoneButtonHeight: CGFloat = 128
+    private let zoneButtonHeight: CGFloat = 150
     private static let manualTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .medium
@@ -42,7 +42,7 @@ struct MeasureView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 20) {
                     if let entry = vm.autosaveStatusEntry {
                         autosaveBanner(entry)
                     }
@@ -58,7 +58,7 @@ struct MeasureView: View {
                     liveChartSection
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 24)
+                .padding(.vertical, 16)
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .navigationTitle(appTitle)
@@ -183,10 +183,8 @@ struct MeasureView: View {
     }
 
     private var measurementCard: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 18) {
             wheelSelector
-
-            manualModeToggle
 
             Divider()
 
@@ -302,12 +300,12 @@ struct MeasureView: View {
         let wheels: [WheelPos] = [.FL, .FR, .RL, .RR]
         let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 8) {
             Text("Tyre position")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: columns, spacing: 12) {
+            LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(wheels, id: \.self) { wheel in
                     wheelTile(for: wheel)
                 }
@@ -330,7 +328,7 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            VStack(spacing: 10) {
+            VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Text(shortTitle(wheel))
                         .font(headlineFont.weight(.semibold))
@@ -346,13 +344,14 @@ struct MeasureView: View {
                 }
 
                 Text(temperature)
-                    .font(.system(size: 32, weight: .semibold, design: .rounded))
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(.primary)
             }
-            .frame(maxWidth: .infinity, minHeight: 110)
-            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 88)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
@@ -456,14 +455,20 @@ struct MeasureView: View {
     }
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            wheelDetailCard(for: wheel)
-
+        VStack(alignment: .leading, spacing: 16) {
             zoneSelector(for: wheel)
+
+            manualModeToggle
+
             if isManualMode {
                 manualEntrySection(for: wheel)
             }
+
             voiceMemoSection(for: wheel)
+
+            Divider()
+
+            wheelDetailCard(for: wheel)
         }
         .animation(.easeInOut(duration: 0.2), value: wheel)
     }
@@ -476,34 +481,11 @@ struct MeasureView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            GeometryReader { proxy in
-                let spacing: CGFloat = 12
-                let totalSpacing = spacing * CGFloat(max(zones.count - 1, 0))
-                let availableWidth = proxy.size.width - totalSpacing
-                let minWidth: CGFloat = 124
-                let idealWidth = zones.isEmpty ? 0 : availableWidth / CGFloat(zones.count)
-
-                if idealWidth >= minWidth {
-                    HStack(spacing: spacing) {
-                        ForEach(zones, id: \.self) { zone in
-                            zoneButton(wheel, zone)
-                        }
-                    }
-                    .frame(width: proxy.size.width, alignment: .leading)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: spacing) {
-                            ForEach(zones, id: \.self) { zone in
-                                zoneButton(wheel, zone)
-                                    .frame(width: minWidth)
-                            }
-                        }
-                        .padding(.horizontal, 2)
-                    }
-                    .frame(width: proxy.size.width)
+            VStack(spacing: 12) {
+                ForEach(zones, id: \.self) { zone in
+                    zoneButton(wheel, zone)
                 }
             }
-            .frame(height: zoneButtonHeight + 16)
         }
     }
 
@@ -848,7 +830,7 @@ struct MeasureView: View {
             vm.tapCell(wheel: wheel, zone: zone)
             focusTick &+= 1
         } label: {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(zoneDisplayName(zone))
                         .font(.title3.weight(.bold))
@@ -861,21 +843,24 @@ struct MeasureView: View {
                         .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
                 }
 
-                if isRunning {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                        .tint(Color.accentColor)
-                    Text(String(format: "Remaining %.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text(valueText == "--" ? "Tap to capture" : "Last captured")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    if isRunning {
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                            .tint(Color.accentColor)
+                        Text(String(format: "Remaining %.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(valueText == "--" ? "Tap to capture" : "Last captured")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
-            .padding(.vertical, 18)
-            .padding(.horizontal, 16)
+            .padding(.vertical, 20)
+            .padding(.horizontal, 18)
             .frame(maxWidth: .infinity, minHeight: zoneButtonHeight, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)

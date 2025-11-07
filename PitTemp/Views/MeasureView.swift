@@ -30,7 +30,7 @@ struct MeasureView: View {
     @State private var showNextSessionDialog = false
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
-    private let zoneButtonHeight: CGFloat = 128
+    private let zoneButtonHeight: CGFloat = 96
     private static let manualTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .medium
@@ -42,50 +42,23 @@ struct MeasureView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 24) {
                     if let entry = vm.autosaveStatusEntry {
                         autosaveBanner(entry)
                     }
-                    connectBar
-                    HStack(spacing: 12) {
-                        Text(String(format: "Hz: %.1f", ble.notifyHz))
-                        Text("W: \(ble.writeCount)")
-                        Text("N: \(ble.notifyCountUI)")
-                        if let v = ble.latestTemperature {
-                            Text(String(format: "Now: %.1f℃", v)).monospacedDigit()
-                        }
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
 
-//                    if let v = ble.latestTemperature {
-//                        Text(String(format: "BLE Now: %.1f℃", v))
-//                            .font(.title3).monospacedDigit()
-//                    }
+                    measurementCard
+
+                    connectBar
+
+                    bleDiagnostics
 
                     headerReadOnly
-                    wheelSelector
-                    manualModeToggle
-                    selectedWheelSection(selectedWheel)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
 
-                        ZStack {
-                            // 元のチャート
-                            MiniTempChart(data: vm.live)
-
-                            // 半透明の現在温度をオーバーレイ
-                            if let v = ble.latestTemperature {
-                                OverlayNow(value: v)   // ← 下の補助Viewを追加します
-                                    .allowsHitTesting(false) // 操作はチャートに通す
-                            }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
+                    liveChartSection
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.vertical, 24)
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .navigationTitle(appTitle)
@@ -209,6 +182,65 @@ struct MeasureView: View {
         }
     }
 
+    private var measurementCard: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            wheelSelector
+
+            manualModeToggle
+
+            Divider()
+
+            selectedWheelSection(selectedWheel)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08))
+        )
+    }
+
+    private var bleDiagnostics: some View {
+        HStack(spacing: 12) {
+            Text(String(format: "Hz: %.1f", ble.notifyHz))
+            Text("W: \(ble.writeCount)")
+            Text("N: \(ble.notifyCountUI)")
+            if let v = ble.latestTemperature {
+                Text(String(format: "Now: %.1f℃", v)).monospacedDigit()
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private var liveChartSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ZStack {
+                MiniTempChart(data: vm.live)
+
+                if let v = ble.latestTemperature {
+                    OverlayNow(value: v)
+                        .allowsHitTesting(false)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
     // --- 以降はUI部品（元のまま） ---
     private func autosaveBanner(_ entry: UILogEntry) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -241,6 +273,7 @@ struct MeasureView: View {
             Label("Manual Mode", systemImage: "hand.tap.fill")
         }
         .toggleStyle(.switch)
+        .padding(.horizontal, 4)
     }
 
     private var headerReadOnly: some View {
@@ -267,58 +300,22 @@ struct MeasureView: View {
 
     private var wheelSelector: some View {
         let wheels: [WheelPos] = [.FL, .FR, .RL, .RR]
+        let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
         return VStack(alignment: .leading, spacing: 12) {
             Text("Tyre position")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            VStack(spacing: 0) {
-                wheelSegments(wheels)
-
-                Divider()
-
-                wheelDetailCard(for: selectedWheel)
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(wheels, id: \.self) { wheel in
+                    wheelTile(for: wheel)
+                }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.18))
-            )
-            .accessibilityElement(children: .contain)
         }
     }
 
-    private func wheelSegments(_ wheels: [WheelPos]) -> some View {
-        HStack(spacing: 0) {
-            ForEach(Array(wheels.enumerated()), id: \.element) { index, wheel in
-                wheelSegmentButton(for: wheel)
-                    .overlay(alignment: .trailing) {
-                        if index < wheels.count - 1 {
-                            Rectangle()
-                                .fill(Color.secondary.opacity(0.12))
-                                .frame(width: 1)
-                                .padding(.vertical, 10)
-                                .accessibilityHidden(true)
-                        }
-                    }
-            }
-        }
-        .padding(4)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.systemBackground).opacity(0.85))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.secondary.opacity(0.15))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func wheelSegmentButton(for wheel: WheelPos) -> some View {
+    private func wheelTile(for wheel: WheelPos) -> some View {
         let isSelected = selectedWheel == wheel
         let headlineFont = Font.system(.headline, design: .rounded)
         let isActive = vm.currentWheel == wheel
@@ -333,8 +330,8 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            VStack(spacing: 6) {
-                HStack(spacing: 6) {
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Text(shortTitle(wheel))
                         .font(headlineFont.weight(.semibold))
                         .minimumScaleFactor(0.7)
@@ -342,26 +339,29 @@ struct MeasureView: View {
 
                     if isActive {
                         Image(systemName: "dot.radiowaves.left.and.right")
-                            .font(.caption)
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(Color.accentColor)
                             .accessibilityHidden(true)
                     }
                 }
 
                 Text(temperature)
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(.primary)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 96)
+            .padding(14)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
             )
-            .contentShape(Rectangle())
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityHint("Double tap to select \(title(wheel))")
@@ -457,6 +457,8 @@ struct MeasureView: View {
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            wheelDetailCard(for: wheel)
+
             zoneSelector(for: wheel)
             if isManualMode {
                 manualEntrySection(for: wheel)
@@ -469,39 +471,19 @@ struct MeasureView: View {
     private func zoneSelector(for wheel: WheelPos) -> some View {
         let zones = zoneOrder(for: wheel)
 
+        let columnCount = max(1, min(3, zones.count))
+        let columns = Array(repeating: GridItem(.flexible(minimum: 80), spacing: 12), count: columnCount)
+
         return VStack(alignment: .leading, spacing: 12) {
             Text("\(title(wheel)) zones")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            GeometryReader { proxy in
-                let spacing: CGFloat = 12
-                let totalSpacing = spacing * CGFloat(max(zones.count - 1, 0))
-                let availableWidth = proxy.size.width - totalSpacing
-                let minWidth: CGFloat = 124
-                let idealWidth = zones.isEmpty ? 0 : availableWidth / CGFloat(zones.count)
-
-                if idealWidth >= minWidth {
-                    HStack(spacing: spacing) {
-                        ForEach(zones, id: \.self) { zone in
-                            zoneButton(wheel, zone)
-                        }
-                    }
-                    .frame(width: proxy.size.width, alignment: .leading)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: spacing) {
-                            ForEach(zones, id: \.self) { zone in
-                                zoneButton(wheel, zone)
-                                    .frame(width: minWidth)
-                            }
-                        }
-                        .padding(.horizontal, 2)
-                    }
-                    .frame(width: proxy.size.width)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+                ForEach(zones, id: \.self) { zone in
+                    zoneButton(wheel, zone)
                 }
             }
-            .frame(height: zoneButtonHeight + 16)
         }
     }
 
@@ -846,14 +828,14 @@ struct MeasureView: View {
             vm.tapCell(wheel: wheel, zone: zone)
             focusTick &+= 1
         } label: {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(zoneDisplayName(zone))
-                        .font(.title3.weight(.bold))
+                        .font(.headline.weight(.bold))
                         .textCase(.uppercase)
                     Spacer(minLength: 8)
                     Text(valueText)
-                        .font(.system(size: 34, weight: .semibold, design: .rounded))
+                        .font(.system(size: 28, weight: .semibold, design: .rounded))
                         .monospacedDigit()
                         .minimumScaleFactor(0.5)
                         .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
@@ -872,8 +854,8 @@ struct MeasureView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .padding(.vertical, 18)
-            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
             .frame(maxWidth: .infinity, minHeight: zoneButtonHeight, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -935,13 +917,10 @@ struct MeasureView: View {
 
             Spacer()
 
-            Button("Next") { vm.receiveSpecial("<RET>") }
-                .buttonStyle(.bordered)
-
             Button {
                 showNextSessionDialog = true
             } label: {
-                Label("Next vehicle", systemImage: "arrowshape.turn.up.right.circle")
+                Label("Next", systemImage: "arrowshape.turn.up.right.circle")
             }
             .buttonStyle(.bordered)
 

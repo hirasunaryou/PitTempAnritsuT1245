@@ -879,6 +879,9 @@ struct MeasureView: View {
                     Text(zoneDisplayName(zone))
                         .font(.title3.weight(.bold))
                         .textCase(.uppercase)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .allowsTightening(true)
                     Spacer(minLength: 8)
                     Text(valueText)
                         .font(.system(size: 34, weight: .semibold, design: .rounded))
@@ -1056,26 +1059,33 @@ struct MeasureView: View {
         }
     }
     private var appTitleHeader: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 10) {
             Image(systemName: "thermometer.medium")
-                .font(.callout.weight(.semibold))
+                .font(.title3.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.accentColor)
                 .accessibilityHidden(true)
 
             Text(appTitle.uppercased())
-                .font(.system(size: 15, weight: .semibold, design: .rounded))
-                .tracking(1.1)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .tracking(1.5)
+                .lineLimit(1)
         }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
         .background(
             Capsule(style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+                .fill(.thinMaterial)
         )
         .overlay(
             Capsule(style: .continuous)
-                .stroke(Color.secondary.opacity(0.2), lineWidth: 0.8)
+                .strokeBorder(
+                    LinearGradient(colors: [Color.accentColor.opacity(0.55), Color.accentColor.opacity(0.1)], startPoint: .leading, endPoint: .trailing),
+                    lineWidth: 1
+                )
         )
-        .foregroundStyle(Color.secondary)
+        .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
+        .foregroundStyle(Color.primary.opacity(0.85))
         .accessibilityLabel(appTitle)
     }
 

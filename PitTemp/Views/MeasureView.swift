@@ -42,50 +42,23 @@ struct MeasureView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 24) {
                     if let entry = vm.autosaveStatusEntry {
                         autosaveBanner(entry)
                     }
-                    connectBar
-                    HStack(spacing: 12) {
-                        Text(String(format: "Hz: %.1f", ble.notifyHz))
-                        Text("W: \(ble.writeCount)")
-                        Text("N: \(ble.notifyCountUI)")
-                        if let v = ble.latestTemperature {
-                            Text(String(format: "Now: %.1f℃", v)).monospacedDigit()
-                        }
-                    }
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
 
-//                    if let v = ble.latestTemperature {
-//                        Text(String(format: "BLE Now: %.1f℃", v))
-//                            .font(.title3).monospacedDigit()
-//                    }
+                    measurementCard
+
+                    connectBar
+
+                    bleDiagnostics
 
                     headerReadOnly
-                    wheelSelector
-                    manualModeToggle
-                    selectedWheelSection(selectedWheel)
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
 
-                        ZStack {
-                            // 元のチャート
-                            MiniTempChart(data: vm.live)
-
-                            // 半透明の現在温度をオーバーレイ
-                            if let v = ble.latestTemperature {
-                                OverlayNow(value: v)   // ← 下の補助Viewを追加します
-                                    .allowsHitTesting(false) // 操作はチャートに通す
-                            }
-                        }
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
+                    liveChartSection
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.vertical, 24)
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .navigationTitle(appTitle)
@@ -209,6 +182,65 @@ struct MeasureView: View {
         }
     }
 
+    private var measurementCard: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            wheelSelector
+
+            manualModeToggle
+
+            Divider()
+
+            selectedWheelSection(selectedWheel)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(20)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.systemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.secondary.opacity(0.08))
+        )
+    }
+
+    private var bleDiagnostics: some View {
+        HStack(spacing: 12) {
+            Text(String(format: "Hz: %.1f", ble.notifyHz))
+            Text("W: \(ble.writeCount)")
+            Text("N: \(ble.notifyCountUI)")
+            if let v = ble.latestTemperature {
+                Text(String(format: "Now: %.1f℃", v)).monospacedDigit()
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private var liveChartSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Live Temp (last \(Int(settings.chartWindowSec))s)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ZStack {
+                MiniTempChart(data: vm.live)
+
+                if let v = ble.latestTemperature {
+                    OverlayNow(value: v)
+                        .allowsHitTesting(false)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
     // --- 以降はUI部品（元のまま） ---
     private func autosaveBanner(_ entry: UILogEntry) -> some View {
         HStack(alignment: .top, spacing: 12) {
@@ -241,6 +273,7 @@ struct MeasureView: View {
             Label("Manual Mode", systemImage: "hand.tap.fill")
         }
         .toggleStyle(.switch)
+        .padding(.horizontal, 4)
     }
 
     private var headerReadOnly: some View {
@@ -267,58 +300,22 @@ struct MeasureView: View {
 
     private var wheelSelector: some View {
         let wheels: [WheelPos] = [.FL, .FR, .RL, .RR]
+        let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
+
         return VStack(alignment: .leading, spacing: 12) {
             Text("Tyre position")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            VStack(spacing: 0) {
-                wheelSegments(wheels)
-
-                Divider()
-
-                wheelDetailCard(for: selectedWheel)
+            LazyVGrid(columns: columns, spacing: 12) {
+                ForEach(wheels, id: \.self) { wheel in
+                    wheelTile(for: wheel)
+                }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(Color(.secondarySystemBackground))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .stroke(Color.secondary.opacity(0.18))
-            )
-            .accessibilityElement(children: .contain)
         }
     }
 
-    private func wheelSegments(_ wheels: [WheelPos]) -> some View {
-        HStack(spacing: 0) {
-            ForEach(Array(wheels.enumerated()), id: \.element) { index, wheel in
-                wheelSegmentButton(for: wheel)
-                    .overlay(alignment: .trailing) {
-                        if index < wheels.count - 1 {
-                            Rectangle()
-                                .fill(Color.secondary.opacity(0.12))
-                                .frame(width: 1)
-                                .padding(.vertical, 10)
-                                .accessibilityHidden(true)
-                        }
-                    }
-            }
-        }
-        .padding(4)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.systemBackground).opacity(0.85))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.secondary.opacity(0.15))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-
-    private func wheelSegmentButton(for wheel: WheelPos) -> some View {
+    private func wheelTile(for wheel: WheelPos) -> some View {
         let isSelected = selectedWheel == wheel
         let headlineFont = Font.system(.headline, design: .rounded)
         let isActive = vm.currentWheel == wheel
@@ -333,8 +330,8 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            VStack(spacing: 6) {
-                HStack(spacing: 6) {
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Text(shortTitle(wheel))
                         .font(headlineFont.weight(.semibold))
                         .minimumScaleFactor(0.7)
@@ -342,26 +339,29 @@ struct MeasureView: View {
 
                     if isActive {
                         Image(systemName: "dot.radiowaves.left.and.right")
-                            .font(.caption)
+                            .font(.caption.weight(.semibold))
                             .foregroundStyle(Color.accentColor)
                             .accessibilityHidden(true)
                     }
                 }
 
                 Text(temperature)
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .font(.system(size: 32, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(.primary)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity, minHeight: 110)
+            .padding(16)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
             )
-            .contentShape(Rectangle())
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityHint("Double tap to select \(title(wheel))")
@@ -457,6 +457,8 @@ struct MeasureView: View {
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            wheelDetailCard(for: wheel)
+
             zoneSelector(for: wheel)
             if isManualMode {
                 manualEntrySection(for: wheel)
@@ -935,13 +937,10 @@ struct MeasureView: View {
 
             Spacer()
 
-            Button("Next") { vm.receiveSpecial("<RET>") }
-                .buttonStyle(.bordered)
-
             Button {
                 showNextSessionDialog = true
             } label: {
-                Label("Next vehicle", systemImage: "arrowshape.turn.up.right.circle")
+                Label("Next", systemImage: "arrowshape.turn.up.right.circle")
             }
             .buttonStyle(.bordered)
 

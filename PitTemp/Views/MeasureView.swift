@@ -30,7 +30,7 @@ struct MeasureView: View {
     @State private var showNextSessionDialog = false
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
-    private let zoneButtonHeight: CGFloat = 128
+    private let zoneButtonHeight: CGFloat = 150
     private static let manualTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .medium
@@ -42,12 +42,12 @@ struct MeasureView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: 20) {
+                    measurementCard
+
                     if let entry = vm.autosaveStatusEntry {
                         autosaveBanner(entry)
                     }
-
-                    measurementCard
 
                     connectBar
 
@@ -58,11 +58,20 @@ struct MeasureView: View {
                     liveChartSection
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 24)
+                .padding(.vertical, 16)
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .navigationTitle(appTitle)
-            .toolbar { Button("Edit") { showMetaEditor = true } }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    appTitleHeader
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit") { showMetaEditor = true }
+                }
+            }
             .sheet(isPresented: $showMetaEditor) {
                 MetaEditorView()
                     .environmentObject(vm)
@@ -183,10 +192,8 @@ struct MeasureView: View {
     }
 
     private var measurementCard: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 18) {
             wheelSelector
-
-            manualModeToggle
 
             Divider()
 
@@ -302,12 +309,12 @@ struct MeasureView: View {
         let wheels: [WheelPos] = [.FL, .FR, .RL, .RR]
         let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 8) {
             Text("Tyre position")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: columns, spacing: 12) {
+            LazyVGrid(columns: columns, spacing: 10) {
                 ForEach(wheels, id: \.self) { wheel in
                     wheelTile(for: wheel)
                 }
@@ -320,6 +327,8 @@ struct MeasureView: View {
         let headlineFont = Font.system(.headline, design: .rounded)
         let isActive = vm.currentWheel == wheel
         let temperature = primaryTemperature(for: wheel)
+        let zoneValues = zoneOrder(for: wheel).map { ($0, displayValue(w: wheel, z: $0)) }
+        let hasZoneSummary = zoneValues.contains { $0.1 != "--" }
 
         return Button {
             let (prevWheel, prevText) = speech.stopAndTakeText()
@@ -330,7 +339,7 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            VStack(spacing: 10) {
+            VStack(spacing: 6) {
                 HStack(spacing: 8) {
                     Text(shortTitle(wheel))
                         .font(headlineFont.weight(.semibold))
@@ -346,13 +355,30 @@ struct MeasureView: View {
                 }
 
                 Text(temperature)
-                    .font(.system(size: 32, weight: .semibold, design: .rounded))
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(.primary)
+
+                if hasZoneSummary {
+                    HStack(spacing: 8) {
+                        ForEach(zoneValues, id: \.0) { zone, value in
+                            VStack(spacing: 2) {
+                                Text(zoneShortName(zone))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(value)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 110)
-            .padding(16)
+            .frame(maxWidth: .infinity, minHeight: 76)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 14)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
@@ -456,14 +482,20 @@ struct MeasureView: View {
     }
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            wheelDetailCard(for: wheel)
-
+        VStack(alignment: .leading, spacing: 16) {
             zoneSelector(for: wheel)
+
+            manualModeToggle
+
             if isManualMode {
                 manualEntrySection(for: wheel)
             }
+
             voiceMemoSection(for: wheel)
+
+            Divider()
+
+            wheelDetailCard(for: wheel)
         }
         .animation(.easeInOut(duration: 0.2), value: wheel)
     }
@@ -476,35 +508,29 @@ struct MeasureView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            GeometryReader { proxy in
-                let spacing: CGFloat = 12
-                let totalSpacing = spacing * CGFloat(max(zones.count - 1, 0))
-                let availableWidth = proxy.size.width - totalSpacing
-                let minWidth: CGFloat = 124
-                let idealWidth = zones.isEmpty ? 0 : availableWidth / CGFloat(zones.count)
-
-                if idealWidth >= minWidth {
-                    HStack(spacing: spacing) {
-                        ForEach(zones, id: \.self) { zone in
-                            zoneButton(wheel, zone)
-                        }
+            tyreZoneContainer {
+                HStack(spacing: 12) {
+                    ForEach(zones, id: \.self) { zone in
+                        zoneButton(wheel, zone)
+                            .frame(maxWidth: .infinity)
                     }
-                    .frame(width: proxy.size.width, alignment: .leading)
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: spacing) {
-                            ForEach(zones, id: \.self) { zone in
-                                zoneButton(wheel, zone)
-                                    .frame(width: minWidth)
-                            }
-                        }
-                        .padding(.horizontal, 2)
-                    }
-                    .frame(width: proxy.size.width)
                 }
             }
-            .frame(height: zoneButtonHeight + 16)
         }
+    }
+
+    private func tyreZoneContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(.tertiarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            )
     }
 
     private func manualEntrySection(for wheel: WheelPos) -> some View {
@@ -848,11 +874,14 @@ struct MeasureView: View {
             vm.tapCell(wheel: wheel, zone: zone)
             focusTick &+= 1
         } label: {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(zoneDisplayName(zone))
                         .font(.title3.weight(.bold))
                         .textCase(.uppercase)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
+                        .allowsTightening(true)
                     Spacer(minLength: 8)
                     Text(valueText)
                         .font(.system(size: 34, weight: .semibold, design: .rounded))
@@ -861,21 +890,24 @@ struct MeasureView: View {
                         .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
                 }
 
-                if isRunning {
-                    ProgressView(value: progress)
-                        .progressViewStyle(.linear)
-                        .tint(Color.accentColor)
-                    Text(String(format: "Remaining %.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text(valueText == "--" ? "Tap to capture" : "Last captured")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    if isRunning {
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                            .tint(Color.accentColor)
+                        Text(String(format: "Remaining %.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(valueText == "--" ? "Tap to capture" : "Last captured")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             }
-            .padding(.vertical, 18)
-            .padding(.horizontal, 16)
+            .padding(.vertical, 20)
+            .padding(.horizontal, 18)
             .frame(maxWidth: .infinity, minHeight: zoneButtonHeight, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -896,6 +928,14 @@ struct MeasureView: View {
         switch zone {
         case .IN: return "IN"
         case .CL: return "CENTER"
+        case .OUT: return "OUT"
+        }
+    }
+
+    private func zoneShortName(_ zone: Zone) -> String {
+        switch zone {
+        case .IN: return "IN"
+        case .CL: return "CL"
         case .OUT: return "OUT"
         }
     }
@@ -1018,6 +1058,37 @@ struct MeasureView: View {
                 .animation(.easeInOut(duration: 0.2), value: value)
         }
     }
+    private var appTitleHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "thermometer.medium")
+                .font(.title3.weight(.semibold))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+
+            Text(appTitle.uppercased())
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .tracking(1.5)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(
+            Capsule(style: .continuous)
+                .fill(.thinMaterial)
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(
+                    LinearGradient(colors: [Color.accentColor.opacity(0.55), Color.accentColor.opacity(0.1)], startPoint: .leading, endPoint: .trailing),
+                    lineWidth: 1
+                )
+        )
+        .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 4)
+        .foregroundStyle(Color.primary.opacity(0.85))
+        .accessibilityLabel(appTitle)
+    }
+
     // MeasureView.swift
     private var appTitle: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String

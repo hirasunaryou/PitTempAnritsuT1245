@@ -327,6 +327,8 @@ struct MeasureView: View {
         let headlineFont = Font.system(.headline, design: .rounded)
         let isActive = vm.currentWheel == wheel
         let temperature = primaryTemperature(for: wheel)
+        let zoneValues = zoneOrder(for: wheel).map { ($0, displayValue(w: wheel, z: $0)) }
+        let hasZoneSummary = zoneValues.contains { $0.1 != "--" }
 
         return Button {
             let (prevWheel, prevText) = speech.stopAndTakeText()
@@ -337,7 +339,7 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 HStack(spacing: 8) {
                     Text(shortTitle(wheel))
                         .font(headlineFont.weight(.semibold))
@@ -353,13 +355,29 @@ struct MeasureView: View {
                 }
 
                 Text(temperature)
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(.primary)
+
+                if hasZoneSummary {
+                    HStack(spacing: 8) {
+                        ForEach(zoneValues, id: \.0) { zone, value in
+                            VStack(spacing: 2) {
+                                Text(zoneShortName(zone))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(value)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 88)
-            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 76)
+            .padding(.vertical, 10)
             .padding(.horizontal, 14)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -491,17 +509,10 @@ struct MeasureView: View {
                 .foregroundStyle(.secondary)
 
             tyreZoneContainer {
-                ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) {
-                        ForEach(zones, id: \.self) { zone in
-                            zoneButton(wheel, zone)
-                        }
-                    }
-
-                    VStack(spacing: 12) {
-                        ForEach(zones, id: \.self) { zone in
-                            zoneButton(wheel, zone)
-                        }
+                HStack(spacing: 12) {
+                    ForEach(zones, id: \.self) { zone in
+                        zoneButton(wheel, zone)
+                            .frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -914,6 +925,14 @@ struct MeasureView: View {
         switch zone {
         case .IN: return "IN"
         case .CL: return "CENTER"
+        case .OUT: return "OUT"
+        }
+    }
+
+    private func zoneShortName(_ zone: Zone) -> String {
+        switch zone {
+        case .IN: return "IN"
+        case .CL: return "CL"
         case .OUT: return "OUT"
         }
     }

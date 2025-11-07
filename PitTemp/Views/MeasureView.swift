@@ -43,11 +43,11 @@ struct MeasureView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    measurementCard
+
                     if let entry = vm.autosaveStatusEntry {
                         autosaveBanner(entry)
                     }
-
-                    measurementCard
 
                     connectBar
 
@@ -62,7 +62,16 @@ struct MeasureView: View {
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .navigationTitle(appTitle)
-            .toolbar { Button("Edit") { showMetaEditor = true } }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    appTitleHeader
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Edit") { showMetaEditor = true }
+                }
+            }
             .sheet(isPresented: $showMetaEditor) {
                 MetaEditorView()
                     .environmentObject(vm)
@@ -318,6 +327,8 @@ struct MeasureView: View {
         let headlineFont = Font.system(.headline, design: .rounded)
         let isActive = vm.currentWheel == wheel
         let temperature = primaryTemperature(for: wheel)
+        let zoneValues = zoneOrder(for: wheel).map { ($0, displayValue(w: wheel, z: $0)) }
+        let hasZoneSummary = zoneValues.contains { $0.1 != "--" }
 
         return Button {
             let (prevWheel, prevText) = speech.stopAndTakeText()
@@ -328,7 +339,7 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            VStack(spacing: 8) {
+            VStack(spacing: 6) {
                 HStack(spacing: 8) {
                     Text(shortTitle(wheel))
                         .font(headlineFont.weight(.semibold))
@@ -344,13 +355,29 @@ struct MeasureView: View {
                 }
 
                 Text(temperature)
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .minimumScaleFactor(0.6)
                     .foregroundStyle(.primary)
+
+                if hasZoneSummary {
+                    HStack(spacing: 8) {
+                        ForEach(zoneValues, id: \.0) { zone, value in
+                            VStack(spacing: 2) {
+                                Text(zoneShortName(zone))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(value)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
             }
-            .frame(maxWidth: .infinity, minHeight: 88)
-            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 76)
+            .padding(.vertical, 10)
             .padding(.horizontal, 14)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -481,12 +508,29 @@ struct MeasureView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            VStack(spacing: 12) {
-                ForEach(zones, id: \.self) { zone in
-                    zoneButton(wheel, zone)
+            tyreZoneContainer {
+                HStack(spacing: 12) {
+                    ForEach(zones, id: \.self) { zone in
+                        zoneButton(wheel, zone)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
         }
+    }
+
+    private func tyreZoneContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(.tertiarySystemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            )
     }
 
     private func manualEntrySection(for wheel: WheelPos) -> some View {
@@ -885,6 +929,14 @@ struct MeasureView: View {
         }
     }
 
+    private func zoneShortName(_ zone: Zone) -> String {
+        switch zone {
+        case .IN: return "IN"
+        case .CL: return "CL"
+        case .OUT: return "OUT"
+        }
+    }
+
     private func title(_ w: WheelPos) -> String {
         switch w { case .FL: return "Front Left"; case .FR: return "Front Right"
         case .RL: return "Rear Left"; case .RR: return "Rear Right" }
@@ -1003,6 +1055,30 @@ struct MeasureView: View {
                 .animation(.easeInOut(duration: 0.2), value: value)
         }
     }
+    private var appTitleHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "thermometer.medium")
+                .font(.callout.weight(.semibold))
+                .accessibilityHidden(true)
+
+            Text(appTitle.uppercased())
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+                .tracking(1.1)
+        }
+        .padding(.vertical, 2)
+        .padding(.horizontal, 10)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .stroke(Color.secondary.opacity(0.2), lineWidth: 0.8)
+        )
+        .foregroundStyle(Color.secondary)
+        .accessibilityLabel(appTitle)
+    }
+
     // MeasureView.swift
     private var appTitle: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String

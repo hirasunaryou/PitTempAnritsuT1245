@@ -62,10 +62,6 @@ struct MeasureView: View {
                 VStack(spacing: 12) {
                     topStatusRow
 
-                    if let entry = vm.autosaveStatusEntry {
-                        autosaveBanner(entry)
-                    }
-
                     sectionCard {
                         tyreControlsSection
                     }
@@ -251,32 +247,6 @@ struct MeasureView: View {
     }
 
     // --- 以降はUI部品（元のまま） ---
-    private func autosaveBanner(_ entry: UILogEntry) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: entry.level.iconName)
-                .foregroundStyle(entry.level.tintColor)
-                .font(.title3)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(entry.message)
-                    .font(.footnote)
-                    .foregroundStyle(entry.level.tintColor)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(entry.createdAt, style: .time)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(entry.level.tintColor.opacity(0.12))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(entry.level.tintColor.opacity(0.25))
-        )
-    }
     private var manualModeToggle: some View {
         Toggle(isOn: $isManualMode) {
             Label("Manual Mode", systemImage: "hand.tap.fill")
@@ -1116,7 +1086,7 @@ struct MeasureView: View {
     // BLEの状態、操作、診断をまとめたカード
     private var connectBar: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .bottom, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
                     bleHeader
                     captureStatusRow
@@ -1127,16 +1097,16 @@ struct MeasureView: View {
                 liveTemperatureBadge
             }
 
+            if let entry = vm.autosaveStatusEntry {
+                noticeRow(for: entry)
+            }
+
             connectButtons
                 .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 12) {
                 Text(String(format: "Hz: %.1f", ble.notifyHz))
                 Text("N: \(ble.notifyCountUI)")
-                if let v = ble.latestTemperature {
-                    Text(String(format: "Now: %.1f℃", v))
-                        .monospacedDigit()
-                }
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -1148,6 +1118,39 @@ struct MeasureView: View {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
+    }
+
+    private func noticeRow(for entry: UILogEntry) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: entry.level.iconName)
+                .foregroundStyle(entry.level.tintColor)
+                .font(.body)
+
+            Text(compactNoticeMessage(for: entry))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(entry.level.tintColor)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+
+            Spacer(minLength: 0)
+
+            Text(entry.createdAt, style: .time)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(entry.level.tintColor.opacity(0.12))
+        )
+    }
+
+    private func compactNoticeMessage(for entry: UILogEntry) -> String {
+        if entry.category == .autosave {
+            return "Autosave restored"
+        }
+        return entry.message
     }
 
     private var liveTemperatureBadge: some View {

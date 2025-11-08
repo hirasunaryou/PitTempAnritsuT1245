@@ -342,7 +342,6 @@ struct MeasureView: View {
         let isSelected = selectedWheel == wheel
         let headlineFont = Font.system(.headline, design: .rounded)
         let isActive = vm.currentWheel == wheel
-        let temperature = primaryTemperature(for: wheel)
         let zoneValues = zoneOrder(for: wheel).map { ($0, displayValue(w: wheel, z: $0)) }
         let hasZoneSummary = zoneValues.contains { $0.1 != "--" }
 
@@ -355,7 +354,7 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            VStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Text(shortTitle(wheel))
                         .font(headlineFont.weight(.semibold))
@@ -369,12 +368,6 @@ struct MeasureView: View {
                             .accessibilityHidden(true)
                     }
                 }
-
-                Text(temperature)
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .minimumScaleFactor(0.6)
-                    .foregroundStyle(.primary)
 
                 if hasZoneSummary {
                     HStack(spacing: 8) {
@@ -484,17 +477,6 @@ struct MeasureView: View {
         case .RL: return "Rear Left"
         case .RR: return "Rear Right"
         }
-    }
-
-    private func primaryTemperature(for wheel: WheelPos) -> String {
-        for zone in zoneOrder(for: wheel) {
-            let value = displayValue(w: wheel, z: zone)
-            if value != "--" { return value }
-        }
-        if vm.currentWheel == wheel {
-            return vm.latestValueText.isEmpty ? "--" : vm.latestValueText
-        }
-        return "--"
     }
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
@@ -916,12 +898,7 @@ struct MeasureView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else if let stamp = captureTimestamp(for: wheel, zone: zone) {
-                        Text(stamp.date)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Text(stamp.time)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        timestampLabel(date: stamp.date, time: stamp.time)
                     } else {
                         Text("Tap to capture")
                             .font(.caption)
@@ -966,7 +943,7 @@ struct MeasureView: View {
     @ViewBuilder
     private func zoneValueLabel(for zone: Zone, valueText: String) -> some View {
         Text(valueText)
-            .font(.system(size: 32, weight: .semibold, design: .rounded))
+            .font(.system(size: 36, weight: .semibold, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(valueText == "--" ? .tertiary : .primary)
             .lineLimit(1)
@@ -977,11 +954,31 @@ struct MeasureView: View {
             .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
     }
 
+    @ViewBuilder
+    private func timestampLabel(date: String, time: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(date)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
+
+            Text(time)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     private func zoneValueOffset(for zone: Zone) -> CGFloat {
         switch zone {
-        case .OUT: return -4
+        case .OUT: return -6
         case .CL: return 0
-        case .IN: return 4
+        case .IN: return 6
         }
     }
 
@@ -1035,7 +1032,7 @@ struct MeasureView: View {
     private func captureTimeText(for date: Date) -> String {
         let core = Self.captureTimeFormatter.string(from: date)
         let abbreviation = TimeZone.current.abbreviation() ?? ""
-        return abbreviation.isEmpty ? core : core + abbreviation
+        return abbreviation.isEmpty ? core : core + " " + abbreviation
     }
 
     private func handleNextSessionChoice(_ option: SessionViewModel.NextSessionCarryOver) {

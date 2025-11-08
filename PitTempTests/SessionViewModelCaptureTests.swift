@@ -43,5 +43,19 @@ final class SessionViewModelCaptureTests: XCTestCase {
 
         viewModel.tapCell(wheel: .FL, zone: .OUT)
         XCTAssertFalse(viewModel.isCaptureActive)
+        XCTAssertNil(viewModel.currentWheel)
+        XCTAssertNil(viewModel.currentZone)
+    }
+
+    func testLiveTemperatureTracksLatestSample() {
+        let fixtures = MeasureViewPreviewFixtures()
+        let viewModel = fixtures.viewModel
+
+        XCTAssertNil(viewModel.liveTemperatureC)
+
+        let sample = TemperatureSample(time: Date(), value: 83.4)
+        viewModel.ingestBLESample(sample)
+
+        XCTAssertEqual(viewModel.liveTemperatureC, 83.4, accuracy: 0.0001)
     }
 }

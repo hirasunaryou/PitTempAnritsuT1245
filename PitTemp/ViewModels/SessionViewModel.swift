@@ -49,6 +49,7 @@ final class SessionViewModel: ObservableObject {
         didSet { scheduleAutosave(reason: .metaUpdated) }
     }
     @Published private(set) var latestValueText: String = "--"
+    @Published private(set) var liveTemperatureC: Double? = nil
     @Published private(set) var live: [TempSample] = []
     private var lastSampleAt: Date? = nil
 
@@ -93,6 +94,7 @@ final class SessionViewModel: ObservableObject {
     func ingestBLESample(_ s: TemperatureSample) {
         // ライブ表示
         latestValueText = String(format: "%.1f", s.value)
+        liveTemperatureC = s.value.isFinite ? s.value : nil
         if s.value.isFinite, s.value > peakC || !peakC.isFinite { peakC = s.value }
 
         // グラフ用のライブ配列（HIDと同じ窓切り）
@@ -116,7 +118,10 @@ final class SessionViewModel: ObservableObject {
 
     func stopAll() {
         finalize(via: "manual")
+        timer?.invalidate(); timer = nil
         isCaptureActive = false
+        currentWheel = nil
+        currentZone = nil
         scheduleAutosave(reason: .stateChange)
     }
 
@@ -204,6 +209,7 @@ final class SessionViewModel: ObservableObject {
     func ingestLine(_ s: String) {
         if let v = HR2500Parser.parseValue(s) {
             latestValueText = String(format: "%.1f", v)
+            liveTemperatureC = v.isFinite ? v : nil
             if v.isFinite, v > peakC || !peakC.isFinite { peakC = v }
             appendLive(v, at: Date())
         } else if advanceWithGreater && s.trimmingCharacters(in: .whitespacesAndNewlines) == ">" && allowAdvanceNow() {
@@ -215,6 +221,7 @@ final class SessionViewModel: ObservableObject {
     func ingestBufferSnapshot(_ s: String) {
         guard s.count >= 4, let v = HR2500Parser.parseValue(s) else { return }
         latestValueText = String(format: "%.1f", v)
+        liveTemperatureC = v.isFinite ? v : nil
         // peakC / live はここでは触らない
     }
 
@@ -284,6 +291,8 @@ final class SessionViewModel: ObservableObject {
                 if self.autoStopLimitSec > 0, self.elapsed >= Double(self.autoStopLimitSec) {
                     self.finalize(via: "timeout")
                     self.isCaptureActive = false
+                    self.currentWheel = nil
+                    self.currentZone = nil
                     self.scheduleAutosave(reason: .stateChange)
                 }
             }

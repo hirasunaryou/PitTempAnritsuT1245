@@ -38,6 +38,22 @@ struct MeasureView: View {
         return formatter
     }()
 
+    private static let captureDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy/MM/dd"
+        return formatter
+    }()
+
+    private static let captureTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.timeZone = .current
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
 
     var body: some View {
         NavigationStack {
@@ -876,7 +892,7 @@ struct MeasureView: View {
         } label: {
             VStack(alignment: .leading, spacing: 12) {
                 ViewThatFits(in: .horizontal) {
-                    HStack(alignment: .center, spacing: 10) {
+                    HStack(alignment: .top, spacing: 10) {
                         zoneBadge(for: zone)
 
                         Spacer(minLength: 8)
@@ -899,8 +915,15 @@ struct MeasureView: View {
                         Text(String(format: "Remaining %.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    } else if let stamp = captureTimestamp(for: wheel, zone: zone) {
+                        Text(stamp.date)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(stamp.time)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     } else {
-                        Text(valueText == "--" ? "Tap to capture" : "Last captured")
+                        Text("Tap to capture")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -943,12 +966,23 @@ struct MeasureView: View {
     @ViewBuilder
     private func zoneValueLabel(for zone: Zone, valueText: String) -> some View {
         Text(valueText)
-            .font(.system(size: 26, weight: .semibold, design: .rounded))
+            .font(.system(size: 32, weight: .semibold, design: .rounded))
             .monospacedDigit()
             .foregroundStyle(valueText == "--" ? .tertiary : .primary)
-            .minimumScaleFactor(0.6)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .lineLimit(1)
+            .allowsTightening(true)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.trailing, -6)
+            .offset(y: zoneValueOffset(for: zone))
             .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
+    }
+
+    private func zoneValueOffset(for zone: Zone) -> CGFloat {
+        switch zone {
+        case .OUT: return -4
+        case .CL: return 0
+        case .IN: return 4
+        }
     }
 
     private func zoneDisplayName(_ zone: Zone) -> String {
@@ -978,6 +1012,30 @@ struct MeasureView: View {
         }
         if vm.currentWheel == w && vm.currentZone == z { return vm.latestValueText }
         return "--"
+    }
+
+    private func captureTimestamp(for wheel: WheelPos, zone: Zone) -> (date: String, time: String)? {
+        if let manualDate = manualSuccessDate(for: wheel, zone: zone) {
+            return (
+                date: Self.captureDateFormatter.string(from: manualDate),
+                time: captureTimeText(for: manualDate)
+            )
+        }
+
+        guard let result = vm.results.first(where: { $0.wheel == wheel && $0.zone == zone }),
+              result.peakC.isFinite else { return nil }
+
+        let endedAt = result.endedAt
+        return (
+            date: Self.captureDateFormatter.string(from: endedAt),
+            time: captureTimeText(for: endedAt)
+        )
+    }
+
+    private func captureTimeText(for date: Date) -> String {
+        let core = Self.captureTimeFormatter.string(from: date)
+        let abbreviation = TimeZone.current.abbreviation() ?? ""
+        return abbreviation.isEmpty ? core : core + abbreviation
     }
 
     private func handleNextSessionChoice(_ option: SessionViewModel.NextSessionCarryOver) {

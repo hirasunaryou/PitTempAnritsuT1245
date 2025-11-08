@@ -1086,7 +1086,7 @@ struct MeasureView: View {
     // BLEの状態、操作、診断をまとめたカード
     private var connectBar: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 14) {
                 VStack(alignment: .leading, spacing: 6) {
                     bleHeader
                     captureStatusRow
@@ -1103,14 +1103,6 @@ struct MeasureView: View {
 
             connectButtons
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-            HStack(spacing: 12) {
-                Text(String(format: "Hz: %.1f", ble.notifyHz))
-                Text("N: \(ble.notifyCountUI)")
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1161,17 +1153,17 @@ struct MeasureView: View {
             valueText = "--"
         }
 
-        return HStack(alignment: .lastTextBaseline, spacing: 4) {
+        return HStack(alignment: .lastTextBaseline, spacing: 6) {
             Image(systemName: "thermometer")
-                .font(.footnote.weight(.semibold))
+                .font(.callout.weight(.semibold))
                 .foregroundStyle(.secondary)
 
             Text(valueText)
-                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .font(.system(size: 40, weight: .bold, design: .rounded))
                 .monospacedDigit()
 
             Text("℃")
-                .font(.body.weight(.semibold))
+                .font(.headline.weight(.semibold))
                 .foregroundStyle(.secondary)
         }
     }
@@ -1218,22 +1210,40 @@ struct MeasureView: View {
 
     private var connectButtons: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 Button(scanButtonTitle()) { scanOrDisconnect() }
                     .buttonStyle(.borderedProminent)
-                Button("Devices…") { showConnectSheet = true }
-                    .buttonStyle(.bordered)
+                HStack(spacing: 8) {
+                    Button("Devices…") { showConnectSheet = true }
+                        .buttonStyle(.bordered)
+
+                    notifyMetrics
+                }
             }
 
             VStack(spacing: 8) {
                 Button(scanButtonTitle()) { scanOrDisconnect() }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
-                Button("Devices…") { showConnectSheet = true }
-                    .buttonStyle(.bordered)
-                    .frame(maxWidth: .infinity)
+                HStack(alignment: .top, spacing: 8) {
+                    Button("Devices…") { showConnectSheet = true }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+
+                    notifyMetrics
+                }
             }
         }
+    }
+
+    private var notifyMetrics: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(String(format: "Hz: %.1f", ble.notifyHz))
+            Text("N: \(ble.notifyCountUI)")
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .lineLimit(1)
     }
 
 

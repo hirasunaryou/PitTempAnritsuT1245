@@ -75,8 +75,8 @@ struct SettingsView: View {
 
                 // 測定パラメータ
                 Section("Measurement") {
-                    Stepper(value: $settings.durationSec, in: 2...20) {
-                        Text("Window: \(settings.durationSec) s")
+                    Stepper(value: $settings.autoStopLimitSec, in: 5...120) {
+                        Text("Auto-stop limit: \(settings.autoStopLimitSec) s")
                     }
                     Stepper(value: $settings.chartWindowSec, in: 3...60, step: 1) {
                         Text("Chart Width: \(Int(settings.chartWindowSec)) s")

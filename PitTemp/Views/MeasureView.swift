@@ -126,6 +126,7 @@ struct MeasureView: View {
             if let current = vm.currentWheel {
                 selectedWheel = current
             }
+            syncManualPressureDefaults(for: selectedWheel)
             print("[UI] MeasureView appear")
         }
 
@@ -151,10 +152,10 @@ struct MeasureView: View {
             }
         }
         .onChange(of: selectedWheel) { _, newWheel in
+            syncManualPressureDefaults(for: newWheel)
             if isManualMode {
                 clearManualFeedback(for: newWheel)
                 syncManualDefaults(for: newWheel)
-                syncManualPressureDefaults(for: newWheel)
             }
             showWheelDetails = false
         }
@@ -165,7 +166,7 @@ struct MeasureView: View {
             if isManualMode { syncManualMemo(for: selectedWheel) }
         }
         .onReceive(vm.$wheelPressures) { _ in
-            if isManualMode { syncManualPressureDefaults(for: selectedWheel) }
+            syncManualPressureDefaults(for: selectedWheel)
         }
         .onReceive(vm.$sessionResetID) { _ in
             selectedWheel = .FL
@@ -177,8 +178,8 @@ struct MeasureView: View {
             if isManualMode {
                 syncManualDefaults(for: .FL)
                 syncManualMemo(for: .FL)
-                syncManualPressureDefaults(for: .FL)
             }
+            syncManualPressureDefaults(for: .FL)
         }
         .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
             if let url = note.userInfo?["url"] as? URL {
@@ -490,30 +491,34 @@ struct MeasureView: View {
     }
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
-        DisclosureGroup(isExpanded: $showWheelDetails) {
-            VStack(alignment: .leading, spacing: 14) {
-                manualModeToggle
+        VStack(alignment: .leading, spacing: 14) {
+            pressureEntryCard(for: wheel)
 
-                if isManualMode {
-                    manualEntrySection(for: wheel)
+            DisclosureGroup(isExpanded: $showWheelDetails) {
+                VStack(alignment: .leading, spacing: 14) {
+                    manualModeToggle
+
+                    if isManualMode {
+                        manualEntrySection(for: wheel)
+                    }
+
+                    voiceMemoSection(for: wheel)
+
+                    Divider()
+
+                    wheelDetailCard(for: wheel)
                 }
-
-                voiceMemoSection(for: wheel)
-
-                Divider()
-
-                wheelDetailCard(for: wheel)
+            } label: {
+                Label(
+                    showWheelDetails ? "Hide extra controls / 詳細を閉じる" : "More controls / 詳細設定",
+                    systemImage: showWheelDetails ? "chevron.up.circle.fill" : "chevron.down.circle"
+                )
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
             }
-        } label: {
-            Label(
-                showWheelDetails ? "Hide extra controls / 詳細を閉じる" : "More controls / 詳細設定",
-                systemImage: showWheelDetails ? "chevron.up.circle.fill" : "chevron.down.circle"
-            )
-            .font(.footnote.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .animation(.easeInOut(duration: 0.2), value: showWheelDetails)
+            .animation(.easeInOut(duration: 0.2), value: wheel)
         }
-        .animation(.easeInOut(duration: 0.2), value: showWheelDetails)
-        .animation(.easeInOut(duration: 0.2), value: wheel)
     }
 
     private func zoneSelector(for wheel: WheelPos) -> some View {
@@ -559,8 +564,6 @@ struct MeasureView: View {
                 manualZoneRow(for: wheel, zone: zone)
             }
 
-            manualPressureRow(for: wheel)
-
             VStack(alignment: .leading, spacing: 6) {
                 Text("Wheel memo")
                     .font(.caption)
@@ -590,7 +593,7 @@ struct MeasureView: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(.tertiarySystemBackground)))
     }
 
-    private func manualPressureRow(for wheel: WheelPos) -> some View {
+    private func pressureEntryCard(for wheel: WheelPos) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Inner pressure (kPa)")
@@ -668,7 +671,14 @@ struct MeasureView: View {
             }
         }
         .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground).opacity(0.6)))
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+        )
     }
 
     private func manualZoneRow(for wheel: WheelPos, zone: Zone) -> some View {

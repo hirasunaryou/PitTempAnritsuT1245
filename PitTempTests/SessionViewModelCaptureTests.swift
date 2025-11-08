@@ -33,4 +33,15 @@ final class SessionViewModelCaptureTests: XCTestCase {
 
         viewModel.stopAll()
     }
+
+    func testTapCellStopsWhenTappedAgain() {
+        let fixtures = MeasureViewPreviewFixtures()
+        let viewModel = fixtures.viewModel
+
+        viewModel.tapCell(wheel: .FL, zone: .OUT)
+        XCTAssertTrue(viewModel.isCaptureActive)
+
+        viewModel.tapCell(wheel: .FL, zone: .OUT)
+        XCTAssertFalse(viewModel.isCaptureActive)
+    }
 }

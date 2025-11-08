@@ -76,7 +76,7 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var sessionResetID = UUID()
 
     // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
-    private var durationSec: Int { settings.validatedDurationSec }
+    private var autoStopLimitSec: Int { settings.validatedAutoStopLimitSec }
     private var chartWindowSec: Double { settings.chartWindowSec }
     private var advanceWithGreater: Bool { settings.advanceWithGreater }
     private var advanceWithRightArrow: Bool { settings.advanceWithRightArrow }
@@ -107,7 +107,11 @@ final class SessionViewModel: ObservableObject {
     
     // MARK: - View からの操作
     func tapCell(wheel: WheelPos, zone: Zone) {
-        start(wheel: wheel, zone: zone)
+        if isCaptureActive, currentWheel == wheel, currentZone == zone {
+            stopAll()
+        } else {
+            start(wheel: wheel, zone: zone)
+        }
     }
 
     func stopAll() {
@@ -277,7 +281,11 @@ final class SessionViewModel: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self = self, let t0 = self.startedAt else { return }
                 self.elapsed = Date().timeIntervalSince(t0)
-                if self.elapsed >= Double(self.durationSec) { self.finalize(via: "timeout") }
+                if self.autoStopLimitSec > 0, self.elapsed >= Double(self.autoStopLimitSec) {
+                    self.finalize(via: "timeout")
+                    self.isCaptureActive = false
+                    self.scheduleAutosave(reason: .stateChange)
+                }
             }
         }
     }

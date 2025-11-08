@@ -13,7 +13,7 @@ import SwiftUI
 
 @MainActor
 protocol SessionSettingsProviding {
-    var validatedDurationSec: Int { get }
+    var validatedAutoStopLimitSec: Int { get }
     var chartWindowSec: Double { get }
     var advanceWithGreater: Bool { get }
     var advanceWithRightArrow: Bool { get }
@@ -31,7 +31,7 @@ final class SettingsStore: ObservableObject {
     }
 
     // 既存キー（互換維持）
-    @AppStorage("pref.durationSec") var durationSec: Int = 10
+    @AppStorage("pref.durationSec") var autoStopLimitSec: Int = 20
     @AppStorage("pref.chartWindowSec") var chartWindowSec: Double = 6
     @AppStorage("pref.advanceWithGreater") var advanceWithGreater: Bool = false
     @AppStorage("pref.advanceWithRightArrow") var advanceWithRightArrow: Bool = false
@@ -112,7 +112,7 @@ final class SettingsStore: ObservableObject {
     }
 
     // 例：範囲バリデーション
-    var validatedDurationSec: Int { max(1, min(durationSec, 60)) }
+    var validatedAutoStopLimitSec: Int { max(1, min(autoStopLimitSec, 120)) }
     
     // --- 追加: メタ入力モード ---
     @AppStorage("pref.metaInputMode") private var metaInputModeRaw: Int = 0

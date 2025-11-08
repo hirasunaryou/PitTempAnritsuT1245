@@ -59,7 +59,7 @@ private final class AutosaveStoreSpy: SessionAutosaveHandling {
 
 @MainActor
 private struct StubSettings: SessionSettingsProviding {
-    var validatedDurationSec: Int = 10
+    var validatedAutoStopLimitSec: Int = 10
     var chartWindowSec: Double = 6
     var advanceWithGreater: Bool = false
     var advanceWithRightArrow: Bool = false

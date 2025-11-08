@@ -211,6 +211,8 @@ struct MeasureView: View {
         VStack(alignment: .leading, spacing: 18) {
             wheelSelector
 
+            liveTemperatureReadout
+
             Divider()
 
             selectedWheelSection(selectedWheel)
@@ -297,6 +299,60 @@ struct MeasureView: View {
         }
         .toggleStyle(.switch)
         .padding(.horizontal, 4)
+    }
+
+    private var liveTemperatureReadout: some View {
+        let valueText: String
+        if let live = vm.liveTemperatureC, live.isFinite {
+            valueText = String(format: "%.1f", live)
+        } else {
+            valueText = "--"
+        }
+
+        let statusText: String
+        if vm.isCaptureActive, let wheel = vm.currentWheel, let zone = vm.currentZone {
+            statusText = "Capturing / 計測中: \(title(wheel)) \(zoneDisplayName(zone))"
+        } else {
+            statusText = "Standby / 待機中"
+        }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("Live temperature / 現在温度", systemImage: "thermometer")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(valueText)
+                    .font(.system(size: 40, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                Text("℃")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                if vm.isCaptureActive {
+                    Text("LIVE")
+                        .font(.caption2.weight(.bold))
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.2)))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(18)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(Color(.tertiarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(Color.secondary.opacity(0.12))
+        )
     }
 
     private var headerReadOnly: some View {

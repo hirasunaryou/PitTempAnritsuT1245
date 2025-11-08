@@ -40,5 +40,9 @@ struct MeasureViewPreviewFixtures {
         bluetooth.writeCount = 128
         bluetooth.notifyCountUI = 512
         bluetooth.latestTemperature = 84.1
+
+        viewModel.ingestBLESample(
+            TemperatureSample(time: Date(), value: 84.1)
+        )
     }
 }

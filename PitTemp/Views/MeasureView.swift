@@ -215,25 +215,7 @@ struct MeasureView: View {
         }
     }
 
-    private var topStatusRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 16) {
-                liveTemperatureReadout
-                    .frame(maxWidth: .infinity)
-
-                connectBar
-                    .frame(maxWidth: 360)
-            }
-
-            VStack(spacing: 12) {
-                liveTemperatureReadout
-                    .frame(maxWidth: .infinity)
-
-                connectBar
-                    .frame(maxWidth: .infinity)
-            }
-        }
-    }
+    private var topStatusRow: some View { connectBar }
 
     private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
@@ -301,60 +283,6 @@ struct MeasureView: View {
         }
         .toggleStyle(.switch)
         .padding(.horizontal, 4)
-    }
-
-    private var liveTemperatureReadout: some View {
-        let valueText: String
-        if let live = vm.liveTemperatureC, live.isFinite {
-            valueText = String(format: "%.1f", live)
-        } else {
-            valueText = "--"
-        }
-
-        let statusText: String
-        if vm.isCaptureActive, let wheel = vm.currentWheel, let zone = vm.currentZone {
-            statusText = "Capturing / 計測中: \(title(wheel)) \(zoneDisplayName(zone))"
-        } else {
-            statusText = "Standby / 待機中"
-        }
-
-        return VStack(alignment: .leading, spacing: 10) {
-            Label("Live temperature / 現在温度", systemImage: "thermometer")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(valueText)
-                    .font(.system(size: 40, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                Text("℃")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                if vm.isCaptureActive {
-                    Text("LIVE")
-                        .font(.caption2.weight(.bold))
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.2)))
-                        .foregroundStyle(Color.accentColor)
-                }
-            }
-
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(18)
-        .background(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(Color(.tertiarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.secondary.opacity(0.12))
-        )
     }
 
     private var headerReadOnly: some View {
@@ -1169,33 +1097,23 @@ struct MeasureView: View {
 
     // BLEの状態、操作、診断をまとめたカード
     private var connectBar: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("BLE: " + stateText())
-                    .font(.subheadline)
-                Spacer()
-                if let name = ble.deviceName {
-                    Text(name)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
+        VStack(alignment: .leading, spacing: 16) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) {
-                    Button(scanButtonTitle()) { scanOrDisconnect() }
-                        .buttonStyle(.borderedProminent)
-                    Button("Devices…") { showConnectSheet = true }
-                        .buttonStyle(.bordered)
+                HStack(alignment: .top, spacing: 20) {
+                    liveTemperatureHighlight
+                        .frame(maxWidth: 240)
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        bleHeader
+                        connectButtons
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                VStack(spacing: 8) {
-                    Button(scanButtonTitle()) { scanOrDisconnect() }
-                        .buttonStyle(.borderedProminent)
-                        .frame(maxWidth: .infinity)
-                    Button("Devices…") { showConnectSheet = true }
-                        .buttonStyle(.bordered)
-                        .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 16) {
+                    liveTemperatureHighlight
+                    bleHeader
+                    connectButtons
                 }
             }
 
@@ -1203,7 +1121,6 @@ struct MeasureView: View {
 
             HStack(spacing: 12) {
                 Text(String(format: "Hz: %.1f", ble.notifyHz))
-                Text("W: \(ble.writeCount)")
                 Text("N: \(ble.notifyCountUI)")
                 if let v = ble.latestTemperature {
                     Text(String(format: "Now: %.1f℃", v))
@@ -1214,12 +1131,99 @@ struct MeasureView: View {
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
+    }
+
+    private var liveTemperatureHighlight: some View {
+        let valueText: String
+        if let live = vm.liveTemperatureC, live.isFinite {
+            valueText = String(format: "%.1f", live)
+        } else {
+            valueText = "--"
+        }
+
+        let statusText: String
+        if vm.isCaptureActive, let wheel = vm.currentWheel, let zone = vm.currentZone {
+            statusText = "Capturing / 計測中: \(title(wheel)) \(zoneDisplayName(zone))"
+        } else {
+            statusText = "Standby / 待機中"
+        }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("Live temperature / 現在温度", systemImage: "thermometer")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(valueText)
+                    .font(.system(size: 46, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text("℃")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+
+                if vm.isCaptureActive {
+                    Text("LIVE")
+                        .font(.caption2.weight(.bold))
+                        .padding(.vertical, 4)
+                        .padding(.horizontal, 8)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+
+            Text(statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.tertiarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.secondary.opacity(0.1))
+        )
+    }
+
+    private var bleHeader: some View {
+        HStack {
+            Text("BLE: " + stateText())
+                .font(.subheadline)
+            Spacer()
+            if let name = ble.deviceName {
+                Text(name)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var connectButtons: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                Button(scanButtonTitle()) { scanOrDisconnect() }
+                    .buttonStyle(.borderedProminent)
+                Button("Devices…") { showConnectSheet = true }
+                    .buttonStyle(.bordered)
+            }
+
+            VStack(spacing: 8) {
+                Button(scanButtonTitle()) { scanOrDisconnect() }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                Button("Devices…") { showConnectSheet = true }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+            }
+        }
     }
 
 

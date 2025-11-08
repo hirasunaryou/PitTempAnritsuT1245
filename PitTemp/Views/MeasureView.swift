@@ -875,27 +875,20 @@ struct MeasureView: View {
             focusTick &+= 1
         } label: {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .center, spacing: 10) {
-                    Text(zoneShortName(zone))
-                        .font(.caption2.weight(.semibold))
-                        .tracking(1.1)
-                        .textCase(.uppercase)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 10)
-                        .background(
-                            Capsule(style: .continuous)
-                                .fill(Color.secondary.opacity(0.12))
-                        )
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .center, spacing: 10) {
+                        zoneBadge(for: zone)
 
-                    Spacer(minLength: 8)
+                        Spacer(minLength: 8)
 
-                    Text(valueText)
-                        .font(.system(size: 26, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundStyle(valueText == "--" ? .tertiary : .primary)
-                        .minimumScaleFactor(0.6)
-                        .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
+                        zoneValueLabel(for: zone, valueText: valueText)
+                    }
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        zoneBadge(for: zone)
+
+                        zoneValueLabel(for: zone, valueText: valueText)
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -930,6 +923,32 @@ struct MeasureView: View {
         .buttonStyle(.plain)
         .accessibilityLabel("\(title(wheel)) \(zoneDisplayName(zone)) button")
         .accessibilityHint(isRunning ? "Capturing" : "Double tap to start capture")
+    }
+
+    @ViewBuilder
+    private func zoneBadge(for zone: Zone) -> some View {
+        Text(zoneShortName(zone))
+            .font(.caption2.weight(.semibold))
+            .tracking(1.1)
+            .textCase(.uppercase)
+            .foregroundStyle(.secondary)
+            .padding(.vertical, 4)
+            .padding(.horizontal, 10)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.secondary.opacity(0.12))
+            )
+    }
+
+    @ViewBuilder
+    private func zoneValueLabel(for zone: Zone, valueText: String) -> some View {
+        Text(valueText)
+            .font(.system(size: 26, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(valueText == "--" ? .tertiary : .primary)
+            .minimumScaleFactor(0.6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
     }
 
     private func zoneDisplayName(_ zone: Zone) -> String {

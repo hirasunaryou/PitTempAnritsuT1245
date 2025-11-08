@@ -10,8 +10,6 @@ struct MeasureView: View {
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var ble: BluetoothService
     @EnvironmentObject var registry: DeviceRegistry
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @StateObject private var speech = SpeechMemoManager()
     @State private var selectedWheel: WheelPos = .FL
@@ -218,18 +216,22 @@ struct MeasureView: View {
     }
 
     private var topStatusRow: some View {
-        let shouldStackVertically = (horizontalSizeClass == .compact && verticalSizeClass != .compact)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                liveTemperatureReadout
+                    .frame(maxWidth: .infinity)
 
-        let layout = shouldStackVertically
-            ? AnyLayout(VStackLayout(spacing: 12))
-            : AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                connectBar
+                    .frame(maxWidth: 360)
+            }
 
-        return layout {
-            liveTemperatureReadout
-                .frame(maxWidth: .infinity)
+            VStack(spacing: 12) {
+                liveTemperatureReadout
+                    .frame(maxWidth: .infinity)
 
-            connectBar
-                .frame(maxWidth: shouldStackVertically ? .infinity : 360)
+                connectBar
+                    .frame(maxWidth: .infinity)
+            }
         }
     }
 

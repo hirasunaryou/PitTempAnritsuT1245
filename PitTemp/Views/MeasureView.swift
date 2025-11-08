@@ -59,19 +59,27 @@ struct MeasureView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    measurementCard
+                    topStatusRow
 
                     if let entry = vm.autosaveStatusEntry {
                         autosaveBanner(entry)
                     }
 
-                    connectBar
+                    sectionCard {
+                        wheelSelector
+                    }
 
-                    bleDiagnostics
+                    sectionCard {
+                        selectedWheelSection(selectedWheel)
+                    }
 
-                    headerReadOnly
+                    sectionCard {
+                        headerReadOnly
+                    }
 
-                    liveChartSection
+                    sectionCard {
+                        liveChartSection
+                    }
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 16)
@@ -207,45 +215,35 @@ struct MeasureView: View {
         }
     }
 
-    private var measurementCard: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            wheelSelector
+    private var topStatusRow: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 16) {
+                liveTemperatureReadout
+                    .frame(maxWidth: .infinity)
 
-            liveTemperatureReadout
+                connectBar
+                    .frame(maxWidth: 320)
+            }
 
-            Divider()
-
-            selectedWheelSection(selectedWheel)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(.systemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.secondary.opacity(0.08))
-        )
-    }
-
-    private var bleDiagnostics: some View {
-        HStack(spacing: 12) {
-            Text(String(format: "Hz: %.1f", ble.notifyHz))
-            Text("W: \(ble.writeCount)")
-            Text("N: \(ble.notifyCountUI)")
-            if let v = ble.latestTemperature {
-                Text(String(format: "Now: %.1f℃", v)).monospacedDigit()
+            VStack(spacing: 12) {
+                liveTemperatureReadout
+                connectBar
             }
         }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
-        )
+    }
+
+    private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(20)
+            .background(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(Color(.systemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.08))
+            )
     }
 
     private var liveChartSection: some View {
@@ -262,6 +260,7 @@ struct MeasureView: View {
                         .allowsHitTesting(false)
                 }
             }
+            .frame(height: 160)
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -356,25 +355,30 @@ struct MeasureView: View {
     }
 
     private var headerReadOnly: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             MetaRow(label: "TRACK", value: vm.meta.track)
             MetaRow(label: "DATE",  value: vm.meta.date)
             MetaRow(label: "CAR",   value: vm.meta.car)
             MetaRow(label: "DRIVER",value: vm.meta.driver)
             MetaRow(label: "TYRE",  value: vm.meta.tyre)
-            HStack {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
                 MetaRow(label: "TIME", value: vm.meta.time)
-                Spacer(minLength: 12)
                 MetaRow(label: "LAP",  value: vm.meta.lap)
             }
             MetaRow(label: "CHECKER", value: vm.meta.checker)
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
     }
 
     private func MetaRow(label: String, value: String) -> some View {
-        HStack { Text(label).font(.caption).foregroundStyle(.secondary); Spacer(); Text(value.isEmpty ? "-" : value).font(.headline) }
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value.isEmpty ? "-" : value)
+                .font(.headline)
+        }
+        .padding(.vertical, 2)
     }
 
     private var wheelSelector: some View {
@@ -1160,26 +1164,59 @@ struct MeasureView: View {
 
 
 
-    // 上部バーは「Scan/Disconnect」と「Devices…」だけに
+    // BLEの状態、操作、診断をまとめたカード
     private var connectBar: some View {
-        VStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("BLE: " + stateText()).font(.subheadline)
+                Text("BLE: " + stateText())
+                    .font(.subheadline)
                 Spacer()
                 if let name = ble.deviceName {
-                    Text(name).font(.callout).foregroundStyle(.secondary)
+                    Text(name)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
             }
-            HStack(spacing: 8) {
-                Button(scanButtonTitle()) { scanOrDisconnect() }
-                    .buttonStyle(.borderedProminent)
-                Button("Devices…") { showConnectSheet = true }
-                    .buttonStyle(.bordered)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    Button(scanButtonTitle()) { scanOrDisconnect() }
+                        .buttonStyle(.borderedProminent)
+                    Button("Devices…") { showConnectSheet = true }
+                        .buttonStyle(.bordered)
+                }
+
+                VStack(spacing: 8) {
+                    Button(scanButtonTitle()) { scanOrDisconnect() }
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxWidth: .infinity)
+                    Button("Devices…") { showConnectSheet = true }
+                        .buttonStyle(.bordered)
+                        .frame(maxWidth: .infinity)
+                }
             }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                Text(String(format: "Hz: %.1f", ble.notifyHz))
+                Text("W: \(ble.writeCount)")
+                Text("N: \(ble.notifyCountUI)")
+                if let v = ble.latestTemperature {
+                    Text(String(format: "Now: %.1f℃", v))
+                        .monospacedDigit()
+                }
+            }
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
         }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 12)
-            .fill(Color(.secondarySystemBackground)))
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
     }
 
 

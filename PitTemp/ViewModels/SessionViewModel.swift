@@ -73,6 +73,9 @@ final class SessionViewModel: ObservableObject {
     @Published var wheelMemos: [WheelPos: String] = [:] {
         didSet { scheduleAutosave(reason: .memoUpdated) }
     }
+    @Published var wheelPressures: [WheelPos: Double] = [:] {
+        didSet { scheduleAutosave(reason: .resultsUpdated) }
+    }
     @Published private(set) var autosaveStatusEntry: UILogEntry? = nil
     @Published private(set) var sessionResetID = UUID()
 
@@ -155,6 +158,7 @@ final class SessionViewModel: ObservableObject {
 
         results = []
         wheelMemos = [:]
+        wheelPressures = [:]
         meta = preservedMeta
         lastCSV = nil
         lastLegacyCSV = nil
@@ -203,6 +207,14 @@ final class SessionViewModel: ObservableObject {
         }
 
         Haptics.success()
+    }
+
+    func setPressure(_ value: Double?, for wheel: WheelPos) {
+        if let value {
+            wheelPressures[wheel] = value
+        } else {
+            wheelPressures.removeValue(forKey: wheel)
+        }
     }
 
     /// HIDからの「行確定」
@@ -255,6 +267,7 @@ final class SessionViewModel: ObservableObject {
                 meta: meta,
                 results: results,
                 wheelMemos: wheelMemos,
+                wheelPressures: wheelPressures,
                 sessionStart: sessionStart,
                 deviceName: deviceName
             )
@@ -388,6 +401,7 @@ final class SessionViewModel: ObservableObject {
         meta = snapshot.meta
         results = snapshot.results
         wheelMemos = snapshot.wheelMemos
+        wheelPressures = snapshot.wheelPressures
         sessionBeganAt = snapshot.sessionBeganAt
         isCaptureActive = false
         currentWheel = nil
@@ -437,6 +451,7 @@ final class SessionViewModel: ObservableObject {
             meta: meta,
             results: results,
             wheelMemos: wheelMemos,
+            wheelPressures: wheelPressures,
             sessionBeganAt: sessionBeganAt
         )
         autosaveStore.save(snapshot)

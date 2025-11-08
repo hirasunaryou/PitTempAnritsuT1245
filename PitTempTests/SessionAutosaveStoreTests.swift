@@ -20,6 +20,7 @@ struct SessionAutosaveStoreTests {
             meta: MeasureMeta(),
             results: [],
             wheelMemos: [:],
+            wheelPressures: [:],
             sessionBeganAt: nil
         )
 

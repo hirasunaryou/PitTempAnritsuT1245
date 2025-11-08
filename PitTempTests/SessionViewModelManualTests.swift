@@ -23,6 +23,7 @@ struct SessionViewModelManualTests {
             memo: "Manual memo",
             timestamp: timestamp
         )
+        vm.setPressure(198.0, for: .FL)
 
         try await Task.sleep(nanoseconds: 400_000_000)
 
@@ -38,6 +39,7 @@ struct SessionViewModelManualTests {
         #expect(result.endedAt == timestamp)
 
         #expect(snapshot.wheelMemos[.FL] == "Manual memo")
+        #expect(snapshot.wheelPressures[.FL] == 198.0)
     }
 }
 
@@ -74,6 +76,7 @@ private struct CSVExporterStub: CSVExporting {
         meta: MeasureMeta,
         results: [MeasureResult],
         wheelMemos: [WheelPos : String],
+        wheelPressures: [WheelPos : Double],
         sessionStart: Date,
         deviceName: String?
     ) throws -> URL {

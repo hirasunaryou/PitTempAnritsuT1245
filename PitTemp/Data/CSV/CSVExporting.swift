@@ -7,6 +7,7 @@ protocol CSVExporting {
         meta: MeasureMeta,
         results: [MeasureResult],
         wheelMemos: [WheelPos: String],
+        wheelPressures: [WheelPos: Double],
         sessionStart: Date,
         deviceName: String?
     ) throws -> URL

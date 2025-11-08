@@ -930,8 +930,8 @@ struct MeasureView: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
             }
-            .padding(.vertical, 18)
-            .padding(.horizontal, 16)
+            .padding(.vertical, 20)
+            .padding(.horizontal, 18)
             .frame(maxWidth: .infinity, minHeight: zoneButtonHeight, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)

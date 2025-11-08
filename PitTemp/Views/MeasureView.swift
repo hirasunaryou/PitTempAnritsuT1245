@@ -28,9 +28,10 @@ struct MeasureView: View {
     @State private var manualMemos: [WheelPos: String] = [:]
     @State private var manualMemoSuccess: [WheelPos: Date] = [:]
     @State private var showNextSessionDialog = false
+    @State private var showWheelDetails = false
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
-    private let zoneButtonHeight: CGFloat = 150
+    private let zoneButtonHeight: CGFloat = 112
     private static let manualTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .medium
@@ -58,7 +59,7 @@ struct MeasureView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
+                VStack(spacing: 12) {
                     topStatusRow
 
                     if let entry = vm.autosaveStatusEntry {
@@ -66,11 +67,7 @@ struct MeasureView: View {
                     }
 
                     sectionCard {
-                        wheelSelector
-                    }
-
-                    sectionCard {
-                        selectedWheelSection(selectedWheel)
+                        tyreControlsSection
                     }
 
                     sectionCard {
@@ -82,7 +79,7 @@ struct MeasureView: View {
                     }
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 16)
+                .padding(.vertical, 12)
             }
             .safeAreaInset(edge: .bottom) { bottomBar }
             .navigationTitle(appTitle)
@@ -141,6 +138,7 @@ struct MeasureView: View {
             if newValue {
                 clearManualFeedback(for: selectedWheel)
                 syncManualDefaults(for: selectedWheel)
+                showWheelDetails = true
             } else {
                 clearManualFeedback()
             }
@@ -150,6 +148,7 @@ struct MeasureView: View {
                 clearManualFeedback(for: newWheel)
                 syncManualDefaults(for: newWheel)
             }
+            showWheelDetails = false
         }
         .onReceive(vm.$results) { _ in
             if isManualMode { syncManualDefaults(for: selectedWheel) }
@@ -162,6 +161,7 @@ struct MeasureView: View {
             manualValues.removeAll()
             manualMemos.removeAll()
             clearManualFeedback()
+            showWheelDetails = false
             if isManualMode {
                 syncManualDefaults(for: .FL)
                 syncManualMemo(for: .FL)
@@ -220,13 +220,13 @@ struct MeasureView: View {
     private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(20)
+            .padding(14)
             .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .fill(Color(.systemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(Color.secondary.opacity(0.08))
             )
     }
@@ -321,7 +321,7 @@ struct MeasureView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            LazyVGrid(columns: columns, spacing: 10) {
+            LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(wheels, id: \.self) { wheel in
                     wheelTile(for: wheel)
                 }
@@ -345,7 +345,7 @@ struct MeasureView: View {
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Text(shortTitle(wheel))
                         .font(headlineFont.weight(.semibold))
@@ -376,18 +376,18 @@ struct MeasureView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 76)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 62)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(isSelected ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityHint("Double tap to select \(title(wheel))")
@@ -470,35 +470,53 @@ struct MeasureView: View {
         }
     }
 
-    private func selectedWheelSection(_ wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            zoneSelector(for: wheel)
+    private var tyreControlsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            wheelSelector
 
-            manualModeToggle
+            zoneSelector(for: selectedWheel)
 
-            if isManualMode {
-                manualEntrySection(for: wheel)
-            }
-
-            voiceMemoSection(for: wheel)
-
-            Divider()
-
-            wheelDetailCard(for: wheel)
+            selectedWheelSection(selectedWheel)
         }
+    }
+
+    private func selectedWheelSection(_ wheel: WheelPos) -> some View {
+        DisclosureGroup(isExpanded: $showWheelDetails) {
+            VStack(alignment: .leading, spacing: 14) {
+                manualModeToggle
+
+                if isManualMode {
+                    manualEntrySection(for: wheel)
+                }
+
+                voiceMemoSection(for: wheel)
+
+                Divider()
+
+                wheelDetailCard(for: wheel)
+            }
+        } label: {
+            Label(
+                showWheelDetails ? "Hide extra controls / 詳細を閉じる" : "More controls / 詳細設定",
+                systemImage: showWheelDetails ? "chevron.up.circle.fill" : "chevron.down.circle"
+            )
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
+        }
+        .animation(.easeInOut(duration: 0.2), value: showWheelDetails)
         .animation(.easeInOut(duration: 0.2), value: wheel)
     }
 
     private func zoneSelector(for wheel: WheelPos) -> some View {
         let zones = zoneOrder(for: wheel)
 
-        return VStack(alignment: .leading, spacing: 12) {
+        return VStack(alignment: .leading, spacing: 8) {
             Text("\(title(wheel)) zones")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
             tyreZoneContainer {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     ForEach(zones, id: \.self) { zone in
                         zoneButton(wheel, zone)
                             .frame(maxWidth: .infinity)
@@ -510,14 +528,14 @@ struct MeasureView: View {
 
     private func tyreZoneContainer<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         content()
-            .padding(12)
+            .padding(8)
             .frame(maxWidth: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .fill(Color(.tertiarySystemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
             )
     }
@@ -864,7 +882,7 @@ struct MeasureView: View {
             vm.tapCell(wheel: wheel, zone: zone)
             focusTick &+= 1
         } label: {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
                 ViewThatFits(in: .horizontal) {
                     HStack(alignment: .top, spacing: 10) {
                         zoneBadge(for: zone)
@@ -874,45 +892,45 @@ struct MeasureView: View {
                         zoneValueLabel(for: zone, valueText: valueText, isLive: isRunning)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         zoneBadge(for: zone)
 
                         zoneValueLabel(for: zone, valueText: valueText, isLive: isRunning)
                     }
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2) {
                     if isRunning {
                         if settings.autoStopLimitSec > 0 {
                             ProgressView(value: progress)
                                 .progressViewStyle(.linear)
                                 .tint(Color.accentColor)
                             Text(String(format: "Auto stop in %.1fs", max(0, autoStopLimit - vm.elapsed)))
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundStyle(.secondary)
                         }
                         Text("Tap again to stop")
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     } else if let stamp = captureTimestamp(for: wheel, zone: zone) {
                         timestampLabel(date: stamp.date, time: stamp.time)
                     } else {
                         Text("Tap to capture")
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
                 }
-                .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
             }
-            .padding(.vertical, 20)
-            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
             .frame(maxWidth: .infinity, minHeight: zoneButtonHeight, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(isRunning ? Color.accentColor.opacity(0.25) : Color(.secondarySystemBackground))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(isRunning ? Color.accentColor : Color.secondary.opacity(0.25),
                             lineWidth: isRunning ? 2 : 1)
             )
@@ -939,9 +957,9 @@ struct MeasureView: View {
 
     @ViewBuilder
     private func zoneValueLabel(for zone: Zone, valueText: String, isLive: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(valueText)
-                .font(.system(size: 36, weight: .semibold, design: .rounded))
+                .font(.system(size: 32, weight: .semibold, design: .rounded))
                 .monospacedDigit()
                 .foregroundStyle(valueText == "--" ? .tertiary : .primary)
                 .lineLimit(1)
@@ -1097,27 +1115,20 @@ struct MeasureView: View {
 
     // BLEの状態、操作、診断をまとめたカード
     private var connectBar: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 20) {
-                    liveTemperatureHighlight
-                        .frame(maxWidth: 240)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        bleHeader
-                        connectButtons
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                VStack(alignment: .leading, spacing: 16) {
-                    liveTemperatureHighlight
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .bottom, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
                     bleHeader
-                    connectButtons
+                    captureStatusRow
                 }
+
+                Spacer(minLength: 0)
+
+                liveTemperatureBadge
             }
 
-            Divider()
+            connectButtons
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             HStack(spacing: 12) {
                 Text(String(format: "Hz: %.1f", ble.notifyHz))
@@ -1127,19 +1138,19 @@ struct MeasureView: View {
                         .monospacedDigit()
                 }
             }
-            .font(.footnote)
+            .font(.caption2)
             .foregroundStyle(.secondary)
             .lineLimit(1)
         }
-        .padding(18)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
     }
 
-    private var liveTemperatureHighlight: some View {
+    private var liveTemperatureBadge: some View {
         let valueText: String
         if let live = vm.liveTemperatureC, live.isFinite {
             valueText = String(format: "%.1f", live)
@@ -1147,61 +1158,57 @@ struct MeasureView: View {
             valueText = "--"
         }
 
-        let statusText: String
-        if vm.isCaptureActive, let wheel = vm.currentWheel, let zone = vm.currentZone {
-            statusText = "Capturing / 計測中: \(title(wheel)) \(zoneDisplayName(zone))"
-        } else {
-            statusText = "Standby / 待機中"
-        }
-
-        return VStack(alignment: .leading, spacing: 10) {
-            Label("Live temperature / 現在温度", systemImage: "thermometer")
-                .font(.caption.weight(.semibold))
+        return HStack(alignment: .lastTextBaseline, spacing: 4) {
+            Image(systemName: "thermometer")
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
 
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(valueText)
-                    .font(.system(size: 46, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-                Text("℃")
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(.secondary)
+            Text(valueText)
+                .font(.system(size: 34, weight: .bold, design: .rounded))
+                .monospacedDigit()
 
-                if vm.isCaptureActive {
-                    Text("LIVE")
-                        .font(.caption2.weight(.bold))
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, 8)
-                        .background(Capsule().fill(Color.accentColor.opacity(0.18)))
-                        .foregroundStyle(Color.accentColor)
-                }
+            Text("℃")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private var captureStatusRow: some View {
+        HStack(spacing: 6) {
+            if vm.isCaptureActive {
+                Text("LIVE")
+                    .font(.caption2.weight(.bold))
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 7)
+                    .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                    .foregroundStyle(Color.accentColor)
             }
 
-            Text(statusText)
-                .font(.caption)
+            Text(captureStatusText())
+                .font(.caption2)
                 .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.tertiarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.secondary.opacity(0.1))
-        )
+    }
+
+    private func captureStatusText() -> String {
+        if vm.isCaptureActive, let wheel = vm.currentWheel, let zone = vm.currentZone {
+            return "Capturing / 計測中: \(title(wheel)) \(zoneDisplayName(zone))"
+        }
+        return "Standby / 待機中"
     }
 
     private var bleHeader: some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 2) {
             Text("BLE: " + stateText())
                 .font(.subheadline)
-            Spacer()
+
             if let name = ble.deviceName {
                 Text(name)
-                    .font(.callout)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
         }
     }

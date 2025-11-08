@@ -865,7 +865,8 @@ struct MeasureView: View {
     private func zoneButton(_ wheel: WheelPos, _ zone: Zone) -> some View {
         let isRunning = vm.currentWheel == wheel && vm.currentZone == zone
         let valueText = displayValue(w: wheel, z: zone)
-        let progress = min(vm.elapsed / Double(settings.durationSec), 1.0)
+        let autoStopLimit = Double(settings.autoStopLimitSec)
+        let progress = autoStopLimit > 0 ? min(vm.elapsed / autoStopLimit, 1.0) : 0
 
         return Button {
             selectedWheel = wheel
@@ -891,10 +892,15 @@ struct MeasureView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     if isRunning {
-                        ProgressView(value: progress)
-                            .progressViewStyle(.linear)
-                            .tint(Color.accentColor)
-                        Text(String(format: "Remaining %.1fs", max(0, Double(settings.durationSec) - vm.elapsed)))
+                        if settings.autoStopLimitSec > 0 {
+                            ProgressView(value: progress)
+                                .progressViewStyle(.linear)
+                                .tint(Color.accentColor)
+                            Text(String(format: "Auto stop in %.1fs", max(0, autoStopLimit - vm.elapsed)))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Text("Tap again to stop")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else if let stamp = captureTimestamp(for: wheel, zone: zone) {
@@ -1050,14 +1056,9 @@ struct MeasureView: View {
         Haptics.impactMedium()
     }
 
-    // 置き換え: 下部バーは「Stop」「Next」「Export CSV」のみ
-    // MeasureView.swift の bottomBar 内
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            Button("Stop") { vm.stopAll() }
-                .buttonStyle(.bordered)
-
-            Spacer()
+            Spacer(minLength: 0)
 
             Button {
                 showNextSessionDialog = true

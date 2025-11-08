@@ -20,6 +20,7 @@ struct SessionSnapshot: Codable {
     var meta: MeasureMeta
     var results: [MeasureResult]
     var wheelMemos: [WheelPos: String]
+    var wheelPressures: [WheelPos: Double]
     var sessionBeganAt: Date?
     var createdAt: Date
 
@@ -27,6 +28,7 @@ struct SessionSnapshot: Codable {
         case meta
         case results
         case wheelMemos
+        case wheelPressures
         case sessionBeganAt
         case createdAt
     }
@@ -34,11 +36,13 @@ struct SessionSnapshot: Codable {
     init(meta: MeasureMeta,
          results: [MeasureResult],
          wheelMemos: [WheelPos: String],
+         wheelPressures: [WheelPos: Double] = [:],
          sessionBeganAt: Date?,
          createdAt: Date = Date()) {
         self.meta = meta
         self.results = results
         self.wheelMemos = wheelMemos
+        self.wheelPressures = wheelPressures
         self.sessionBeganAt = sessionBeganAt
         self.createdAt = createdAt
     }
@@ -54,6 +58,14 @@ struct SessionSnapshot: Codable {
         wheelMemos = Dictionary(uniqueKeysWithValues: rawMap.compactMap { key, value in
             WheelPos(rawValue: key).map { ($0, value) }
         })
+
+        if let rawPressures = try container.decodeIfPresent([WheelPos.RawValue: Double].self, forKey: .wheelPressures) {
+            wheelPressures = Dictionary(uniqueKeysWithValues: rawPressures.compactMap { key, value in
+                WheelPos(rawValue: key).map { ($0, value) }
+            })
+        } else {
+            wheelPressures = [:]
+        }
     }
 
     func encode(to encoder: Encoder) throws {
@@ -65,6 +77,11 @@ struct SessionSnapshot: Codable {
 
         let rawMap = Dictionary(uniqueKeysWithValues: wheelMemos.map { ($0.key.rawValue, $0.value) })
         try container.encode(rawMap, forKey: .wheelMemos)
+
+        if !wheelPressures.isEmpty {
+            let pressureMap = Dictionary(uniqueKeysWithValues: wheelPressures.map { ($0.key.rawValue, $0.value) })
+            try container.encode(pressureMap, forKey: .wheelPressures)
+        }
     }
 }
 
@@ -187,7 +204,7 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
     }
 
     private func writeCSV(_ snapshot: SessionSnapshot) throws {
-        struct Accumulator { var out = ""; var center = ""; var inner = "" }
+        struct Accumulator { var out = ""; var center = ""; var inner = ""; var ip = "" }
         var perWheel: [WheelPos: Accumulator] = [:]
         for result in snapshot.results {
             let value = result.peakC.isFinite ? String(format: "%.1f", result.peakC) : ""
@@ -200,7 +217,13 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
             perWheel[result.wheel] = acc
         }
 
-        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO\n"
+        for (wheel, pressure) in snapshot.wheelPressures {
+            var acc = perWheel[wheel] ?? Accumulator()
+            acc.ip = String(format: "%.1f", pressure)
+            perWheel[wheel] = acc
+        }
+
+        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO\n"
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
@@ -210,8 +233,8 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
         let uploadedISO = ""
 
         let order: [WheelPos] = [.FL, .FR, .RL, .RR]
-        for wheel in order where perWheel[wheel] != nil {
-            let acc = perWheel[wheel]!
+        for wheel in order {
+            guard let acc = perWheel[wheel] else { continue }
             let memo = snapshot.wheelMemos[wheel]?.replacingOccurrences(of: ",", with: " ") ?? ""
             let row = [
                 snapshot.meta.track,
@@ -226,6 +249,7 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
                 acc.out,
                 acc.center,
                 acc.inner,
+                acc.ip,
                 memo,
                 sessionISO,
                 exportedISO,

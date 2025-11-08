@@ -32,6 +32,7 @@ final class CSVExporter: CSVExporting {
         meta: MeasureMeta,
         results: [MeasureResult],
         wheelMemos: [WheelPos: String],
+        wheelPressures: [WheelPos: Double],
         sessionStart: Date,
         deviceName: String?
     ) throws -> URL {
@@ -48,11 +49,11 @@ final class CSVExporter: CSVExporting {
         let url = dir.appendingPathComponent("track_session_flatwheel_\(ts)_\(dev)_\(trk).csv")
 
         // ヘッダは旧資産に合わせる
-        // TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO
-        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO\n"
+        // TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO
+        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO\n"
 
         // wheelごとに OUT/CL/IN を詰める
-        struct Acc { var out="", cl="", inS="" }
+        struct Acc { var out="", cl="", inS="", ip="" }
         var perWheel: [WheelPos:Acc] = [:]
         for r in results {
             var a = perWheel[r.wheel] ?? Acc()
@@ -64,6 +65,12 @@ final class CSVExporter: CSVExporting {
             perWheel[r.wheel] = a
         }
 
+        for (wheel, pressure) in wheelPressures {
+            var acc = perWheel[wheel] ?? Acc()
+            acc.ip = String(format: "%.1f", pressure)
+            perWheel[wheel] = acc
+        }
+
         let iso = ISO8601DateFormatter()
         let sessionISO  = iso.string(from: sessionStart)
         let exportedISO = iso.string(from: Date())
@@ -71,12 +78,12 @@ final class CSVExporter: CSVExporting {
 
         // wheel順で安定化
         let order: [WheelPos] = [.FL,.FR,.RL,.RR]
-        for w in order where perWheel[w] != nil {
-            let a = perWheel[w]!
+        for w in order {
+            guard let a = perWheel[w] else { continue }
             let memo = wheelMemos[w] ?? ""
             let row = [
                 meta.track, meta.date, meta.car, meta.driver, meta.tyre, meta.time, meta.lap, meta.checker,
-                w.rawValue, a.out, a.cl, a.inS,
+                w.rawValue, a.out, a.cl, a.inS, a.ip,
                 memo.replacingOccurrences(of: ",", with: " "),
                 sessionISO, exportedISO, uploadedISO
             ].joined(separator: ",")

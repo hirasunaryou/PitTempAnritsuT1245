@@ -12,6 +12,7 @@ struct MeasureView: View {
     @EnvironmentObject var registry: DeviceRegistry
 
     @StateObject private var speech = SpeechMemoManager()
+    @StateObject private var pressureSpeech = SpeechMemoManager()
     @State private var selectedWheel: WheelPos = .FL
     @State private var showRaw = false
     @State private var focusTick = 0
@@ -27,10 +28,16 @@ struct MeasureView: View {
     @State private var manualSuccess: [WheelPos: [Zone: Date]] = [:]
     @State private var manualMemos: [WheelPos: String] = [:]
     @State private var manualMemoSuccess: [WheelPos: Date] = [:]
+    @State private var manualPressureValues: [WheelPos: String] = [:]
+    @State private var manualPressureErrors: [WheelPos: String] = [:]
+    @State private var manualPressureSuccess: [WheelPos: Date] = [:]
     @State private var showNextSessionDialog = false
     @State private var showWheelDetails = false
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
+    private let manualPressureRange: ClosedRange<Double> = 0...400
+    private let manualPressureStep: Double = 5
+    private let manualPressureDefault: Double = 200
     private let zoneButtonHeight: CGFloat = 112
     private static let manualTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -110,6 +117,7 @@ struct MeasureView: View {
         }
         .onAppear {
             speech.requestAuth()
+            pressureSpeech.requestAuth()
             ble.startScan()
             ble.autoConnectOnDiscover = settings.bleAutoConnect
             // registry の autoConnect=true だけを優先対象に
@@ -123,6 +131,7 @@ struct MeasureView: View {
 
         .onDisappear {
             vm.stopAll()
+            if pressureSpeech.isRecording { pressureSpeech.stop() }
         }
         .onReceive(ble.temperatureStream) { sample in
             vm.ingestBLESample(sample)
@@ -134,15 +143,18 @@ struct MeasureView: View {
             if newValue {
                 clearManualFeedback(for: selectedWheel)
                 syncManualDefaults(for: selectedWheel)
+                syncManualPressureDefaults(for: selectedWheel)
                 showWheelDetails = true
             } else {
                 clearManualFeedback()
+                if pressureSpeech.isRecording { pressureSpeech.stop() }
             }
         }
         .onChange(of: selectedWheel) { _, newWheel in
             if isManualMode {
                 clearManualFeedback(for: newWheel)
                 syncManualDefaults(for: newWheel)
+                syncManualPressureDefaults(for: newWheel)
             }
             showWheelDetails = false
         }
@@ -152,15 +164,20 @@ struct MeasureView: View {
         .onReceive(vm.$wheelMemos) { _ in
             if isManualMode { syncManualMemo(for: selectedWheel) }
         }
+        .onReceive(vm.$wheelPressures) { _ in
+            if isManualMode { syncManualPressureDefaults(for: selectedWheel) }
+        }
         .onReceive(vm.$sessionResetID) { _ in
             selectedWheel = .FL
             manualValues.removeAll()
             manualMemos.removeAll()
+            manualPressureValues.removeAll()
             clearManualFeedback()
             showWheelDetails = false
             if isManualMode {
                 syncManualDefaults(for: .FL)
                 syncManualMemo(for: .FL)
+                syncManualPressureDefaults(for: .FL)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
@@ -345,6 +362,17 @@ struct MeasureView: View {
                         }
                     }
                 }
+
+                if let pressureText = pressureTileDisplay(for: wheel) {
+                    HStack(spacing: 6) {
+                        Text("I.P.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text(pressureText)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .frame(maxWidth: .infinity, minHeight: 62)
             .padding(.vertical, 6)
@@ -417,6 +445,17 @@ struct MeasureView: View {
                     summaryChip(for: zone, wheel: wheel)
                 }
             }
+        }
+
+        if let pressureText = pressureDetailDisplay(for: wheel) {
+            HStack(spacing: 6) {
+                Image(systemName: "gauge")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("I.P.: \(pressureText)")
+                    .font(.callout.monospacedDigit())
+            }
+            .padding(.top, 6)
         }
     }
 
@@ -520,6 +559,8 @@ struct MeasureView: View {
                 manualZoneRow(for: wheel, zone: zone)
             }
 
+            manualPressureRow(for: wheel)
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Wheel memo")
                     .font(.caption)
@@ -547,6 +588,87 @@ struct MeasureView: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(.tertiarySystemBackground)))
+    }
+
+    private func manualPressureRow(for wheel: WheelPos) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Inner pressure (kPa)")
+                    .font(.headline)
+                if pressureSpeech.isRecording && pressureSpeech.currentWheel == wheel {
+                    Spacer(minLength: 8)
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                    Text("Recording…")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    commitManualPressure(for: wheel)
+                } label: {
+                    Label("Save", systemImage: "checkmark.circle.fill")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            TextField("200", text: manualPressureBinding(for: wheel))
+                .textFieldStyle(.roundedBorder)
+                .keyboardType(.decimalPad)
+                .disableAutocorrection(true)
+                .onSubmit { commitManualPressure(for: wheel) }
+
+            Stepper(value: manualPressureStepperBinding(for: wheel), in: manualPressureRange, step: manualPressureStep) {
+                Text("Adjust: \(manualPressureDisplay(for: wheel)) kPa")
+                    .monospacedDigit()
+            }
+
+            HStack {
+                if pressureSpeech.isRecording && pressureSpeech.currentWheel == wheel {
+                    Button("Stop") {
+                        pressureSpeech.stop()
+                        let transcript = pressureSpeech.takeFinalText()
+                        applyPressureTranscript(transcript, to: wheel)
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button {
+                        let (prevWheel, prevText) = pressureSpeech.stopAndTakeText()
+                        if let prevWheel, !prevText.isEmpty {
+                            applyPressureTranscript(prevText, to: prevWheel)
+                        }
+                        do {
+                            try pressureSpeech.start(for: wheel)
+                            Haptics.impactLight()
+                        } catch {
+                            if let error = error as? SpeechMemoManager.RecordingError {
+                                setManualPressureError(error.localizedDescription, for: wheel)
+                                setManualPressureSuccess(nil, for: wheel)
+                            }
+                        }
+                    } label: {
+                        Label("Voice input", systemImage: "mic.fill")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!pressureSpeech.isAuthorized)
+                }
+                Spacer()
+            }
+
+            if let error = manualPressureError(for: wheel) {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(Color.red)
+            } else if let savedAt = manualPressureSuccessDate(for: wheel) {
+                Text("Saved \(Self.manualTimeFormatter.string(from: savedAt))")
+                    .font(.caption)
+                    .foregroundStyle(Color.green)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground).opacity(0.6)))
     }
 
     private func manualZoneRow(for wheel: WheelPos, zone: Zone) -> some View {
@@ -642,6 +764,40 @@ struct MeasureView: View {
         manualMemoSuccess[wheel]
     }
 
+    private func manualPressureBinding(for wheel: WheelPos) -> Binding<String> {
+        Binding(
+            get: { manualPressureValues[wheel] ?? "" },
+            set: { newValue in updateManualPressureValue(newValue, for: wheel) }
+        )
+    }
+
+    private func manualPressureStepperBinding(for wheel: WheelPos) -> Binding<Double> {
+        Binding(
+            get: {
+                if let text = manualPressureValues[wheel], let parsed = parseManualValue(text) {
+                    return min(max(parsed, manualPressureRange.lowerBound), manualPressureRange.upperBound)
+                }
+                if let existing = vm.wheelPressures[wheel] {
+                    return existing
+                }
+                return manualPressureDefault
+            },
+            set: { newValue in
+                updateManualPressureValue(String(format: "%.1f", newValue), for: wheel)
+            }
+        )
+    }
+
+    private func manualPressureDisplay(for wheel: WheelPos) -> String {
+        if let text = manualPressureValues[wheel], !text.isEmpty {
+            return text
+        }
+        if let existing = vm.wheelPressures[wheel] {
+            return String(format: "%.1f", existing)
+        }
+        return String(format: "%.0f", manualPressureDefault)
+    }
+
     private func updateManualValue(_ value: String, for wheel: WheelPos, zone: Zone) {
         var zoneMap = manualValues[wheel] ?? [:]
         zoneMap[zone] = value
@@ -649,6 +805,12 @@ struct MeasureView: View {
 
         setManualError(nil, for: wheel, zone: zone)
         setManualSuccess(nil, for: wheel, zone: zone)
+    }
+
+    private func updateManualPressureValue(_ value: String, for wheel: WheelPos) {
+        manualPressureValues[wheel] = value
+        setManualPressureError(nil, for: wheel)
+        setManualPressureSuccess(nil, for: wheel)
     }
 
     private func defaultManualValue(for wheel: WheelPos, zone: Zone) -> Double {
@@ -676,6 +838,30 @@ struct MeasureView: View {
             zoneMap.removeValue(forKey: zone)
         }
         manualSuccess[wheel] = zoneMap.isEmpty ? nil : zoneMap
+    }
+
+    private func manualPressureError(for wheel: WheelPos) -> String? {
+        manualPressureErrors[wheel]
+    }
+
+    private func manualPressureSuccessDate(for wheel: WheelPos) -> Date? {
+        manualPressureSuccess[wheel]
+    }
+
+    private func setManualPressureError(_ message: String?, for wheel: WheelPos) {
+        if let message {
+            manualPressureErrors[wheel] = message
+        } else {
+            manualPressureErrors.removeValue(forKey: wheel)
+        }
+    }
+
+    private func setManualPressureSuccess(_ date: Date?, for wheel: WheelPos) {
+        if let date {
+            manualPressureSuccess[wheel] = date
+        } else {
+            manualPressureSuccess.removeValue(forKey: wheel)
+        }
     }
 
     private func commitManualEntry(wheel: WheelPos, zone: Zone) {
@@ -720,6 +906,36 @@ struct MeasureView: View {
         manualMemoSuccess[wheel] = Date()
     }
 
+    private func commitManualPressure(for wheel: WheelPos) {
+        let rawText = manualPressureValues[wheel] ?? ""
+        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            setManualPressureError("Enter a pressure value", for: wheel)
+            setManualPressureSuccess(nil, for: wheel)
+            return
+        }
+
+        guard let value = parseManualValue(trimmed) else {
+            setManualPressureError("Invalid number", for: wheel)
+            setManualPressureSuccess(nil, for: wheel)
+            return
+        }
+
+        guard manualPressureRange.contains(value) else {
+            let minText = String(format: "%.0f", manualPressureRange.lowerBound)
+            let maxText = String(format: "%.0f", manualPressureRange.upperBound)
+            setManualPressureError("Value must be between \(minText) and \(maxText) kPa", for: wheel)
+            setManualPressureSuccess(nil, for: wheel)
+            return
+        }
+
+        vm.setPressure(value, for: wheel)
+        updateManualPressureValue(String(format: "%.1f", value), for: wheel)
+        setManualPressureError(nil, for: wheel)
+        setManualPressureSuccess(Date(), for: wheel)
+        Haptics.success()
+    }
+
     private func parseManualValue(_ text: String) -> Double? {
         let normalized = text.replacingOccurrences(of: ",", with: ".")
         return Double(normalized)
@@ -753,16 +969,43 @@ struct MeasureView: View {
         manualMemos[wheel] = vm.wheelMemos[wheel] ?? manualMemos[wheel] ?? ""
     }
 
+    private func syncManualPressureDefaults(for wheel: WheelPos) {
+        if let existing = vm.wheelPressures[wheel] {
+            manualPressureValues[wheel] = String(format: "%.1f", existing)
+        } else {
+            manualPressureValues[wheel] = manualPressureValues[wheel] ?? ""
+        }
+    }
+
     private func clearManualFeedback(for wheel: WheelPos? = nil) {
         if let wheel {
             manualErrors[wheel] = nil
             manualSuccess[wheel] = nil
             manualMemoSuccess[wheel] = nil
+            manualPressureErrors[wheel] = nil
+            manualPressureSuccess[wheel] = nil
         } else {
             manualErrors.removeAll()
             manualSuccess.removeAll()
             manualMemoSuccess.removeAll()
+            manualPressureErrors.removeAll()
+            manualPressureSuccess.removeAll()
         }
+    }
+
+    private func applyPressureTranscript(_ text: String, to wheel: WheelPos) {
+        let sanitized = text.replacingOccurrences(of: "[^0-9,\\.]", with: "", options: .regularExpression)
+        let normalized = sanitized.replacingOccurrences(of: ",", with: ".")
+        let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmed.isEmpty else {
+            setManualPressureError("Voice input did not contain numbers", for: wheel)
+            setManualPressureSuccess(nil, for: wheel)
+            return
+        }
+
+        updateManualPressureValue(trimmed, for: wheel)
+        commitManualPressure(for: wheel)
     }
 
     private func zoneOrder(for wheel: WheelPos) -> [Zone] {
@@ -1013,6 +1256,16 @@ struct MeasureView: View {
             return r.peakC.isFinite ? String(format: "%.1f", r.peakC) : "--"
         }
         return "--"
+    }
+
+    private func pressureTileDisplay(for wheel: WheelPos) -> String? {
+        guard let pressure = vm.wheelPressures[wheel] else { return nil }
+        return String(format: "%.1f kPa", pressure)
+    }
+
+    private func pressureDetailDisplay(for wheel: WheelPos) -> String? {
+        guard let pressure = vm.wheelPressures[wheel] else { return nil }
+        return String(format: "%.1f kPa", pressure)
     }
 
     private func captureTimestamp(for wheel: WheelPos, zone: Zone) -> (date: String, time: String)? {

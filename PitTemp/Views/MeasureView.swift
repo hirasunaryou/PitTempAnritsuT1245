@@ -1098,24 +1098,21 @@ struct MeasureView: View {
     // BLEの状態、操作、診断をまとめたカード
     private var connectBar: some View {
         VStack(alignment: .leading, spacing: 16) {
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 20) {
-                    liveTemperatureHighlight
-                        .frame(maxWidth: 240)
-
-                    VStack(alignment: .leading, spacing: 12) {
-                        bleHeader
-                        connectButtons
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                VStack(alignment: .leading, spacing: 16) {
-                    liveTemperatureHighlight
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
                     bleHeader
-                    connectButtons
+                    Text(captureStatusText())
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                liveTemperatureBadge
             }
+
+            connectButtons
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             Divider()
 
@@ -1139,7 +1136,7 @@ struct MeasureView: View {
         )
     }
 
-    private var liveTemperatureHighlight: some View {
+    private var liveTemperatureBadge: some View {
         let valueText: String
         if let live = vm.liveTemperatureC, live.isFinite {
             valueText = String(format: "%.1f", live)
@@ -1147,17 +1144,12 @@ struct MeasureView: View {
             valueText = "--"
         }
 
-        let statusText: String
-        if vm.isCaptureActive, let wheel = vm.currentWheel, let zone = vm.currentZone {
-            statusText = "Capturing / 計測中: \(title(wheel)) \(zoneDisplayName(zone))"
-        } else {
-            statusText = "Standby / 待機中"
-        }
-
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 4) {
             Label("Live temperature / 現在温度", systemImage: "thermometer")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .labelStyle(.titleAndIcon)
+                .lineLimit(1)
 
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(valueText)
@@ -1176,21 +1168,15 @@ struct MeasureView: View {
                         .foregroundStyle(Color.accentColor)
                 }
             }
-
-            Text(statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color(.tertiarySystemBackground))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.secondary.opacity(0.1))
-        )
+        .frame(minWidth: 0, alignment: .trailing)
+    }
+
+    private func captureStatusText() -> String {
+        if vm.isCaptureActive, let wheel = vm.currentWheel, let zone = vm.currentZone {
+            return "Capturing / 計測中: \(title(wheel)) \(zoneDisplayName(zone))"
+        }
+        return "Standby / 待機中"
     }
 
     private var bleHeader: some View {

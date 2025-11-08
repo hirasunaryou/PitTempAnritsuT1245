@@ -898,12 +898,7 @@ struct MeasureView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     } else if let stamp = captureTimestamp(for: wheel, zone: zone) {
-                        Text("\(stamp.date) \(stamp.time)")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                            .allowsTightening(true)
+                        timestampLabel(date: stamp.date, time: stamp.time)
                     } else {
                         Text("Tap to capture")
                             .font(.caption)
@@ -957,6 +952,26 @@ struct MeasureView: View {
             .padding(.trailing, -6)
             .offset(y: zoneValueOffset(for: zone))
             .accessibilityLabel("\(zoneDisplayName(zone)) value \(valueText)")
+    }
+
+    @ViewBuilder
+    private func timestampLabel(date: String, time: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(date)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
+
+            Text(time)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .allowsTightening(true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func zoneValueOffset(for zone: Zone) -> CGFloat {

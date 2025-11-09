@@ -11,6 +11,21 @@ import Foundation
 import SwiftUI
 import Combine
 
+struct DriveCSVMetadata: Codable, Equatable {
+    var sessionID: UUID
+    var driver: String
+    var track: String
+    var car: String
+    var deviceID: String
+    var deviceName: String
+    var exportedAt: Date
+    var sessionStartedAt: Date
+
+    var dayFolderName: String {
+        DateFormatter.cachedDayFormatter.string(from: sessionStartedAt)
+    }
+}
+
 @MainActor
 final class SessionViewModel: ObservableObject {
 
@@ -72,6 +87,7 @@ final class SessionViewModel: ObservableObject {
     }
     @Published private(set) var lastCSV: URL? = nil
     @Published private(set) var lastLegacyCSV: URL? = nil
+    @Published private(set) var lastCSVMetadata: DriveCSVMetadata? = nil
     // メモ（ホイール別の自由記述）
     @Published var wheelMemos: [WheelPos: String] = [:] {
         didSet { scheduleAutosave(reason: .memoUpdated) }
@@ -174,6 +190,7 @@ final class SessionViewModel: ObservableObject {
         meta = preservedMeta
         lastCSV = nil
         lastLegacyCSV = nil
+        lastCSVMetadata = nil
 
         loadedHistorySummary = nil
 
@@ -285,9 +302,21 @@ final class SessionViewModel: ObservableObject {
                 wheelMemos: wheelMemos,
                 wheelPressures: wheelPressures,
                 sessionStart: sessionStart,
-                deviceName: deviceName
+                deviceName: deviceName,
+                sessionID: currentSessionID,
+                deviceIdentity: deviceIdentity
             )
             lastCSV = url
+            lastCSVMetadata = DriveCSVMetadata(
+                sessionID: currentSessionID,
+                driver: meta.driver,
+                track: meta.track,
+                car: meta.car,
+                deviceID: deviceIdentity.id,
+                deviceName: deviceIdentity.name,
+                exportedAt: Date(),
+                sessionStartedAt: sessionStart
+            )
             print("CSV saved (wflat):", url.lastPathComponent)
             persistAutosaveNow()
             autosaveStore.archiveLatest()
@@ -502,6 +531,7 @@ final class SessionViewModel: ObservableObject {
         peakC = .nan
         lastCSV = nil
         lastLegacyCSV = nil
+        lastCSVMetadata = nil
         isRestoringAutosave = false
         loadedHistorySummary = historySummary
     }

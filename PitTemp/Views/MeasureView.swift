@@ -10,6 +10,7 @@ struct MeasureView: View {
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var ble: BluetoothService
     @EnvironmentObject var registry: DeviceRegistry
+    @EnvironmentObject var driveService: GoogleDriveService
 
     @StateObject private var speech = SpeechMemoManager()
     @StateObject private var pressureSpeech = SpeechMemoManager()
@@ -1626,12 +1627,17 @@ struct MeasureView: View {
                 // 1) CSVを両フォーマットで生成（デバイス名を付与）
                 vm.exportCSV(deviceName: ble.deviceName)
 
-                // 2) アップロード先は「旧フォーマット優先」（ライブラリ互換）
-                if let url = vm.lastLegacyCSV ?? vm.lastCSV {
-                    folderBM.upload(file: url)
+                if let metadata = vm.lastCSVMetadata, let url = vm.lastCSV {
+                    Task { await driveService.upload(csvURL: url, metadata: metadata) }
+                }
+
+                if let fallbackURL = vm.lastLegacyCSV ?? vm.lastCSV {
+                    folderBM.upload(file: fallbackURL, metadata: vm.lastCSVMetadata)
                 }
             }
             .buttonStyle(.borderedProminent)
+
+            uploadStatusView
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -1722,6 +1728,31 @@ struct MeasureView: View {
             Text("℃")
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var uploadStatusView: some View {
+        switch driveService.uploadState {
+        case .idle:
+            EmptyView()
+        case .uploading:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.accentColor)
+                Text("Uploading to Drive…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .done:
+            Label("Drive upload complete", systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .failed(let message):
+            Label(message.isEmpty ? "Drive upload failed" : message, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.red)
         }
     }
 
@@ -1909,6 +1940,7 @@ struct MeasureView: View {
         .environmentObject(fixtures.viewModel)
         .environmentObject(fixtures.folderBookmark)
         .environmentObject(fixtures.settings)
+        .environmentObject(fixtures.driveService)
         .environmentObject(fixtures.bluetooth)
         .environmentObject(fixtures.registry)
         .environmentObject(fixtures.logStore)
@@ -1920,6 +1952,7 @@ struct MeasureView: View {
         .environmentObject(fixtures.viewModel)
         .environmentObject(fixtures.folderBookmark)
         .environmentObject(fixtures.settings)
+        .environmentObject(fixtures.driveService)
         .environmentObject(fixtures.bluetooth)
         .environmentObject(fixtures.registry)
         .environmentObject(fixtures.logStore)

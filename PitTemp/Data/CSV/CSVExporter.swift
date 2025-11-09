@@ -27,6 +27,7 @@ final class CSVExporter: CSVExporting {
             do { try h.close() } catch { /* ignore */ }
         }
     }
+
     // MARK: - 旧形式（wflat）
     func exportWFlat(
         meta: MeasureMeta,
@@ -34,19 +35,30 @@ final class CSVExporter: CSVExporting {
         wheelMemos: [WheelPos: String],
         wheelPressures: [WheelPos: Double],
         sessionStart: Date,
-        deviceName: String?
+        deviceName: String?,
+        sessionID: UUID,
+        deviceIdentity: DeviceIdentity
     ) throws -> URL {
 
         let base = documentsBase()
-        let day = ISO8601DateFormatter().string(from: sessionStart).prefix(10) // yyyy-MM-dd
-        let dir = base.appendingPathComponent("PitTempUploads/\(day)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let uploadsDir = base.appendingPathComponent("PitTempUploads", isDirectory: true)
+        let day = Self.dayString(from: sessionStart)
+        let dayDir = uploadsDir.appendingPathComponent(day, isDirectory: true)
+        let deviceDir = dayDir.appendingPathComponent(deviceIdentity.id.sanitizedPathComponent(), isDirectory: true)
 
-        // ファイル名: track_session_flatwheel_<ISO>_<device>_<track>.csv
-        let ts = Self.fileStamp(sessionStart) // 例: 2025-10-13T12-06-19Z
-        let dev = (deviceName ?? "Unknown").replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
-        let trk = meta.track.replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "_", options: .regularExpression)
-        let url = dir.appendingPathComponent("track_session_flatwheel_\(ts)_\(dev)_\(trk).csv")
+        try FileManager.default.createDirectory(at: deviceDir, withIntermediateDirectories: true)
+
+        let fileName = Self.fileName(
+            sessionID: sessionID,
+            meta: meta,
+            deviceName: deviceName,
+            deviceIdentity: deviceIdentity
+        )
+        let url = deviceDir.appendingPathComponent(fileName).appendingPathExtension("csv")
+
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
 
         // ヘッダは旧資産に合わせる
         // TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO
@@ -103,13 +115,39 @@ final class CSVExporter: CSVExporting {
         return FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
 
-    private static func fileStamp(_ d: Date) -> String {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withYear,.withMonth,.withDay,.withTime,.withColonSeparatorInTime] // 2025-10-13T12:06:19Z
-        let s = f.string(from: d).replacingOccurrences(of: ":", with: "-")
-        return s // 2025-10-13T12-06-19Z
+    private static func dayString(from date: Date) -> String {
+        if #available(iOS 15.0, *) {
+            return DateFormatter.cachedDayFormatter.string(from: date)
+        } else {
+            let formatter = DateFormatter()
+            formatter.calendar = Calendar(identifier: .gregorian)
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            formatter.dateFormat = "yyyy-MM-dd"
+            return formatter.string(from: date)
+        }
     }
 
+    private static func fileName(
+        sessionID: UUID,
+        meta: MeasureMeta,
+        deviceName: String?,
+        deviceIdentity: DeviceIdentity
+    ) -> String {
+        var components: [String] = ["session", sessionID.uuidString]
+
+        let driver = meta.driver.sanitizedPathComponent()
+        let track = meta.track.sanitizedPathComponent()
+        let car = meta.car.sanitizedPathComponent()
+        let device = (deviceName ?? deviceIdentity.name).sanitizedPathComponent()
+
+        if !driver.isEmpty { components.append(driver) }
+        if !track.isEmpty { components.append(track) }
+        if !car.isEmpty { components.append(car) }
+        if !device.isEmpty { components.append(device) }
+
+        return components.joined(separator: "-")
+    }
 
     // ---- ヘルパ ----
 
@@ -117,7 +155,7 @@ final class CSVExporter: CSVExporting {
     private func ensureStreamingHandle() {
         if handle != nil { return }
         let base = documentsBase()
-        let day = ISO8601DateFormatter().string(from: Date()).prefix(10) // yyyy-MM-dd
+        let day = Self.dayString(from: Date())
         let dir = base.appendingPathComponent("PitTempLogs/\(day)")
 
         do {
@@ -137,3 +175,28 @@ final class CSVExporter: CSVExporting {
         }
     }
 }
+
+private extension String {
+    func sanitizedPathComponent(limit: Int = 48) -> String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let collapsed = trimmed.replacingOccurrences(
+            of: "[^A-Za-z0-9._-]",
+            with: "_",
+            options: .regularExpression
+        )
+
+        let deduped = collapsed
+            .replacingOccurrences(of: "__+", with: "_", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "._-"))
+
+        if limit > 0 && deduped.count > limit {
+            let index = deduped.index(deduped.startIndex, offsetBy: limit)
+            return String(deduped[..<index])
+        }
+
+        return deduped
+    }
+}
+

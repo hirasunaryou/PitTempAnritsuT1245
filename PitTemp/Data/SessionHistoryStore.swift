@@ -176,11 +176,19 @@ final class SessionHistoryStore: ObservableObject {
     func refresh() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
-            let urls = (try? self.fileManager.contentsOfDirectory(
+            let urls: [URL]
+            if let enumerator = self.fileManager.enumerator(
                 at: self.archiveDirectory,
-                includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles]
-            )) ?? []
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles, .skipsPackageDescendants]
+            ) {
+                urls = enumerator.compactMap { element in
+                    guard let url = element as? URL else { return nil }
+                    return url
+                }
+            } else {
+                urls = []
+            }
 
             let decoder = JSONDecoder()
             var items: [SessionHistorySummary] = []
@@ -304,54 +312,21 @@ private extension SessionHistoryStore {
     }
 
     func uniqueDestinationURL(for snapshot: SessionSnapshot, original: URL) -> URL {
-        let baseName = suggestedBaseName(for: snapshot, original: original)
-        var candidate = baseName
-        var index = 1
-        var destination = archiveDirectory.appendingPathComponent(candidate).appendingPathExtension("json")
+        _ = original
+        let day = DateFormatter.cachedDayFormatter.string(from: snapshot.createdAt)
+        let dayDirectory = archiveDirectory.appendingPathComponent(day, isDirectory: true)
+        if !fileManager.fileExists(atPath: dayDirectory.path) {
+            try? fileManager.createDirectory(at: dayDirectory, withIntermediateDirectories: true)
+        }
 
-        while fileManager.fileExists(atPath: destination.path) {
-            index += 1
-            candidate = "\(baseName)-\(index)"
-            destination = archiveDirectory.appendingPathComponent(candidate).appendingPathExtension("json")
+        let destination = dayDirectory
+            .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+            .appendingPathExtension("json")
+
+        if fileManager.fileExists(atPath: destination.path) {
+            try? fileManager.removeItem(at: destination)
         }
 
         return destination
-    }
-
-    func suggestedBaseName(for snapshot: SessionSnapshot, original: URL) -> String {
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let timestamp = isoFormatter.string(from: snapshot.createdAt).replacingOccurrences(of: ":", with: "-")
-        let carComponent = sanitizeFileNameComponent(snapshot.meta.car)
-        let trackComponent = sanitizeFileNameComponent(snapshot.meta.track)
-        let deviceComponent = sanitizeFileNameComponent(snapshot.originDeviceName)
-        let idSuffix = sanitizeFileNameComponent(String(snapshot.sessionID.uuidString.prefix(8)))
-
-        var components = ["session", timestamp]
-        if !idSuffix.isEmpty { components.append(idSuffix) }
-        if !carComponent.isEmpty {
-            components.append(carComponent)
-        } else if !trackComponent.isEmpty {
-            components.append(trackComponent)
-        }
-        if deviceComponent.isEmpty == false {
-            components.append(deviceComponent)
-        }
-
-        if components.count <= 2 {
-            let originalBase = sanitizeFileNameComponent(original.deletingPathExtension().lastPathComponent)
-            if !originalBase.isEmpty { components.append(originalBase) }
-        }
-
-        return components.joined(separator: "-")
-    }
-
-    func sanitizeFileNameComponent(_ text: String) -> String {
-        var invalidCharacters = CharacterSet(charactersIn: "/:?%*|<>")
-        invalidCharacters.insert(charactersIn: "\"\\")
-        invalidCharacters.formUnion(.whitespacesAndNewlines)
-
-        let components = text.components(separatedBy: invalidCharacters)
-        return components.filter { !$0.isEmpty }.joined(separator: "-")
     }
 }

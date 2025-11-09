@@ -381,7 +381,7 @@ struct LibraryView: View {
                 }
                 ToolbarItem(placement: .primaryAction) {
                     if let shareDocument {
-                        ShareLink(item: shareDocument) {
+                        ShareLink(item: shareDocument, preview: SharePreview(Text(shareDocument.fileName))) {
                             Label("Export CSV", systemImage: "square.and.arrow.up")
                         }
                     }

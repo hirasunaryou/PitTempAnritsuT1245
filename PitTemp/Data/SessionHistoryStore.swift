@@ -273,7 +273,7 @@ final class SessionHistoryStore: ObservableObject {
     }
 }
 
-private extension String {
+extension String {
     func ifEmpty(_ fallback: String) -> String {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : self
     }

@@ -47,6 +47,7 @@ struct FileItem: Identifiable, Hashable {
 // MARK: - LibraryView
 struct LibraryView: View {
     @EnvironmentObject var folderBM: FolderBookmark
+    @EnvironmentObject var settings: SettingsStore
 
     // ファイル一覧
     @State private var files: [FileItem] = []
@@ -103,10 +104,15 @@ struct LibraryView: View {
         NavigationStack {
             List {
                 Section("Cloud") {
-                    NavigationLink {
-                        DriveBrowserView()
-                    } label: {
-                        Label("Google Drive", systemImage: "cloud")
+                    if settings.enableGoogleDriveUpload {
+                        NavigationLink {
+                            DriveBrowserView()
+                        } label: {
+                            Label("Google Drive", systemImage: "cloud")
+                        }
+                    } else {
+                        Label("Google Drive uploads disabled", systemImage: "cloud.slash")
+                            .foregroundStyle(.secondary)
                     }
                 }
 

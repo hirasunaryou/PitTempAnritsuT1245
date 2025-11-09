@@ -329,6 +329,12 @@ final class GoogleDriveService: ObservableObject {
         manualAccessToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    @MainActor
+    func resetUIState() {
+        uploadState = .idle
+        lastErrorMessage = nil
+    }
+
     func signOut() {
         guard supportsInteractiveSignIn else { return }
 #if canImport(GoogleSignIn)

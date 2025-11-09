@@ -50,78 +50,96 @@ struct SettingsView: View {
 
                 // 共有フォルダ
                 Section("Shared Folder") {
-                    HStack {
-                        Text("Upload Folder")
-                        Spacer()
-                        Text(folderBM.folderURL?.lastPathComponent ?? "Not set")
+                    Toggle("Upload to iCloud shared folder", isOn: $settings.enableICloudUpload)
+
+                    if settings.enableICloudUpload {
+                        HStack {
+                            Text("Upload Folder")
+                            Spacer()
+                            Text(folderBM.folderURL?.lastPathComponent ?? "Not set")
+                                .foregroundStyle(.secondary)
+                        }
+                        Button("Choose iCloud Folder…") { showPicker = true }
+                    } else {
+                        Label("iCloud upload is disabled. CSV files will remain on this device until you re-enable it.", systemImage: "icloud.slash")
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Button("Choose iCloud Folder…") { showPicker = true }
                 }
 
                 Section("Google Drive") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        TextField(
-                            "Parent folder ID",
-                            text: Binding(
-                                get: { driveService.parentFolderID },
-                                set: { driveService.setParentFolder(id: $0) }
-                            )
-                        )
-                        .textInputAutocapitalization(.none)
-                        .autocorrectionDisabled()
+                    Toggle("Upload to Google Drive", isOn: $settings.enableGoogleDriveUpload)
 
-                        TextField(
-                            "Manual access token (optional)",
-                            text: Binding(
-                                get: { driveService.manualAccessToken },
-                                set: { driveService.setManualAccessToken($0) }
+                    if settings.enableGoogleDriveUpload {
+                        VStack(alignment: .leading, spacing: 12) {
+                            TextField(
+                                "Parent folder ID",
+                                text: Binding(
+                                    get: { driveService.parentFolderID },
+                                    set: { driveService.setParentFolder(id: $0) }
+                                )
                             )
-                        )
-                        .textInputAutocapitalization(.none)
-                        .autocorrectionDisabled()
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                            .textInputAutocapitalization(.none)
+                            .autocorrectionDisabled()
 
-                        if driveService.supportsInteractiveSignIn {
-                            HStack {
-                                Button {
-                                    Task {
-                                        do {
-                                            try await driveService.signIn()
-                                        } catch {
-                                            driveAlertMessage = error.localizedDescription
+                            TextField(
+                                "Manual access token (optional)",
+                                text: Binding(
+                                    get: { driveService.manualAccessToken },
+                                    set: { driveService.setManualAccessToken($0) }
+                                )
+                            )
+                            .textInputAutocapitalization(.none)
+                            .autocorrectionDisabled()
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                            if driveService.supportsInteractiveSignIn {
+                                HStack {
+                                    Button {
+                                        Task {
+                                            do {
+                                                try await driveService.signIn()
+                                            } catch {
+                                                driveAlertMessage = error.localizedDescription
+                                            }
                                         }
+                                    } label: {
+                                        Label("Sign in", systemImage: "person.crop.circle.badge.plus")
                                     }
-                                } label: {
-                                    Label("Sign in", systemImage: "person.crop.circle.badge.plus")
-                                }
 
-                                Button(role: .destructive) {
-                                    driveService.signOut()
-                                } label: {
-                                    Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                                    Button(role: .destructive) {
+                                        driveService.signOut()
+                                    } label: {
+                                        Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                                    }
                                 }
+                            } else {
+                                Label("Interactive Google sign-in is unavailable in this build. Provide an access token manually or add the GoogleSignIn SDK.", systemImage: "info.circle")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
-                        } else {
-                            Label("Interactive Google sign-in is unavailable in this build. Provide an access token manually or add the GoogleSignIn SDK.", systemImage: "info.circle")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
 
-                        Button {
-                            Task { await driveService.refreshFileList() }
-                        } label: {
-                            Label("Refresh Drive listing", systemImage: "arrow.clockwise")
-                        }
-                        .disabled(!driveService.isConfigured())
+                            Button {
+                                Task { await driveService.refreshFileList() }
+                            } label: {
+                                Label("Refresh Drive listing", systemImage: "arrow.clockwise")
+                            }
+                            .disabled(!settings.enableGoogleDriveUpload || !driveService.isConfigured())
 
-                        if let message = driveService.lastErrorMessage, !message.isEmpty {
-                            Text(message)
-                                .font(.footnote)
-                                .foregroundStyle(.red)
+                            if let message = driveService.lastErrorMessage, !message.isEmpty {
+                                Text(message)
+                                    .font(.footnote)
+                                    .foregroundStyle(.red)
+                            }
                         }
+                    } else {
+                        Label("Drive upload is disabled. Enable it if you need automatic uploads to Google Drive.", systemImage: "cloud.slash")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 
@@ -259,6 +277,16 @@ struct SettingsView: View {
             Button("OK", role: .cancel) { driveAlertMessage = nil }
         } message: {
             Text(driveAlertMessage ?? "")
+        }
+        .onChange(of: settings.enableGoogleDriveUpload) { _, newValue in
+            if !newValue {
+                driveService.resetUIState()
+            }
+        }
+        .onChange(of: settings.enableICloudUpload) { _, newValue in
+            if !newValue {
+                folderBM.statusLabel = .idle
+            }
         }
     }
 

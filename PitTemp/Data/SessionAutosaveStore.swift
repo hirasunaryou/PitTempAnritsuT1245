@@ -189,6 +189,11 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
                 }
                 try fileManager.copyItem(at: autosaveCSVURL, to: destinationCSV)
             }
+            NotificationCenter.default.post(
+                name: .pitSessionHistoryUpdated,
+                object: nil,
+                userInfo: ["url": destination]
+            )
         } catch {
             print("[Autosave] archive failed:", error)
             uiLogger?.publish(UILogEntry(

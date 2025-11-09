@@ -13,6 +13,7 @@ struct MeasureView: View {
 
     @StateObject private var speech = SpeechMemoManager()
     @StateObject private var pressureSpeech = SpeechMemoManager()
+    @StateObject private var history = SessionHistoryStore()
     @State private var selectedWheel: WheelPos = .FL
     @State private var showRaw = false
     @State private var focusTick = 0
@@ -33,12 +34,24 @@ struct MeasureView: View {
     @State private var manualPressureSuccess: [WheelPos: Date] = [:]
     @State private var showNextSessionDialog = false
     @State private var showWheelDetails = false
+    @State private var showHistorySheet = false
+    @State private var historyError: String? = nil
+    @State private var historyEditingEnabled = false
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
     private let manualPressureStep: Double = 5
     private let manualPressureDefault: Double = 200
     private let zoneButtonHeight: CGFloat = 112
+
+    private var isHistoryMode: Bool { vm.loadedHistorySummary != nil }
+    private var isManualInteractionActive: Bool {
+        if isHistoryMode { return historyEditingEnabled }
+        return isManualMode
+    }
+    private var historyBackgroundColor: Color {
+        isHistoryMode ? Color.orange.opacity(0.08) : .clear
+    }
     private static let manualTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .medium
@@ -69,6 +82,8 @@ struct MeasureView: View {
                 VStack(spacing: 12) {
                     topStatusRow
 
+                    historyStatusCard
+
                     sectionCard {
                         tyreControlsSection
                     }
@@ -84,10 +99,19 @@ struct MeasureView: View {
                 .padding(.horizontal)
                 .padding(.vertical, 12)
             }
+            .background(historyBackgroundColor)
             .safeAreaInset(edge: .bottom) { bottomBar }
             .navigationTitle(appTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showHistorySheet = true
+                    } label: {
+                        Label("History / 履歴", systemImage: "clock.arrow.circlepath")
+                    }
+                }
+
                 ToolbarItem(placement: .principal) {
                     appTitleHeader
                 }
@@ -114,7 +138,35 @@ struct MeasureView: View {
                     ActivityView(items: [url])
                 }
             }
+            .sheet(isPresented: $showHistorySheet) {
+                NavigationStack {
+                    List {
+                        if history.summaries.isEmpty {
+                            Text("保存済み履歴がありません / No archived sessions available")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ForEach(history.summaries) { summary in
+                                Button {
+                                    loadHistorySummary(summary)
+                                } label: {
+                                    historyRow(for: summary)
+                                }
+                            }
+                        }
+                    }
+                    .navigationTitle("History / 履歴")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Close") { showHistorySheet = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
         }
+        .background(historyBackgroundColor.ignoresSafeArea())
         .onAppear {
             speech.requestAuth()
             pressureSpeech.requestAuth()
@@ -127,6 +179,7 @@ struct MeasureView: View {
                 selectedWheel = current
             }
             syncManualPressureDefaults(for: selectedWheel)
+            history.refresh()
             print("[UI] MeasureView appear")
         }
 
@@ -135,12 +188,15 @@ struct MeasureView: View {
             if pressureSpeech.isRecording { pressureSpeech.stop() }
         }
         .onReceive(ble.temperatureStream) { sample in
-            vm.ingestBLESample(sample)
+            if !isHistoryMode {
+                vm.ingestBLESample(sample)
+            }
         }
         .onReceive(vm.$currentWheel) { newWheel in
             if let newWheel { selectedWheel = newWheel }
         }
         .onChange(of: isManualMode) { _, newValue in
+            guard !isHistoryMode else { return }
             if newValue {
                 clearManualFeedback(for: selectedWheel)
                 syncManualDefaults(for: selectedWheel)
@@ -153,20 +209,37 @@ struct MeasureView: View {
         }
         .onChange(of: selectedWheel) { _, newWheel in
             syncManualPressureDefaults(for: newWheel)
-            if isManualMode {
+            if isManualInteractionActive {
                 clearManualFeedback(for: newWheel)
                 syncManualDefaults(for: newWheel)
             }
             showWheelDetails = false
         }
         .onReceive(vm.$results) { _ in
-            if isManualMode { syncManualDefaults(for: selectedWheel) }
+            if isManualInteractionActive { syncManualDefaults(for: selectedWheel) }
         }
         .onReceive(vm.$wheelMemos) { _ in
-            if isManualMode { syncManualMemo(for: selectedWheel) }
+            if isManualInteractionActive { syncManualMemo(for: selectedWheel) }
         }
         .onReceive(vm.$wheelPressures) { _ in
             syncManualPressureDefaults(for: selectedWheel)
+        }
+        .onChange(of: historyEditingEnabled) { _, enabled in
+            if enabled {
+                clearManualFeedback(for: selectedWheel)
+                syncManualDefaults(for: selectedWheel)
+                syncManualMemo(for: selectedWheel)
+                syncManualPressureDefaults(for: selectedWheel)
+            }
+        }
+        .onChange(of: vm.loadedHistorySummary) { _, summary in
+            deactivateHistoryEditing()
+            if summary != nil {
+                isManualMode = false
+            }
+        }
+        .onChange(of: showHistorySheet) { _, presenting in
+            if presenting { history.refresh() }
         }
         .onReceive(vm.$sessionResetID) { _ in
             selectedWheel = .FL
@@ -199,6 +272,17 @@ struct MeasureView: View {
         .alert("Upload complete", isPresented: $showUploadAlert) {
             Button("OK", role: .cancel) { }
         } message: { Text(uploadMessage) }
+        .alert(
+            "History error / 履歴エラー",
+            isPresented: Binding(
+                get: { historyError != nil },
+                set: { if !$0 { historyError = nil } }
+            )
+        ) {
+            Button("OK") { historyError = nil }
+        } message: {
+            Text(historyError ?? "")
+        }
         .onChange(of: folderBM.statusLabel) { _, newVal in
             if case .done = newVal {
                 let p = folderBM.lastUploadedDestination
@@ -243,6 +327,103 @@ struct MeasureView: View {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(Color.secondary.opacity(0.08))
             )
+    }
+
+    @ViewBuilder
+    private var historyStatusCard: some View {
+        if let summary = vm.loadedHistorySummary {
+            historyActiveBanner(for: summary)
+        }
+    }
+
+    private func historyActiveBanner(for summary: SessionHistorySummary) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Viewing archived session / 履歴データを表示中")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(summary.displayTitle)
+                    .font(.headline)
+                Text(summary.displayDetail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    historyNavigationButtons()
+                }
+                VStack(spacing: 8) {
+                    historyNavigationButtons()
+                }
+            }
+
+            historyEditingControls()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.orange.opacity(0.22))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.orange.opacity(0.35))
+        )
+    }
+
+    @ViewBuilder
+    private func historyNavigationButtons() -> some View {
+        Button {
+            showHistorySheet = true
+        } label: {
+            Label("History list / 履歴一覧", systemImage: "list.bullet.rectangle")
+        }
+        .buttonStyle(.bordered)
+
+        Button {
+            restoreCurrentSession()
+        } label: {
+            Label("Return to live / 現在の測定に戻る", systemImage: "arrow.uturn.forward")
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(!vm.canRestoreCurrentSession())
+    }
+
+    @ViewBuilder
+    private func historyEditingControls() -> some View {
+        if historyEditingEnabled {
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Editing enabled / 編集モード", systemImage: "pencil.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(Color.green)
+
+                Text("手動修正が可能です。計測は行われません。\nManual corrections are enabled; live capture stays paused.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    deactivateHistoryEditing()
+                } label: {
+                    Label("Finish editing / 編集を終了", systemImage: "lock.fill")
+                }
+                .buttonStyle(.bordered)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("過去データは閲覧のみです。編集する場合は下のボタンを押してください。\nViewing archived data only. Enable editing to make manual adjustments.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Button {
+                    activateHistoryEditing()
+                } label: {
+                    Label("Enable editing / 編集モードに入る", systemImage: "pencil")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+        }
     }
 
     private var liveChartSection: some View {
@@ -492,17 +673,32 @@ struct MeasureView: View {
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            pressureEntryCard(for: wheel)
+            ZStack(alignment: .topLeading) {
+                pressureEntryCard(for: wheel)
+
+                if isHistoryMode && !historyEditingEnabled {
+                    historyLockedOverlay(text: "Enable editing to adjust pressure / 編集モードで空気圧を修正")
+                }
+            }
+            .disabled(isHistoryMode && !historyEditingEnabled)
+
+            if isHistoryMode && !historyEditingEnabled {
+                historyLockedFootnote()
+            }
 
             DisclosureGroup(isExpanded: $showWheelDetails) {
                 VStack(alignment: .leading, spacing: 14) {
-                    manualModeToggle
+                    if isHistoryMode {
+                        historyManualControls(for: wheel)
+                    } else {
+                        manualModeToggle
 
-                    if isManualMode {
-                        manualEntrySection(for: wheel)
+                        if isManualMode {
+                            manualEntrySection(for: wheel)
+                        }
+
+                        voiceMemoSection(for: wheel)
                     }
-
-                    voiceMemoSection(for: wheel)
 
                     Divider()
 
@@ -552,6 +748,73 @@ struct MeasureView: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
             )
+    }
+
+    private func historyLockedOverlay(text: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("View only / 閲覧専用", systemImage: "lock.fill")
+                .font(.caption.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.orange.opacity(0.18))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+        )
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .allowsHitTesting(false)
+    }
+
+    private func historyLockedFootnote() -> some View {
+        Text("履歴は編集モードを有効にすると更新できます。\nEnable editing above to modify saved values.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 4)
+    }
+
+    @ViewBuilder
+    private func historyManualControls(for wheel: WheelPos) -> some View {
+        if historyEditingEnabled {
+            Label("Manual editing enabled / 手動編集中", systemImage: "pencil.circle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.accentColor)
+
+            manualEntrySection(for: wheel)
+
+            voiceMemoSection(for: wheel)
+        } else {
+            historyLockedMessage()
+        }
+    }
+
+    private func historyLockedMessage() -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("View only / 閲覧専用", systemImage: "lock.fill")
+                .font(.caption.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.secondary)
+
+            Text("「編集モードに入る」を押すとこのセッションを手動で修正できます。\nActivate editing mode from the banner above to make manual adjustments.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.tertiarySystemBackground))
+        )
     }
 
     private func manualEntrySection(for wheel: WheelPos) -> some View {
@@ -875,6 +1138,7 @@ struct MeasureView: View {
     }
 
     private func commitManualEntry(wheel: WheelPos, zone: Zone) {
+        guard isManualInteractionActive else { return }
         let rawText = manualValues[wheel]?[zone] ?? ""
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -917,6 +1181,7 @@ struct MeasureView: View {
     }
 
     private func commitManualPressure(for wheel: WheelPos) {
+        guard isManualInteractionActive else { return }
         let rawText = manualPressureValues[wheel] ?? ""
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -952,6 +1217,7 @@ struct MeasureView: View {
     }
 
     private func persistManualMemo(for wheel: WheelPos) {
+        guard isManualInteractionActive else { return }
         let trimmed = (manualMemos[wheel] ?? vm.wheelMemos[wheel] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         manualMemos[wheel] = trimmed
         if trimmed.isEmpty {
@@ -1004,6 +1270,7 @@ struct MeasureView: View {
     }
 
     private func applyPressureTranscript(_ text: String, to wheel: WheelPos) {
+        guard isManualInteractionActive else { return }
         let sanitized = text.replacingOccurrences(of: "[^0-9,\\.]", with: "", options: .regularExpression)
         let normalized = sanitized.replacingOccurrences(of: ",", with: ".")
         let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1158,6 +1425,8 @@ struct MeasureView: View {
                             lineWidth: isRunning ? 2 : 1)
             )
         }
+        .disabled(isHistoryMode)
+        .opacity(isHistoryMode ? 0.55 : 1)
         .buttonStyle(.plain)
         .accessibilityLabel("\(title(wheel)) \(zoneDisplayName(zone)) button")
         .accessibilityHint(isRunning ? "Capturing" : "Double tap to start capture")
@@ -1300,6 +1569,72 @@ struct MeasureView: View {
         let core = Self.captureTimeFormatter.string(from: date)
         let abbreviation = TimeZone.current.abbreviation() ?? ""
         return abbreviation.isEmpty ? core : core + " " + abbreviation
+    }
+
+    private func loadHistorySummary(_ summary: SessionHistorySummary) {
+        guard let snapshot = history.snapshot(for: summary) else {
+            historyError = "履歴の読み込みに失敗しました / Failed to load archived session"
+            return
+        }
+        deactivateHistoryEditing()
+        isManualMode = false
+        vm.loadHistorySnapshot(snapshot, summary: summary)
+        showHistorySheet = false
+    }
+
+    private func restoreCurrentSession() {
+        vm.exitHistoryMode()
+        deactivateHistoryEditing()
+    }
+
+    private func activateHistoryEditing() {
+        guard isHistoryMode else { return }
+        if !historyEditingEnabled {
+            historyEditingEnabled = true
+            clearManualFeedback(for: selectedWheel)
+            syncManualDefaults(for: selectedWheel)
+            syncManualMemo(for: selectedWheel)
+            syncManualPressureDefaults(for: selectedWheel)
+            showWheelDetails = true
+        }
+    }
+
+    private func deactivateHistoryEditing() {
+        if historyEditingEnabled {
+            historyEditingEnabled = false
+        }
+        manualValues.removeAll()
+        manualMemos.removeAll()
+        manualPressureValues.removeAll()
+        clearManualFeedback()
+        if speech.isRecording { speech.stop() }
+        if pressureSpeech.isRecording { pressureSpeech.stop() }
+        showWheelDetails = false
+        syncManualDefaults(for: selectedWheel)
+        syncManualMemo(for: selectedWheel)
+        syncManualPressureDefaults(for: selectedWheel)
+    }
+
+    private func historyRow(for summary: SessionHistorySummary) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(summary.displayTitle)
+                    .font(.headline)
+                Spacer()
+                Text(summary.createdAt, style: .date)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(summary.displayDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !summary.date.isEmpty {
+                Text("記録日: \(summary.date)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func handleNextSessionChoice(_ option: SessionViewModel.NextSessionCarryOver) {

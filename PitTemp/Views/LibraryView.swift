@@ -2,6 +2,7 @@
 
 import SwiftUI
 import Foundation
+import UniformTypeIdentifiers
 
 // MARK: - 1行=1レコード（wflatに準拠）
 struct LogRow: Identifiable {
@@ -15,6 +16,13 @@ struct LogRow: Identifiable {
     var sessionISO: String     // SESSION_START_ISO
     var exportedISO: String    // EXPORTED_AT_ISO
     var uploadedISO: String    // UPLOADED_AT_ISO
+}
+
+extension LogRow {
+    /// CSVエクスポート時の行データ
+    fileprivate var canonicalCSVColumns: [String] {
+        [track, date, car, driver, tyre, time, lap, checker, wheel, outStr, clStr, inStr, memo, sessionISO, exportedISO, uploadedISO]
+    }
 }
 
 // 個別CSVビューのクイック並び替えキー（wflatに合わせて簡略化）
@@ -32,16 +40,71 @@ enum SortKey: String, CaseIterable {
 
 // ALLビューでユーザーが選べる列
 enum Column: String, CaseIterable, Identifiable {
-    case track = "TRACK", date="DATE", car="CAR", driver="DRIVER", tyre="TYRE"
+    case track = "TRACK", date="DATE", time="TIME", car="CAR", driver="DRIVER", tyre="TYRE"
     case lap="LAP", checker="CHECKER", wheel="WHEEL"
-    case out="OUT", cl="CL", inT="IN", memo="MEMO", exported="EXPORTED", uploaded="UPLOADED"
+    case out="OUT", cl="CL", inT="IN", memo="MEMO", session = "SESSION", exported="EXPORTED", uploaded="UPLOADED"
     var id: String { rawValue }
 }
 
 // URLをそのままIdentifiableに拡張しない（将来衝突回避）ための薄いラッパ
 struct FileItem: Identifiable, Hashable {
     let url: URL
+    let dayFolder: String
+    let modifiedAt: Date
     var id: String { url.absoluteString }
+}
+
+private struct DailyGroup: Identifiable, Hashable {
+    let day: String
+    let files: [FileItem]
+
+    var id: String { day }
+
+    var latestModified: Date {
+        files.map(\.modifiedAt).max() ?? .distantPast
+    }
+
+    var fileCountText: String {
+        "\(files.count) file\(files.count > 1 ? "s" : "")"
+    }
+}
+
+private struct MergedCSVDocument: Transferable {
+    let fileName: String
+    let rows: [LogRow]
+
+    static var transferRepresentation: some TransferRepresentation {
+        DataRepresentation(exportedContentType: .commaSeparatedText) { document in
+            Data(document.makeCSV().utf8)
+        }
+        .suggestedFileName { document in
+            document.fileName
+        }
+    }
+
+    private func makeCSV() -> String {
+        guard !rows.isEmpty else {
+            return canonicalHeader.joined(separator: ",") + "\n"
+        }
+
+        let escapedRows = rows.map { row in
+            row.canonicalCSVColumns.map { Self.escape($0) }.joined(separator: ",")
+        }
+        return ([canonicalHeader.joined(separator: ",")] + escapedRows).joined(separator: "\n") + "\n"
+    }
+
+    private static let canonicalHeader: [String] = [
+        "TRACK", "DATE", "CAR", "DRIVER", "TYRE", "TIME", "LAP", "CHECKER",
+        "WHEEL", "OUT", "CL", "IN", "MEMO", "SESSION_START_ISO", "EXPORTED_AT_ISO", "UPLOADED_AT_ISO"
+    ]
+
+    private static func escape(_ value: String) -> String {
+        if value.contains(",") || value.contains("\"") || value.contains("\n") {
+            let escaped = value.replacingOccurrences(of: "\"", with: "\"\"")
+            return "\"\(escaped)\""
+        }
+        return value
+    }
 }
 
 // MARK: - LibraryView
@@ -51,20 +114,24 @@ struct LibraryView: View {
 
     // ファイル一覧
     @State private var files: [FileItem] = []
+    @State private var dailyGroups: [DailyGroup] = []
 
     // 個別CSV表示用
     @State private var rows: [LogRow] = []
     @State private var sortKey: SortKey = .newest
     @State private var selectedFile: FileItem? = nil
     @State private var rawPreview: String = ""
+    @State private var isMergingDailyCSV = false
 
     // ALL表示用
     @State private var showAllSheet = false
     @State private var searchText = ""
-    @State private var selectedColumns: [Column] = [.track,.date,.car,.tyre,.wheel,.out,.cl,.inT,.memo,.exported,.uploaded]
+    @State private var selectedColumns: [Column] = [.track,.date,.time,.car,.tyre,.wheel,.out,.cl,.inT,.memo,.exported,.uploaded]
     @State private var sortColumn: Column = .date
     @State private var sortAscending: Bool = true
     @State private var showColumnSheet = false
+    @State private var allSheetTitle = "All CSVs"
+    @State private var shareFileName = "PitTemp_All.csv"
 
     // 可視→検索→ソートを適用した配列
     private var visibleSortedRows: [LogRow] {
@@ -88,7 +155,7 @@ struct LibraryView: View {
                 let la = Double(lhs) ?? -Double.infinity
                 let rb = Double(rhs) ?? -Double.infinity
                 return sortAscending ? (la < rb) : (la > rb)
-            } else if [.exported, .uploaded].contains(sortColumn) {
+            } else if [.exported, .uploaded, .session].contains(sortColumn) {
                 let fa = ISO8601DateFormatter().date(from: lhs) ?? .distantPast
                 let fb = ISO8601DateFormatter().date(from: rhs) ?? .distantPast
                 return sortAscending ? (fa < fb) : (fa > fb)
@@ -100,13 +167,18 @@ struct LibraryView: View {
         })
     }
 
+    private var shareDocument: MergedCSVDocument? {
+        rows.isEmpty ? nil : MergedCSVDocument(fileName: shareFileName, rows: visibleSortedRows)
+    }
+
     var body: some View {
-        NavigationStack {
-            List {
-                Section("Cloud") {
-                    if settings.enableGoogleDriveUpload {
-                        NavigationLink {
-                            DriveBrowserView()
+        ZStack {
+            NavigationStack {
+                List {
+                    Section("Cloud") {
+                        if settings.enableGoogleDriveUpload {
+                            NavigationLink {
+                                DriveBrowserView()
                         } label: {
                             Label("Google Drive", systemImage: "cloud")
                         }
@@ -131,6 +203,40 @@ struct LibraryView: View {
                     }
                 }
 
+                if !dailyGroups.isEmpty {
+                    Section("Daily collections") {
+                        ForEach(dailyGroups) { group in
+                            Button {
+                                openDailyGroup(group)
+                            } label: {
+                                HStack(alignment: .center, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(formattedDayTitle(group.day))
+                                            .font(.headline)
+                                        HStack(spacing: 12) {
+                                            Label(group.fileCountText, systemImage: "doc.on.doc")
+                                                .font(.caption)
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "clock")
+                                                Text(group.latestModified, format: .dateTime.year().month().day().hour().minute())
+                                            }
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+
                 // ファイル一覧
                 ForEach(files, id: \.self) { item in
                     Button {
@@ -142,9 +248,9 @@ struct LibraryView: View {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(item.url.lastPathComponent).font(.headline)
-                                let dt = (try? item.url.resourceValues(forKeys:[.contentModificationDateKey]).contentModificationDate)?
-                                    .formatted(date:.abbreviated, time:.shortened) ?? ""
-                                Text(dt).font(.footnote).foregroundStyle(.secondary)
+                                Text(item.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
                             }
                             Spacer()
                             Image(systemName: "doc.text")
@@ -157,7 +263,10 @@ struct LibraryView: View {
                 HStack {
                     Button("All") {
                         rows = loadAll()
+                        searchText.removeAll()
                         applyDynamicSort()
+                        allSheetTitle = "All CSVs"
+                        shareFileName = makeMergedFileName(suffix: "all")
                         showAllSheet = true
                     }
 
@@ -208,50 +317,72 @@ struct LibraryView: View {
                         .background(Color(.secondarySystemBackground))
 
                         ScrollView([.vertical, .horizontal]) {
-                            VStack(alignment: .leading, spacing: 8) {
-                                // ヘッダ行（タップでその列ソート、2回目で昇降反転）
-                                HStack {
-                                    ForEach(selectedColumns) { col in
-                                        Button {
-                                            if sortColumn == col {
-                                                sortAscending.toggle()
-                                            } else {
-                                                sortColumn = col
-                                                sortAscending = true
+                            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                                Section {
+                                    ForEach(Array(visibleSortedRows.enumerated()), id: \.offset) { index, row in
+                                        HStack(spacing: 0) {
+                                            ForEach(selectedColumns) { col in
+                                                Text(cell(row, col))
+                                                    .font(.footnote.monospacedDigit())
+                                                    .padding(.vertical, 8)
+                                                    .padding(.horizontal, 6)
+                                                    .frame(minWidth: 120, alignment: .leading)
+                                                    .background(index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
                                             }
-                                        } label: {
-                                            HStack(spacing: 6) {
-                                                Text(col.rawValue).font(.footnote).bold()
-                                                if sortColumn == col {
-                                                    Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
-                                                        .font(.caption2)
-                                                }
-                                            }
-                                            .frame(minWidth: 110, alignment: .leading)
                                         }
-                                        .buttonStyle(.plain)
+                                        .background(index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        .padding(.vertical, 1)
                                     }
-                                }
-                                Divider()
-
-                                // データ行
-                                ForEach(visibleSortedRows) { r in
-                                    HStack {
+                                } header: {
+                                    HStack(spacing: 0) {
                                         ForEach(selectedColumns) { col in
-                                            Text(cell(r, col))
-                                                .font(.footnote).monospacedDigit()
-                                                .frame(minWidth: 110, alignment: .leading)
+                                            Button {
+                                                if sortColumn == col {
+                                                    sortAscending.toggle()
+                                                } else {
+                                                    sortColumn = col
+                                                    sortAscending = true
+                                                }
+                                            } label: {
+                                                HStack(spacing: 6) {
+                                                    Text(col.rawValue)
+                                                        .font(.footnote.bold())
+                                                    if sortColumn == col {
+                                                        Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
+                                                            .font(.caption2)
+                                                    }
+                                                }
+                                                .frame(minWidth: 120, alignment: .leading)
+                                                .padding(.vertical, 10)
+                                                .padding(.horizontal, 6)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .background(Color(.tertiarySystemBackground))
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
                                         }
                                     }
-                                    .padding(.vertical, 4)
-                                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(.secondarySystemBackground)))
+                                    .padding(.bottom, 4)
+                                    .background(Color(.systemGroupedBackground))
                                 }
                             }
-                            .padding()
+                            .padding(.horizontal)
+                            .padding(.bottom)
                         }
                     }
-                    .navigationTitle("All CSVs")
-                    .toolbar { Button("Close") { showAllSheet = false } }
+                    .navigationTitle(allSheetTitle)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { showAllSheet = false }
+                        }
+                        ToolbarItem(placement: .primaryAction) {
+                            if let shareDocument {
+                                ShareLink(item: shareDocument) {
+                                    Label("Export CSV", systemImage: "square.and.arrow.up")
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -262,11 +393,23 @@ struct LibraryView: View {
                     .presentationDragIndicator(.visible)
             }
         }
+        .overlay {
+            if isMergingDailyCSV {
+                ZStack {
+                    Color.black.opacity(0.2).ignoresSafeArea()
+                    ProgressView("Merging CSVs…")
+                        .padding(20)
+                        .background(.thinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                }
+            }
+        }
     }
 
     // MARK: - ファイル一覧
     private func reloadFiles() {
         rows.removeAll(); rawPreview.removeAll()
+        files.removeAll(); dailyGroups.removeAll()
         folderBM.withAccess { folder in
             // 再帰的に enumerator で .csv を全部集める
             let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey, .isDirectoryKey]
@@ -276,26 +419,42 @@ struct LibraryView: View {
                 options: [.skipsHiddenFiles, .producesRelativePathURLs]
             )
 
-            var found: [URL] = []
+            var found: [FileItem] = []
             while let u = e?.nextObject() as? URL {
                 let rv = try? u.resourceValues(forKeys: Set(keys))
                 if rv?.isRegularFile == true, u.pathExtension.lowercased() == "csv" {
-                    found.append(u)
+                    let modified = rv?.contentModificationDate ?? .distantPast
+                    let resolvedURL = u.isFileURL ? u : folder.appendingPathComponent(u.relativePath)
+                    let day = dayFolderName(for: resolvedURL, baseFolder: folder)
+                    found.append(FileItem(url: resolvedURL, dayFolder: day, modifiedAt: modified))
                 }
             }
 
             // 表示順：
             // 1) *_wflat_* or *_flat_* を優先
             // 2) 更新日が新しい順
-            let sorted = found.sorted { a,b in
-                let af = a.lastPathComponent.contains("_wflat_") || a.lastPathComponent.contains("_flat_")
-                let bf = b.lastPathComponent.contains("_wflat_") || b.lastPathComponent.contains("_flat_")
+            let sorted = found.sorted { a, b in
+                let af = a.url.lastPathComponent.contains("_wflat_") || a.url.lastPathComponent.contains("_flat_")
+                let bf = b.url.lastPathComponent.contains("_wflat_") || b.url.lastPathComponent.contains("_flat_")
                 if af != bf { return af && !bf }
-                let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
-                return da > db
+                return a.modifiedAt > b.modifiedAt
             }
-            files = sorted.map { FileItem(url: $0) }
+            files = sorted
+
+            let grouped = Dictionary(grouping: sorted, by: { $0.dayFolder })
+            dailyGroups = grouped.map { key, value in
+                let ordered = value.sorted { $0.modifiedAt > $1.modifiedAt }
+                return DailyGroup(day: key, files: ordered)
+            }
+            .sorted { lhs, rhs in
+                // ISO形式日付優先、それ以外は文字列比較
+                let lDate = LibraryView.isoDayFormatter.date(from: lhs.day)
+                let rDate = LibraryView.isoDayFormatter.date(from: rhs.day)
+                if let lDate, let rDate { return lDate > rDate }
+                if let lDate { return true }
+                if let rDate { return false }
+                return lhs.day > rhs.day
+            }
         }
     }
     // MARK: - 一括読み込み
@@ -308,6 +467,93 @@ struct LibraryView: View {
         }
         return out
     }
+
+    private func mergeRows(for group: DailyGroup) -> [LogRow] {
+        var out: [LogRow] = []
+        folderBM.withAccess { _ in
+            for item in group.files {
+                out.append(contentsOf: parseCSV(item.url))
+            }
+        }
+        return out
+    }
+
+    private func openDailyGroup(_ group: DailyGroup) {
+        guard !group.files.isEmpty else { return }
+        isMergingDailyCSV = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let merged = mergeRows(for: group)
+            DispatchQueue.main.async {
+                rows = merged
+                searchText.removeAll()
+                sortColumn = .date
+                sortAscending = false
+                applyDynamicSort()
+                allSheetTitle = formattedDayTitle(group.day)
+                shareFileName = makeMergedFileName(suffix: group.day)
+                showAllSheet = true
+                isMergingDailyCSV = false
+            }
+        }
+    }
+
+    private func makeMergedFileName(suffix: String) -> String {
+        let sanitized = suffix.replacingOccurrences(of: "[^0-9A-Za-z_-]", with: "_", options: .regularExpression)
+        let timestamp = LibraryView.exportTimestampFormatter.string(from: Date())
+        return "PitTemp_\(sanitized)_merged_\(timestamp).csv"
+    }
+
+    private func dayFolderName(for url: URL, baseFolder: URL) -> String {
+        let basePath = baseFolder.standardizedFileURL.path
+        let absolutePath = url.standardizedFileURL.path
+        let trimmed: String
+        if absolutePath.hasPrefix(basePath) {
+            trimmed = String(absolutePath.dropFirst(basePath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        } else {
+            trimmed = url.lastPathComponent
+        }
+        guard !trimmed.isEmpty else { return "(Root)" }
+        let components = trimmed.split(separator: "/")
+        if components.count >= 2 {
+            return String(components[components.count - 2])
+        } else if let first = components.first {
+            return String(first)
+        }
+        return "(Root)"
+    }
+
+    private func formattedDayTitle(_ day: String) -> String {
+        if day == "(Root)" {
+            return NSLocalizedString("Unsorted files", comment: "Fallback day folder name")
+        }
+        if let date = LibraryView.isoDayFormatter.date(from: day) {
+            return LibraryView.displayDayFormatter.string(from: date)
+        }
+        return day
+    }
+
+    private static let isoDayFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.calendar = Calendar(identifier: .iso8601)
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+        df.dateFormat = "yyyy-MM-dd"
+        return df
+    }()
+
+    private static let displayDayFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy MMM d (EEE)"
+        df.locale = Locale.current
+        return df
+    }()
+
+    private static let exportTimestampFormatter: DateFormatter = {
+        let df = DateFormatter()
+        df.dateFormat = "yyyyMMdd_HHmm"
+        df.locale = Locale(identifier: "en_US_POSIX")
+        return df
+    }()
 
     // MARK: - 個別CSVビュー用ソート（wflatに合わせる）
     private func applySortForSingle() {
@@ -346,7 +592,7 @@ struct LibraryView: View {
                 let la = Double(lhs) ?? -Double.infinity
                 let rb = Double(rhs) ?? -Double.infinity
                 return sortAscending ? (la < rb) : (la > rb)
-            } else if sortColumn == .exported || sortColumn == .uploaded {
+            } else if sortColumn == .exported || sortColumn == .uploaded || sortColumn == .session {
                 let fa = ISO8601DateFormatter().date(from: lhs) ?? .distantPast
                 let fb = ISO8601DateFormatter().date(from: rhs) ?? .distantPast
                 return sortAscending ? (fa < fb) : (fa > fb)
@@ -363,6 +609,7 @@ struct LibraryView: View {
         switch c {
         case .track: return r.track
         case .date:  return r.date
+        case .time:  return r.time
         case .car:   return r.car
         case .driver:return r.driver
         case .tyre:  return r.tyre
@@ -373,6 +620,7 @@ struct LibraryView: View {
         case .cl:    return r.clStr
         case .inT:   return r.inStr
         case .memo:  return r.memo
+        case .session: return r.sessionISO
         case .exported: return r.exportedISO
         case .uploaded: return r.uploadedISO
         }

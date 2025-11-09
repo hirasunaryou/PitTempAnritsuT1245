@@ -1466,7 +1466,7 @@ private struct ColumnFilterEditorSheet: View {
                 Spacer()
                 if text == suggestion {
                     Image(systemName: "checkmark")
-                        .foregroundStyle(.accent)
+                        .foregroundStyle(.tint)
                 }
             }
         }

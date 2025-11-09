@@ -5,6 +5,7 @@ struct PitTempApp: App {
     @StateObject private var settings: SettingsStore
     @StateObject private var vm: SessionViewModel
     @StateObject private var folderBM = FolderBookmark()
+    @StateObject private var driveService = GoogleDriveService()
     @AppStorage("onboarded") private var onboarded: Bool = false
     @StateObject private var recorder = SessionRecorder()
     @StateObject private var ble = BluetoothService()
@@ -31,6 +32,7 @@ struct PitTempApp: App {
                     .environmentObject(vm)
                     .environmentObject(settings)
                     .environmentObject(folderBM)
+                    .environmentObject(driveService)
                     .environmentObject(ble)
                     .environmentObject(registry)
                     .environmentObject(uiLog)

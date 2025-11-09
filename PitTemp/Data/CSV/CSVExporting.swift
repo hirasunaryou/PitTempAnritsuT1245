@@ -9,7 +9,9 @@ protocol CSVExporting {
         wheelMemos: [WheelPos: String],
         wheelPressures: [WheelPos: Double],
         sessionStart: Date,
-        deviceName: String?
+        deviceName: String?,
+        sessionID: UUID,
+        deviceIdentity: DeviceIdentity
     ) throws -> URL
 
     /// ライブ追記（任意実装）

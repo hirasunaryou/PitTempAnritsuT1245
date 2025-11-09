@@ -364,6 +364,7 @@ struct LibraryView: View {
     @State private var sortColumn: Column = .date
     @State private var sortAscending: Bool = true
     @State private var showColumnSheet = false
+    @State private var pendingColumnSheet = false
     @State private var allSheetTitle = "All CSVs"
     @State private var timeZoneOption: LibraryTimeZoneOption = .tokyo
     @State private var shareSource: ShareFileSource = .generated(suffix: "all")
@@ -435,30 +436,34 @@ struct LibraryView: View {
     }
 
     var body: some View {
-        ZStack {
-            NavigationStack {
-                libraryList
-                    .navigationTitle("Library")
-                    .toolbar { libraryToolbar }
-                    .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
-                    .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
-                    .onAppear { reloadFiles() }
-                    .sheet(item: $selectedFile, content: singleFileSheet)
-                    .sheet(isPresented: $showAllSheet, content: allFilesSheet)
-                    .sheet(isPresented: $showColumnSheet) {
-                        ColumnPickerSheet(allColumns: Column.allCases, selected: $selectedColumns)
-                            .presentationDetents([.medium, .large])
-                            .presentationDragIndicator(.visible)
-                    }
-                    .sheet(item: $filterEditorColumn) { column in
-                        ColumnFilterEditorSheet(
-                            column: column,
-                            initialText: columnFilters[column] ?? "",
-                            suggestions: buildSuggestions(for: column),
-                            onApply: { value in applyFilter(value, for: column) },
-                            onClear: { clearFilter(for: column) }
-                        )
-                    }
+        NavigationStack {
+            libraryList
+                .navigationTitle("Library")
+                .toolbar { libraryToolbar }
+                .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
+                .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
+                .onAppear { reloadFiles() }
+        }
+        .sheet(item: $selectedFile, content: singleFileSheet)
+        .sheet(isPresented: $showAllSheet, content: allFilesSheet)
+        .sheet(isPresented: $showColumnSheet) {
+            ColumnPickerSheet(allColumns: Column.allCases, selected: $selectedColumns)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $filterEditorColumn) { column in
+            ColumnFilterEditorSheet(
+                column: column,
+                initialText: columnFilters[column] ?? "",
+                suggestions: buildSuggestions(for: column),
+                onApply: { value in applyFilter(value, for: column) },
+                onClear: { clearFilter(for: column) }
+            )
+        }
+        .onChange(of: showAllSheet) { _, isPresented in
+            if !isPresented, pendingColumnSheet {
+                pendingColumnSheet = false
+                showColumnSheet = true
             }
         }
         .overlay(mergeOverlay)
@@ -627,7 +632,7 @@ struct LibraryView: View {
                 showAllSheet = true
             }
 
-            Button("Columns") { showColumnSheet = true }
+            Button("Columns") { openColumnPicker(closeAllSheetFirst: false) }
 
             Menu("Sort") {
                 Picker("Column", selection: $sortColumn) {
@@ -737,7 +742,7 @@ struct LibraryView: View {
                 }
 
                 Button {
-                    showColumnSheet = true
+                    openColumnPicker(closeAllSheetFirst: true)
                 } label: {
                     Label("Columns", systemImage: "square.grid.2x2")
                 }
@@ -887,6 +892,16 @@ struct LibraryView: View {
             sortAscending = true
         }
         clearFilter(for: column)
+    }
+
+    private func openColumnPicker(closeAllSheetFirst: Bool) {
+        if closeAllSheetFirst, showAllSheet {
+            pendingColumnSheet = true
+            showAllSheet = false
+        } else {
+            pendingColumnSheet = false
+            showColumnSheet = true
+        }
     }
 
     private func isFilterActive(_ column: Column) -> Bool {

@@ -131,15 +131,11 @@ final class FolderBookmark: ObservableObject {
                 let uploadedISO = isoFormatter.string(from: Date())
                 let dataToWrite = csvDataWithUploadedTimestamp(from: originalCSV, uploadedISO: uploadedISO)
 
-                // 既存があれば置換（原始的に remove → copy）
-                if FileManager.default.fileExists(atPath: dest.path) {
-                    try? FileManager.default.removeItem(at: dest)
-                }
-                if dataToWrite.isEmpty {
-                    try FileManager.default.copyItem(at: originalCSV, to: dest)
-                } else {
-                    try dataToWrite.write(to: dest, options: .atomic)
-                }
+                try coordinateWrite(
+                    destination: dest,
+                    originalCSV: originalCSV,
+                    replacementData: dataToWrite.isEmpty ? nil : dataToWrite
+                )
 
                 print("[Upload] copied \(originalCSV.lastPathComponent) -> \(dest.path)")
                 self.lastUploadedDestination = dest
@@ -151,7 +147,7 @@ final class FolderBookmark: ObservableObject {
                 return true
             } catch {
                 print("[Upload] failed:", error)
-                statusLabel = .failed("Copy error")
+                statusLabel = .failed(error.presentableMessage)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
                 return false
             }
@@ -228,6 +224,47 @@ private extension String {
         }
 
         return deduped
+    }
+}
+
+private extension FolderBookmark {
+    /// Security-scoped URL に対して NSFileCoordinator を用いた書き込みを実施する
+    func coordinateWrite(destination dest: URL, originalCSV: URL, replacementData: Data?) throws {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+
+        coordinator.coordinate(writingItemAt: dest, options: fileCoordinatorOptions(for: dest), error: &coordinationError) { url in
+            do {
+                if let replacementData {
+                    try replacementData.write(to: url, options: .atomic)
+                } else {
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        try FileManager.default.removeItem(at: url)
+                    }
+                    try FileManager.default.copyItem(at: originalCSV, to: url)
+                }
+            } catch {
+                coordinationError = error as NSError
+            }
+        }
+
+        if let coordinationError {
+            throw coordinationError
+        }
+    }
+
+    func fileCoordinatorOptions(for destination: URL) -> NSFileCoordinator.WritingOptions {
+        FileManager.default.fileExists(atPath: destination.path) ? [.forReplacing] : []
+    }
+}
+
+private extension Error {
+    var presentableMessage: String {
+        let nsError = self as NSError
+        if nsError.domain == NSCocoaErrorDomain {
+            return nsError.localizedDescription
+        }
+        return localizedDescription
     }
 }
 

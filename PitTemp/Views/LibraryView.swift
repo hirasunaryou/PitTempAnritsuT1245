@@ -75,14 +75,14 @@ private struct MergedCSVDocument: Transferable {
 
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(exportedContentType: .commaSeparatedText) { document in
-            Data(document.makeCSV().utf8)
+            Data(document.csvContent().utf8)
         }
         .suggestedFileName { document in
             document.fileName
         }
     }
 
-    private func makeCSV() -> String {
+    fileprivate func csvContent() -> String {
         guard !rows.isEmpty else {
             return Self.canonicalHeader.joined(separator: ",") + "\n"
         }
@@ -115,6 +115,7 @@ struct LibraryView: View {
     // ファイル一覧
     @State private var files: [FileItem] = []
     @State private var dailyGroups: [DailyGroup] = []
+    @State private var summaryFiles: [FileItem] = []
 
     // 個別CSV表示用
     @State private var rows: [LogRow] = []
@@ -203,6 +204,8 @@ struct LibraryView: View {
 
             dailyCollectionsSection
 
+            summarySection
+
             ForEach(files, id: \.self, content: fileRow)
         }
     }
@@ -254,6 +257,18 @@ struct LibraryView: View {
     }
 
     @ViewBuilder
+    private var summarySection: some View {
+        if !summaryFiles.isEmpty {
+            Section("Daily merged CSVs") {
+                ForEach(summaryFiles) { item in
+                    Button { openSummaryFile(item) } label: { summaryRow(for: item) }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
     private func dailyCollectionRow(for group: DailyGroup) -> some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
@@ -265,6 +280,35 @@ struct LibraryView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
                         Text(group.latestModified, format: .dateTime.year().month().day().hour().minute())
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func summaryRow(for item: FileItem) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(formattedDayTitle(item.dayFolder))
+                    .font(.headline)
+                HStack(spacing: 12) {
+                    Label(item.url.lastPathComponent, systemImage: "doc.plaintext")
+                        .font(.caption)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                        Text(item.modifiedAt, format: .dateTime.year().month().day().hour().minute())
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -480,6 +524,9 @@ struct LibraryView: View {
                 if rv?.isRegularFile == true, u.pathExtension.lowercased() == "csv" {
                     let modified = rv?.contentModificationDate ?? .distantPast
                     let resolvedURL = u.isFileURL ? u : folder.appendingPathComponent(u.relativePath)
+                    if resolvedURL.deletingLastPathComponent().lastPathComponent == LibraryView.summaryFolderName {
+                        continue
+                    }
                     let day = dayFolderName(for: resolvedURL, baseFolder: folder)
                     found.append(FileItem(url: resolvedURL, dayFolder: day, modifiedAt: modified))
                 }
@@ -517,6 +564,9 @@ struct LibraryView: View {
                 }
             }
         }
+        refreshSummaryFiles()
+        let groupsSnapshot = dailyGroups
+        scheduleDailySummarySync(for: groupsSnapshot)
     }
     // MARK: - 一括読み込み
     private func loadAll() -> [LogRow] {
@@ -542,8 +592,10 @@ struct LibraryView: View {
     private func openDailyGroup(_ group: DailyGroup) {
         guard !group.files.isEmpty else { return }
         isMergingDailyCSV = true
+        let latest = group.latestModified
         DispatchQueue.global(qos: .userInitiated).async {
             let merged = mergeRows(for: group)
+            let wroteSummary = persistDailySummaryIfNeeded(rows: merged, day: group.day, latest: latest)
             DispatchQueue.main.async {
                 rows = merged
                 searchText.removeAll()
@@ -554,14 +606,125 @@ struct LibraryView: View {
                 shareFileName = makeMergedFileName(suffix: group.day)
                 showAllSheet = true
                 isMergingDailyCSV = false
+                if wroteSummary {
+                    refreshSummaryFiles()
+                }
             }
         }
+    }
+
+    private func openSummaryFile(_ item: FileItem) {
+        let parsed = parseCSV(item.url)
+        rows = parsed
+        searchText.removeAll()
+        sortColumn = .date
+        sortAscending = false
+        applyDynamicSort()
+        allSheetTitle = formattedDayTitle(item.dayFolder)
+        shareFileName = item.url.lastPathComponent
+        showAllSheet = true
     }
 
     private func makeMergedFileName(suffix: String) -> String {
         let sanitized = suffix.replacingOccurrences(of: "[^0-9A-Za-z_-]", with: "_", options: .regularExpression)
         let timestamp = LibraryView.exportTimestampFormatter.string(from: Date())
         return "PitTemp_\(sanitized)_merged_\(timestamp).csv"
+    }
+
+    private func refreshSummaryFiles() {
+        DispatchQueue.global(qos: .utility).async {
+            let items = folderBM.withAccess { base -> [FileItem] in
+                let summaryFolder = base.appendingPathComponent(LibraryView.summaryFolderName, isDirectory: true)
+                let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+                guard FileManager.default.fileExists(atPath: summaryFolder.path) else { return [] }
+                guard let urls = try? FileManager.default.contentsOfDirectory(
+                    at: summaryFolder,
+                    includingPropertiesForKeys: keys,
+                    options: [.skipsHiddenFiles]
+                ) else {
+                    return []
+                }
+                return urls.compactMap { url -> FileItem? in
+                    guard url.pathExtension.lowercased() == "csv" else { return nil }
+                    let values = try? url.resourceValues(forKeys: Set(keys))
+                    guard values?.isRegularFile == true else { return nil }
+                    let dayKey = summaryDayKey(from: url) ?? url.deletingPathExtension().lastPathComponent
+                    let modified = values?.contentModificationDate ?? .distantPast
+                    return FileItem(url: url, dayFolder: dayKey, modifiedAt: modified)
+                }
+                .sorted { $0.modifiedAt > $1.modifiedAt }
+            } ?? []
+
+            DispatchQueue.main.async {
+                summaryFiles = items
+            }
+        }
+    }
+
+    private func scheduleDailySummarySync(for groups: [DailyGroup]) {
+        guard !groups.isEmpty, folderBM.folderURL != nil else { return }
+        DispatchQueue.global(qos: .utility).async {
+            var didWriteAny = false
+            for group in groups {
+                let latest = group.latestModified
+                let needsUpdate = folderBM.withAccess { base -> Bool in
+                    let summaryURL = LibraryView.summaryFileURL(for: group.day, baseFolder: base)
+                    if FileManager.default.fileExists(atPath: summaryURL.path) {
+                        let values = try? summaryURL.resourceValues(forKeys: [.contentModificationDateKey])
+                        let summaryDate = values?.contentModificationDate ?? .distantPast
+                        return summaryDate < latest
+                    } else {
+                        return true
+                    }
+                } ?? false
+
+                guard needsUpdate else { continue }
+
+                let merged = mergeRows(for: group)
+                if persistDailySummaryIfNeeded(rows: merged, day: group.day, latest: latest) {
+                    didWriteAny = true
+                }
+            }
+
+            if didWriteAny {
+                DispatchQueue.main.async {
+                    refreshSummaryFiles()
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    private func persistDailySummaryIfNeeded(rows: [LogRow], day: String, latest: Date) -> Bool {
+        folderBM.withAccess { base -> Bool in
+            let summaryURL = LibraryView.summaryFileURL(for: day, baseFolder: base)
+            let fm = FileManager.default
+            let shouldWrite: Bool
+            if fm.fileExists(atPath: summaryURL.path) {
+                let values = try? summaryURL.resourceValues(forKeys: [.contentModificationDateKey])
+                let summaryDate = values?.contentModificationDate ?? .distantPast
+                shouldWrite = summaryDate < latest
+            } else {
+                shouldWrite = true
+            }
+
+            guard shouldWrite else { return false }
+
+            do {
+                try fm.createDirectory(
+                    at: summaryURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true,
+                    attributes: nil
+                )
+                let document = MergedCSVDocument(fileName: summaryURL.lastPathComponent, rows: rows)
+                guard let data = document.csvContent().data(using: .utf8) else { return false }
+                try data.write(to: summaryURL, options: .atomic)
+                return true
+            } catch {
+                print("[Summary] write failed:", error)
+                return false
+            }
+        } ?? false
     }
 
     private func dayFolderName(for url: URL, baseFolder: URL) -> String {
@@ -615,6 +778,29 @@ struct LibraryView: View {
         df.locale = Locale(identifier: "en_US_POSIX")
         return df
     }()
+
+    private static let summaryFolderName = "DailyMerged"
+    private static let summaryFileSuffix = "_PitTempDaily"
+
+    private static func summaryFileURL(for day: String, baseFolder: URL) -> URL {
+        let sanitized = sanitizedDayKey(day)
+        let folder = baseFolder.appendingPathComponent(summaryFolderName, isDirectory: true)
+        return folder.appendingPathComponent("\(sanitized)\(summaryFileSuffix).csv")
+    }
+
+    private static func sanitizedDayKey(_ day: String) -> String {
+        let sanitized = day.replacingOccurrences(of: "[^0-9A-Za-z_-]", with: "_", options: .regularExpression)
+        let collapsed = sanitized.replacingOccurrences(of: "__+", with: "_", options: .regularExpression)
+        let trimmed = collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        return trimmed.isEmpty ? "Daily" : trimmed
+    }
+
+    private func summaryDayKey(from url: URL) -> String? {
+        let base = url.deletingPathExtension().lastPathComponent
+        guard base.hasSuffix(LibraryView.summaryFileSuffix) else { return nil }
+        let dayPart = String(base.dropLast(LibraryView.summaryFileSuffix.count))
+        return dayPart.isEmpty ? nil : dayPart
+    }
 
     // MARK: - 個別CSVビュー用ソート（wflatに合わせる）
     private func applySortForSingle() {

@@ -13,6 +13,7 @@ struct MeasureView: View {
 
     @StateObject private var speech = SpeechMemoManager()
     @StateObject private var pressureSpeech = SpeechMemoManager()
+    @StateObject private var history = SessionHistoryStore()
     @State private var selectedWheel: WheelPos = .FL
     @State private var showRaw = false
     @State private var focusTick = 0
@@ -33,6 +34,8 @@ struct MeasureView: View {
     @State private var manualPressureSuccess: [WheelPos: Date] = [:]
     @State private var showNextSessionDialog = false
     @State private var showWheelDetails = false
+    @State private var showHistorySheet = false
+    @State private var historyError: String? = nil
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
@@ -68,6 +71,10 @@ struct MeasureView: View {
             ScrollView {
                 VStack(spacing: 12) {
                     topStatusRow
+
+                    sectionCard {
+                        historySection
+                    }
 
                     sectionCard {
                         tyreControlsSection
@@ -114,6 +121,33 @@ struct MeasureView: View {
                     ActivityView(items: [url])
                 }
             }
+            .sheet(isPresented: $showHistorySheet) {
+                NavigationStack {
+                    List {
+                        if history.summaries.isEmpty {
+                            Text("保存済み履歴がありません / No archived sessions available")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            ForEach(history.summaries) { summary in
+                                Button {
+                                    loadHistorySummary(summary)
+                                } label: {
+                                    historyRow(for: summary)
+                                }
+                            }
+                        }
+                    }
+                    .navigationTitle("History / 履歴")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Close") { showHistorySheet = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium, .large])
+            }
         }
         .onAppear {
             speech.requestAuth()
@@ -127,6 +161,7 @@ struct MeasureView: View {
                 selectedWheel = current
             }
             syncManualPressureDefaults(for: selectedWheel)
+            history.refresh()
             print("[UI] MeasureView appear")
         }
 
@@ -199,6 +234,17 @@ struct MeasureView: View {
         .alert("Upload complete", isPresented: $showUploadAlert) {
             Button("OK", role: .cancel) { }
         } message: { Text(uploadMessage) }
+        .alert(
+            "History error / 履歴エラー",
+            isPresented: Binding(
+                get: { historyError != nil },
+                set: { if !$0 { historyError = nil } }
+            )
+        ) {
+            Button("OK") { historyError = nil }
+        } message: {
+            Text(historyError ?? "")
+        }
         .onChange(of: folderBM.statusLabel) { _, newVal in
             if case .done = newVal {
                 let p = folderBM.lastUploadedDestination
@@ -243,6 +289,84 @@ struct MeasureView: View {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(Color.secondary.opacity(0.08))
             )
+    }
+
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let summary = vm.loadedHistorySummary {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Viewing saved session / 履歴データを表示中")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(summary.displayTitle)
+                        .font(.headline)
+                    Text(summary.displayDetail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Current measurement / 現在の測定データ")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let latest = history.summaries.first {
+                        Text(latest.displayTitle)
+                            .font(.headline)
+                        Text(latest.displayDetail)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("保存済み履歴がまだありません / No archived sessions yet")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            historyControlButtons
+        }
+    }
+
+    private var historyControlButtons: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { historyButtonStack }
+            VStack(spacing: 8) { historyButtonStack }
+        }
+    }
+
+    @ViewBuilder
+    private var historyButtonStack: some View {
+        Button {
+            loadPreviousHistory()
+        } label: {
+            Label("Prev session / 前の測定", systemImage: "arrowshape.turn.up.backward")
+        }
+        .buttonStyle(.bordered)
+        .disabled(history.previous(after: vm.loadedHistorySummary) == nil)
+
+        Button {
+            showHistorySheet = true
+        } label: {
+            Label("History list / 履歴一覧", systemImage: "list.bullet.rectangle")
+        }
+        .buttonStyle(.bordered)
+
+        if let current = vm.loadedHistorySummary {
+            Button {
+                loadNewerHistory()
+            } label: {
+                Label("Next saved / 次の履歴", systemImage: "arrowshape.turn.up.forward")
+            }
+            .buttonStyle(.bordered)
+            .disabled(history.newer(before: current) == nil)
+
+            Button {
+                restoreCurrentSession()
+            } label: {
+                Label("Return to live / 現在の測定に戻る", systemImage: "arrow.uturn.forward")
+            }
+            .buttonStyle(.borderedProminent)
+        }
     }
 
     private var liveChartSection: some View {
@@ -1300,6 +1424,64 @@ struct MeasureView: View {
         let core = Self.captureTimeFormatter.string(from: date)
         let abbreviation = TimeZone.current.abbreviation() ?? ""
         return abbreviation.isEmpty ? core : core + " " + abbreviation
+    }
+
+    private func loadPreviousHistory() {
+        guard let summary = history.previous(after: vm.loadedHistorySummary) else {
+            historyError = "履歴が見つかりません / No archived session available"
+            return
+        }
+        loadHistorySummary(summary)
+    }
+
+    private func loadNewerHistory() {
+        guard let summary = history.newer(before: vm.loadedHistorySummary) else { return }
+        loadHistorySummary(summary)
+    }
+
+    private func loadHistorySummary(_ summary: SessionHistorySummary) {
+        guard let snapshot = history.snapshot(for: summary) else {
+            historyError = "履歴の読み込みに失敗しました / Failed to load archived session"
+            return
+        }
+        vm.loadHistorySnapshot(snapshot, summary: summary)
+        if isManualMode {
+            syncManualDefaults(for: selectedWheel)
+            syncManualMemo(for: selectedWheel)
+            syncManualPressureDefaults(for: selectedWheel)
+        }
+        showHistorySheet = false
+    }
+
+    private func restoreCurrentSession() {
+        vm.exitHistoryMode()
+        if isManualMode {
+            syncManualDefaults(for: selectedWheel)
+            syncManualMemo(for: selectedWheel)
+            syncManualPressureDefaults(for: selectedWheel)
+        }
+    }
+
+    private func historyRow(for summary: SessionHistorySummary) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(summary.displayTitle)
+                    .font(.headline)
+                Spacer()
+                Text(summary.createdAt, style: .date)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(summary.displayDetail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if !summary.date.isEmpty {
+                Text("記録日: \(summary.date)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private func handleNextSessionChoice(_ option: SessionViewModel.NextSessionCarryOver) {

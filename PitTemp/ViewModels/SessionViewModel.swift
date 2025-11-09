@@ -78,6 +78,7 @@ final class SessionViewModel: ObservableObject {
     }
     @Published private(set) var autosaveStatusEntry: UILogEntry? = nil
     @Published private(set) var sessionResetID = UUID()
+    @Published private(set) var loadedHistorySummary: SessionHistorySummary? = nil
 
     // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
     private var autoStopLimitSec: Int { settings.validatedAutoStopLimitSec }
@@ -163,6 +164,7 @@ final class SessionViewModel: ObservableObject {
         lastCSV = nil
         lastLegacyCSV = nil
 
+        loadedHistorySummary = nil
         autosaveStore.clear()
         persistAutosaveNow()
 
@@ -273,6 +275,7 @@ final class SessionViewModel: ObservableObject {
             )
             lastCSV = url
             print("CSV saved (wflat):", url.lastPathComponent)
+            persistAutosaveNow()
             autosaveStore.archiveLatest()
         } catch {
             print("CSV export error:", error)
@@ -288,6 +291,7 @@ final class SessionViewModel: ObservableObject {
             scheduleAutosave(reason: .stateChange)
         }
 
+        loadedHistorySummary = nil
         finalize(via: "auto") // 既存の計測があれば閉じる
         currentWheel = wheel
         currentZone  = zone
@@ -397,18 +401,7 @@ final class SessionViewModel: ObservableObject {
             publishAutosaveStatus(entry)
             return false
         }
-        isRestoringAutosave = true
-        meta = snapshot.meta
-        results = snapshot.results
-        wheelMemos = snapshot.wheelMemos
-        wheelPressures = snapshot.wheelPressures
-        sessionBeganAt = snapshot.sessionBeganAt
-        isCaptureActive = false
-        currentWheel = nil
-        currentZone = nil
-        elapsed = 0
-        peakC = .nan
-        isRestoringAutosave = false
+        applySnapshot(snapshot)
         let created = Self.autosaveStatusFormatter.string(from: snapshot.createdAt)
         let entry = UILogEntry(
             message: "Restored autosave created at \(created).",
@@ -417,6 +410,26 @@ final class SessionViewModel: ObservableObject {
         )
         publishAutosaveStatus(entry)
         return true
+    }
+
+    func loadHistorySnapshot(_ snapshot: SessionSnapshot, summary: SessionHistorySummary) {
+        applySnapshot(snapshot, historySummary: summary)
+        let created = Self.autosaveStatusFormatter.string(from: summary.createdAt)
+        let entry = UILogEntry(
+            message: "履歴を読み込みました: \(summary.displayTitle)\nLoaded archived session captured \(created).",
+            level: .info,
+            category: .autosave
+        )
+        publishAutosaveStatus(entry)
+    }
+
+    func exitHistoryMode() {
+        if restoreAutosaveIfAvailable() { return }
+        loadedHistorySummary = nil
+    }
+
+    func canRestoreCurrentSession() -> Bool {
+        autosaveStore.hasSnapshot()
     }
 
     func persistAutosaveNow() {
@@ -455,6 +468,24 @@ final class SessionViewModel: ObservableObject {
             sessionBeganAt: sessionBeganAt
         )
         autosaveStore.save(snapshot)
+    }
+
+    private func applySnapshot(_ snapshot: SessionSnapshot, historySummary: SessionHistorySummary? = nil) {
+        isRestoringAutosave = true
+        meta = snapshot.meta
+        results = snapshot.results
+        wheelMemos = snapshot.wheelMemos
+        wheelPressures = snapshot.wheelPressures
+        sessionBeganAt = snapshot.sessionBeganAt
+        isCaptureActive = false
+        currentWheel = nil
+        currentZone = nil
+        elapsed = 0
+        peakC = .nan
+        lastCSV = nil
+        lastLegacyCSV = nil
+        isRestoringAutosave = false
+        loadedHistorySummary = historySummary
     }
 
     func clearAutosave() {

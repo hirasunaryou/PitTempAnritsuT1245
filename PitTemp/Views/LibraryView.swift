@@ -284,6 +284,7 @@ struct LibraryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
+                .buttonStyle(.plain)
             }
             Spacer()
             Image(systemName: "chevron.right")

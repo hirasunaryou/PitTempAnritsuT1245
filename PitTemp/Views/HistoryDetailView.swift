@@ -99,6 +99,24 @@ struct HistoryDetailView: View {
                 title: "Archived",
                 value: DateFormatter.localizedString(from: summary.createdAt, dateStyle: .medium, timeStyle: .short)
             )
+            metaRow(
+                title: "Session ID",
+                value: summary.sessionID.uuidString
+            )
+            metaRow(
+                title: "Device",
+                value: summary.originDeviceDisplayName.ifEmpty("Unknown device")
+            )
+            if !summary.originDeviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                metaRow(
+                    title: "Device ID",
+                    value: summary.originDeviceID
+                )
+            }
+            metaRow(
+                title: "Origin",
+                value: summary.isFromCurrentDevice ? "This device" : "Imported / External"
+            )
             metaRow(title: "Results", value: "\(snapshot.results.count)")
         }
     }

@@ -22,6 +22,9 @@ struct SessionSnapshot: Codable {
     var wheelMemos: [WheelPos: String]
     var wheelPressures: [WheelPos: Double]
     var sessionBeganAt: Date?
+    var sessionID: UUID
+    var originDeviceID: String
+    var originDeviceName: String
     var createdAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -30,6 +33,9 @@ struct SessionSnapshot: Codable {
         case wheelMemos
         case wheelPressures
         case sessionBeganAt
+        case sessionID
+        case originDeviceID
+        case originDeviceName
         case createdAt
     }
 
@@ -38,12 +44,18 @@ struct SessionSnapshot: Codable {
          wheelMemos: [WheelPos: String],
          wheelPressures: [WheelPos: Double] = [:],
          sessionBeganAt: Date?,
+         sessionID: UUID,
+         originDeviceID: String,
+         originDeviceName: String,
          createdAt: Date = Date()) {
         self.meta = meta
         self.results = results
         self.wheelMemos = wheelMemos
         self.wheelPressures = wheelPressures
         self.sessionBeganAt = sessionBeganAt
+        self.sessionID = sessionID
+        self.originDeviceID = originDeviceID
+        self.originDeviceName = originDeviceName
         self.createdAt = createdAt
     }
 
@@ -52,6 +64,9 @@ struct SessionSnapshot: Codable {
         meta = try container.decode(MeasureMeta.self, forKey: .meta)
         results = try container.decode([MeasureResult].self, forKey: .results)
         sessionBeganAt = try container.decodeIfPresent(Date.self, forKey: .sessionBeganAt)
+        sessionID = try container.decodeIfPresent(UUID.self, forKey: .sessionID) ?? UUID()
+        originDeviceID = try container.decodeIfPresent(String.self, forKey: .originDeviceID) ?? ""
+        originDeviceName = try container.decodeIfPresent(String.self, forKey: .originDeviceName) ?? ""
         createdAt = try container.decode(Date.self, forKey: .createdAt)
 
         let rawMap = try container.decode([WheelPos.RawValue: String].self, forKey: .wheelMemos)
@@ -73,6 +88,9 @@ struct SessionSnapshot: Codable {
         try container.encode(meta, forKey: .meta)
         try container.encode(results, forKey: .results)
         try container.encodeIfPresent(sessionBeganAt, forKey: .sessionBeganAt)
+        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(originDeviceID, forKey: .originDeviceID)
+        try container.encode(originDeviceName, forKey: .originDeviceName)
         try container.encode(createdAt, forKey: .createdAt)
 
         let rawMap = Dictionary(uniqueKeysWithValues: wheelMemos.map { ($0.key.rawValue, $0.value) })

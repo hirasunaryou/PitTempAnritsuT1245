@@ -18,6 +18,26 @@ struct HistorySummaryRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Label {
+                    Text(summary.originDeviceDisplayName.ifEmpty("Unknown device"))
+                } icon: {
+                    Image(systemName: summary.isFromCurrentDevice ? "iphone" : "arrow.down.circle")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+
+                if !summary.originDeviceShortID.isEmpty {
+                    Text("ID: \(summary.originDeviceShortID)")
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                Text(String(summary.sessionID.uuidString.prefix(8)))
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.tertiary)
+            }
+
             if !summary.date.isEmpty {
                 Text("記録日: \(summary.date)")
                     .font(.caption2)
@@ -108,6 +128,9 @@ struct HistorySummaryRow_Previews: PreviewProvider {
             wheelMemos: [:],
             wheelPressures: [.FL: 195.0],
             sessionBeganAt: Date().addingTimeInterval(-600),
+            sessionID: UUID(),
+            originDeviceID: "SAMPLE-DEVICE-ID",
+            originDeviceName: "PitTemp iPhone",
             createdAt: Date()
         )
 
@@ -120,6 +143,7 @@ struct HistorySummaryRow_Previews: PreviewProvider {
             fileURL: URL(fileURLWithPath: "/tmp/sample.json"),
             createdAt: snapshot.createdAt,
             sessionBeganAt: snapshot.sessionBeganAt,
+            sessionID: snapshot.sessionID,
             track: snapshot.meta.track,
             date: snapshot.meta.date,
             car: snapshot.meta.car,
@@ -128,7 +152,10 @@ struct HistorySummaryRow_Previews: PreviewProvider {
             lap: snapshot.meta.lap,
             resultCount: snapshot.results.count,
             zonePeaks: zonePeaks,
-            wheelPressures: snapshot.wheelPressures
+            wheelPressures: snapshot.wheelPressures,
+            originDeviceID: snapshot.originDeviceID,
+            originDeviceName: snapshot.originDeviceName,
+            isFromCurrentDevice: true
         )
 
         HistorySummaryRow(summary: summary)

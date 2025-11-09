@@ -4,6 +4,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
     let fileURL: URL
     let createdAt: Date
     let sessionBeganAt: Date?
+    let sessionID: UUID
     let track: String
     let date: String
     let car: String
@@ -13,6 +14,9 @@ struct SessionHistorySummary: Identifiable, Equatable {
     let resultCount: Int
     let zonePeaks: [WheelPos: [Zone: Double]]
     let wheelPressures: [WheelPos: Double]
+    let originDeviceID: String
+    let originDeviceName: String
+    let isFromCurrentDevice: Bool
 
     var id: String { fileURL.lastPathComponent }
 
@@ -31,11 +35,27 @@ struct SessionHistorySummary: Identifiable, Equatable {
         let tyreText = tyre.ifEmpty("-")
         let lapText = lap.ifEmpty("-")
         let cells = resultCount == 1 ? "1 cell" : "\(resultCount) cells"
-        return "Saved: \(captured) · Driver: \(driverText) · Tyre: \(tyreText) · Lap: \(lapText) · \(cells)"
+        let device = originDeviceDisplayName.ifEmpty("Unknown device")
+        let deviceScope = isFromCurrentDevice ? "This device" : "External"
+        return "Saved: \(captured) · Driver: \(driverText) · Tyre: \(tyreText) · Lap: \(lapText) · Device: \(device) (\(deviceScope)) · \(cells)"
     }
 
     var hasTemperatures: Bool { !zonePeaks.isEmpty }
     var hasPressures: Bool { !wheelPressures.isEmpty }
+
+    var originDeviceDisplayName: String {
+        let trimmed = originDeviceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        let idTrimmed = originDeviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !idTrimmed.isEmpty { return idTrimmed }
+        return ""
+    }
+
+    var originDeviceShortID: String {
+        let trimmed = originDeviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 8 else { return trimmed }
+        return String(trimmed.prefix(8))
+    }
 
     func temperature(for wheel: WheelPos, zone: Zone) -> Double? {
         zonePeaks[wheel]?[zone]
@@ -63,6 +83,9 @@ struct SessionHistorySummary: Identifiable, Equatable {
             driver,
             tyre,
             lap,
+            sessionID.uuidString,
+            originDeviceID,
+            originDeviceName,
             SessionHistorySummary.searchDateFormatter.string(from: createdAt),
         ].map { $0.lowercased() }
         return haystack.contains { $0.contains(lower) }
@@ -116,10 +139,12 @@ final class SessionHistoryStore: ObservableObject {
 
     private let fileManager: FileManager
     private let archiveDirectory: URL
+    private let deviceIdentity: DeviceIdentity
     private var historyObserver: Any?
 
     init(fileManager: FileManager = .default, baseDirectory: URL? = nil) {
         self.fileManager = fileManager
+        self.deviceIdentity = DeviceIdentity.current()
         if let baseDirectory {
             archiveDirectory = baseDirectory
                 .appendingPathComponent("PitTempAutosaves", isDirectory: true)
@@ -159,13 +184,17 @@ final class SessionHistoryStore: ObservableObject {
 
             let decoder = JSONDecoder()
             var items: [SessionHistorySummary] = []
+            let localDeviceID = self.deviceIdentity.id.trimmingCharacters(in: .whitespacesAndNewlines)
             for url in urls where url.pathExtension.lowercased() == "json" {
                 guard let data = try? Data(contentsOf: url) else { continue }
                 guard let snapshot = try? decoder.decode(SessionSnapshot.self, from: data) else { continue }
+                let trimmedDeviceID = snapshot.originDeviceID.trimmingCharacters(in: .whitespacesAndNewlines)
+                let isLocal = !trimmedDeviceID.isEmpty && !localDeviceID.isEmpty && trimmedDeviceID == localDeviceID
                 let summary = SessionHistorySummary(
                     fileURL: url,
                     createdAt: snapshot.createdAt,
                     sessionBeganAt: snapshot.sessionBeganAt,
+                    sessionID: snapshot.sessionID,
                     track: snapshot.meta.track,
                     date: snapshot.meta.date,
                     car: snapshot.meta.car,
@@ -174,7 +203,10 @@ final class SessionHistoryStore: ObservableObject {
                     lap: snapshot.meta.lap,
                     resultCount: snapshot.results.count,
                     zonePeaks: SessionHistoryStore.zonePeaks(from: snapshot.results),
-                    wheelPressures: snapshot.wheelPressures
+                    wheelPressures: snapshot.wheelPressures,
+                    originDeviceID: snapshot.originDeviceID,
+                    originDeviceName: snapshot.originDeviceName,
+                    isFromCurrentDevice: isLocal
                 )
                 items.append(summary)
             }
@@ -241,7 +273,7 @@ final class SessionHistoryStore: ObservableObject {
     }
 }
 
-private extension String {
+extension String {
     func ifEmpty(_ fallback: String) -> String {
         trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : self
     }
@@ -292,14 +324,26 @@ private extension SessionHistoryStore {
         let timestamp = isoFormatter.string(from: snapshot.createdAt).replacingOccurrences(of: ":", with: "-")
         let carComponent = sanitizeFileNameComponent(snapshot.meta.car)
         let trackComponent = sanitizeFileNameComponent(snapshot.meta.track)
+        let deviceComponent = sanitizeFileNameComponent(snapshot.originDeviceName)
+        let idSuffix = sanitizeFileNameComponent(String(snapshot.sessionID.uuidString.prefix(8)))
+
+        var components = ["session", timestamp]
+        if !idSuffix.isEmpty { components.append(idSuffix) }
         if !carComponent.isEmpty {
-            return "session-\(timestamp)-\(carComponent)"
+            components.append(carComponent)
         } else if !trackComponent.isEmpty {
-            return "session-\(timestamp)-\(trackComponent)"
-        } else {
-            let originalBase = sanitizeFileNameComponent(original.deletingPathExtension().lastPathComponent)
-            return originalBase.isEmpty ? "session-\(timestamp)" : originalBase
+            components.append(trackComponent)
         }
+        if deviceComponent.isEmpty == false {
+            components.append(deviceComponent)
+        }
+
+        if components.count <= 2 {
+            let originalBase = sanitizeFileNameComponent(original.deletingPathExtension().lastPathComponent)
+            if !originalBase.isEmpty { components.append(originalBase) }
+        }
+
+        return components.joined(separator: "-")
     }
 
     func sanitizeFileNameComponent(_ text: String) -> String {

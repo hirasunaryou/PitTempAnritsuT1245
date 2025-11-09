@@ -25,8 +25,10 @@ final class SessionViewModel: ObservableObject {
     private let exporter: CSVExporting
     private let autosaveStore: SessionAutosaveHandling
     private let uiLog: UILogPublishing?
+    private let deviceIdentity: DeviceIdentity
     private var autosaveWorkItem: DispatchWorkItem?
     private var isRestoringAutosave = false
+    private var currentSessionID = UUID()
 
     init(exporter: CSVExporting = CSVExporter(),
          settings: SessionSettingsProviding? = nil,
@@ -35,6 +37,7 @@ final class SessionViewModel: ObservableObject {
         self.exporter = exporter
         self.autosaveStore = autosaveStore
         self.uiLog = uiLog
+        self.deviceIdentity = DeviceIdentity.current()
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
         if let settings {
             self.settings = settings
@@ -132,6 +135,14 @@ final class SessionViewModel: ObservableObject {
     func prepareForNextSession(carryOver: NextSessionCarryOver) {
         timer?.invalidate(); timer = nil
 
+        let hadResults = !results.isEmpty || !wheelMemos.isEmpty || !wheelPressures.isEmpty
+        var archiveMessage: String? = nil
+        if hadResults {
+            persistAutosaveNow()
+            autosaveStore.archiveLatest()
+            archiveMessage = "前の計測セッション (\(currentSessionID.uuidString)) をアーカイブしました。\nArchived previous session before starting a new one."
+        }
+
         let preservedMeta: MeasureMeta
         switch carryOver {
         case .keepAllMeta:
@@ -165,13 +176,16 @@ final class SessionViewModel: ObservableObject {
         lastLegacyCSV = nil
 
         loadedHistorySummary = nil
-        autosaveStore.clear()
+
+        currentSessionID = UUID()
         persistAutosaveNow()
 
         sessionResetID = UUID()
 
+        var message = messageForNextSession(carryOver: carryOver)
+        if let archiveMessage { message = archiveMessage + "\n\n" + message }
         let entry = UILogEntry(
-            message: messageForNextSession(carryOver: carryOver),
+            message: message,
             level: .info,
             category: .general
         )
@@ -465,7 +479,10 @@ final class SessionViewModel: ObservableObject {
             results: results,
             wheelMemos: wheelMemos,
             wheelPressures: wheelPressures,
-            sessionBeganAt: sessionBeganAt
+            sessionBeganAt: sessionBeganAt,
+            sessionID: currentSessionID,
+            originDeviceID: deviceIdentity.id,
+            originDeviceName: deviceIdentity.name
         )
         autosaveStore.save(snapshot)
     }
@@ -477,6 +494,7 @@ final class SessionViewModel: ObservableObject {
         wheelMemos = snapshot.wheelMemos
         wheelPressures = snapshot.wheelPressures
         sessionBeganAt = snapshot.sessionBeganAt
+        currentSessionID = snapshot.sessionID
         isCaptureActive = false
         currentWheel = nil
         currentZone = nil
@@ -523,13 +541,15 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func messageForNextSession(carryOver: NextSessionCarryOver) -> String {
+        let base: String
         switch carryOver {
         case .keepAllMeta:
-            return "計測結果をクリアしました（メタ情報は保持）。\nCleared results while keeping meta fields."
+            base = "計測結果をクリアしました（メタ情報は保持）。\nCleared results while keeping meta fields."
         case .keepCarIdentity:
-            return "計測結果をクリアし、車両Noのみ引き継ぎました。\nCleared results and kept only the car number."
+            base = "計測結果をクリアし、車両Noのみ引き継ぎました。\nCleared results and kept only the car number."
         case .resetEverything:
-            return "計測結果とメタ情報をすべて初期化しました。\nReset results and meta for the next vehicle."
+            base = "計測結果とメタ情報をすべて初期化しました。\nReset results and meta for the next vehicle."
         }
+        return base + "\n\nSession ID: \(currentSessionID.uuidString)"
     }
 }

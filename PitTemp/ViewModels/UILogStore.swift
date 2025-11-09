@@ -6,10 +6,13 @@ final class UILogStore: ObservableObject, UILogPublishing {
     @Published private(set) var entries: [UILogEntry] = []
     private let maxEntries = 200
 
-    func publish(_ entry: UILogEntry) {
-        entries.append(entry)
-        if entries.count > maxEntries {
-            entries.removeFirst(entries.count - maxEntries)
+    nonisolated func publish(_ entry: UILogEntry) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.entries.append(entry)
+            if self.entries.count > self.maxEntries {
+                self.entries.removeFirst(self.entries.count - self.maxEntries)
+            }
         }
     }
 

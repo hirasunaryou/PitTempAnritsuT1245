@@ -99,7 +99,7 @@ final class FolderBookmark: ObservableObject {
     }
 
     @Published var lastUploadedDestination: URL? = nil
-    func upload(file originalCSV: URL) {
+    func upload(file originalCSV: URL, metadata: DriveCSVMetadata? = nil) {
         // 連打ガード
         guard case .idle = statusLabel else { return }
         statusLabel = .uploading
@@ -112,19 +112,40 @@ final class FolderBookmark: ObservableObject {
         }
 
         // 日付フォルダ（YYYY-MM-DD）を「指定フォルダ直下」に作る
-        let day = ISO8601DateFormatter().string(from: Date()).prefix(10) // yyyy-MM-dd
-        let dayFolder = baseFolder.appendingPathComponent(String(day), isDirectory: true)
+        let dayName: String
+        if let metadata {
+            dayName = metadata.dayFolderName
+        } else {
+            dayName = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
+        }
+        var destinationFolder = baseFolder.appendingPathComponent(dayName, isDirectory: true)
+
+        if let metadata {
+            let deviceComponent = metadata.deviceID.sanitizedPathComponent()
+            if !deviceComponent.isEmpty {
+                destinationFolder = destinationFolder.appendingPathComponent(deviceComponent, isDirectory: true)
+            }
+        }
 
         do {
-            try FileManager.default.createDirectory(at: dayFolder, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
 
-            let dest = dayFolder.appendingPathComponent(originalCSV.lastPathComponent)
+            let dest = destinationFolder.appendingPathComponent(originalCSV.lastPathComponent)
+
+            let isoFormatter = ISO8601DateFormatter()
+            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            let uploadedISO = isoFormatter.string(from: Date())
+            let dataToWrite = csvDataWithUploadedTimestamp(from: originalCSV, uploadedISO: uploadedISO)
 
             // 既存があれば置換（原始的に remove → copy）
             if FileManager.default.fileExists(atPath: dest.path) {
                 try? FileManager.default.removeItem(at: dest)
             }
-            try FileManager.default.copyItem(at: originalCSV, to: dest)
+            if dataToWrite.isEmpty {
+                try FileManager.default.copyItem(at: originalCSV, to: dest)
+            } else {
+                try dataToWrite.write(to: dest, options: .atomic)
+            }
 
             print("[Upload] copied \(originalCSV.lastPathComponent) -> \(dest.path)")
             self.lastUploadedDestination = dest
@@ -143,28 +164,30 @@ final class FolderBookmark: ObservableObject {
 
     // MARK: - Helpers
 
-    /// 既存 CSV（wheel-flat 形式想定）に UPLOADED_AT_ISO を埋めたコピーを /Documents に作る
-    private func makeUploadedStampedCopy(from original: URL, uploadedISO: String) -> URL? {
-        guard let text = try? String(contentsOf: original, encoding: .utf8) else { return nil }
-        guard let firstNL = text.firstIndex(of: "\n") else { return nil }
+    /// 既存 CSV（wheel-flat 形式想定）に UPLOADED_AT_ISO を埋め込んだ Data を返す
+    private func csvDataWithUploadedTimestamp(from original: URL, uploadedISO: String) -> Data {
+        guard let text = try? String(contentsOf: original, encoding: .utf8),
+              let firstNL = text.firstIndex(of: "\n")
+        else {
+            return (try? Data(contentsOf: original)) ?? Data()
+        }
         let header = String(text[..<firstNL])
 
         // 期待ヘッダ: “…,UPLOADED_AT_ISO” まで含む
-        guard header.hasPrefix("TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO")
-        else { return nil }
+        guard header.hasPrefix("TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO")
+        else {
+            return (try? Data(contentsOf: original)) ?? Data()
+        }
 
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         let body = lines.dropFirst().map { line -> String in
             var cols = splitCSV(line)
-            if cols.count >= 16 { cols[15] = uploadedISO } // 0..15 の16列目
+            if cols.count >= 17 { cols[16] = uploadedISO }
             return cols.joined(separator: ",")
         }.joined(separator: "\n")
 
         let stamped = ([header, body].joined(separator: "\n") + "\n")
-        let tmp = original.deletingLastPathComponent()
-            .appendingPathComponent(original.lastPathComponent.replacingOccurrences(of: ".csv", with: "_uploaded.csv"))
-        try? Data(stamped.utf8).write(to: tmp)
-        return tmp
+        return Data(stamped.utf8)
     }
 
     /// CSV1行をカンマ+ダブルクオート対応で分割
@@ -179,6 +202,30 @@ final class FolderBookmark: ObservableObject {
         }
         out.append(cur)
         return out.map { $0.replacingOccurrences(of: "\"\"", with: "\"") }
+    }
+}
+
+private extension String {
+    func sanitizedPathComponent(limit: Int = 48) -> String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+
+        let collapsed = trimmed.replacingOccurrences(
+            of: "[^A-Za-z0-9._-]",
+            with: "_",
+            options: .regularExpression
+        )
+
+        let deduped = collapsed
+            .replacingOccurrences(of: "__+", with: "_", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "._-"))
+
+        if limit > 0 && deduped.count > limit {
+            let index = deduped.index(deduped.startIndex, offsetBy: limit)
+            return String(deduped[..<index])
+        }
+
+        return deduped
     }
 }
 
@@ -280,6 +327,12 @@ final class GoogleDriveService: ObservableObject {
 
     func setManualAccessToken(_ token: String) {
         manualAccessToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    @MainActor
+    func resetUIState() {
+        uploadState = .idle
+        lastErrorMessage = nil
     }
 
     func signOut() {

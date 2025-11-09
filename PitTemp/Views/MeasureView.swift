@@ -1627,12 +1627,12 @@ struct MeasureView: View {
                 // 1) CSVを両フォーマットで生成（デバイス名を付与）
                 vm.exportCSV(deviceName: ble.deviceName)
 
-                if let metadata = vm.lastCSVMetadata, let url = vm.lastCSV {
+                if settings.enableGoogleDriveUpload, let metadata = vm.lastCSVMetadata, let url = vm.lastCSV {
                     Task { await driveService.upload(csvURL: url, metadata: metadata) }
                 }
 
-                if let fallbackURL = vm.lastLegacyCSV ?? vm.lastCSV {
-                    folderBM.upload(file: fallbackURL)
+                if settings.enableICloudUpload, let fallbackURL = vm.lastLegacyCSV ?? vm.lastCSV {
+                    folderBM.upload(file: fallbackURL, metadata: vm.lastCSVMetadata)
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -1733,7 +1733,53 @@ struct MeasureView: View {
 
     @ViewBuilder
     private var uploadStatusView: some View {
-        switch driveService.uploadState {
+        let driveState = driveService.uploadState
+        let iCloudState = folderBM.statusLabel
+        let showDrive = settings.enableGoogleDriveUpload && driveState != .idle
+        let showICloud = settings.enableICloudUpload && iCloudState != .idle
+
+        if showDrive || showICloud {
+            HStack(spacing: 12) {
+                if showICloud { iCloudStatusChip(for: iCloudState) }
+                if showDrive { driveStatusChip(for: driveState) }
+            }
+        } else if !settings.enableGoogleDriveUpload && !settings.enableICloudUpload {
+            Label("Cloud uploads disabled", systemImage: "icloud.slash")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private func iCloudStatusChip(for state: UploadUIState) -> some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case .uploading:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.accentColor)
+                Text("Saving to iCloud…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        case .done:
+            Label("iCloud upload complete", systemImage: "checkmark.icloud.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+        case .failed(let message):
+            Label(message.isEmpty ? "iCloud upload failed" : message, systemImage: "exclamationmark.triangle")
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    @ViewBuilder
+    private func driveStatusChip(for state: UploadUIState) -> some View {
+        switch state {
         case .idle:
             EmptyView()
         case .uploading:

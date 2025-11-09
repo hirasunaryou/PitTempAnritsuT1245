@@ -46,6 +46,10 @@ final class SettingsStore: ObservableObject {
     @AppStorage("pref.autofillDateTime") var autofillDateTime: Bool = true
     @AppStorage("hr2500.id") var hr2500ID: String = ""
 
+    // クラウド連携の有効/無効
+    @AppStorage("cloud.enableICloudUpload") var enableICloudUpload: Bool = true
+    @AppStorage("cloud.enableDriveUpload") var enableGoogleDriveUpload: Bool = false
+
     enum MetaVoiceField: String, CaseIterable, Identifiable {
         case track, date, time, car, driver, tyre, lap, checker
         var id: String { rawValue }

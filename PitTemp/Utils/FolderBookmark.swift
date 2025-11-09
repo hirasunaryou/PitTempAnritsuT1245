@@ -681,20 +681,27 @@ final class GoogleDriveService: ObservableObject {
 
 #if canImport(UIKit)
     @MainActor
-    private func topViewController(base: UIViewController? = UIApplication.shared.connectedScenes.compactMap { scene in
-        guard let windowScene = scene as? UIWindowScene else { return nil }
-        return windowScene.windows.first { $0.isKeyWindow }?.rootViewController
-    }.first) -> UIViewController? {
-        if let nav = base as? UINavigationController {
+    private func topViewController(base: UIViewController? = nil) -> UIViewController? {
+        let startingBase: UIViewController?
+        if let base {
+            startingBase = base
+        } else {
+            startingBase = UIApplication.shared.connectedScenes.compactMap { scene in
+                guard let windowScene = scene as? UIWindowScene else { return nil }
+                return windowScene.windows.first { $0.isKeyWindow }?.rootViewController
+            }.first
+        }
+
+        if let nav = startingBase as? UINavigationController {
             return topViewController(base: nav.visibleViewController)
         }
-        if let tab = base as? UITabBarController {
+        if let tab = startingBase as? UITabBarController {
             return tab.selectedViewController.flatMap { topViewController(base: $0) }
         }
-        if let presented = base?.presentedViewController {
+        if let presented = startingBase?.presentedViewController {
             return topViewController(base: presented)
         }
-        return base
+        return startingBase
     }
 #endif
 }

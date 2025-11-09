@@ -179,14 +179,14 @@ struct LibraryView: View {
                         if settings.enableGoogleDriveUpload {
                             NavigationLink {
                                 DriveBrowserView()
-                        } label: {
-                            Label("Google Drive", systemImage: "cloud")
+                            } label: {
+                                Label("Google Drive", systemImage: "cloud")
+                            }
+                        } else {
+                            Label("Google Drive uploads disabled", systemImage: "cloud.slash")
+                                .foregroundStyle(.secondary)
                         }
-                    } else {
-                        Label("Google Drive uploads disabled", systemImage: "cloud.slash")
-                            .foregroundStyle(.secondary)
                     }
-                }
 
                 if folderBM.folderURL != nil {
                     // クイック並び替え（個別CSVビュー用）

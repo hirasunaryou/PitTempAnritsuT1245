@@ -104,59 +104,57 @@ final class FolderBookmark: ObservableObject {
         guard case .idle = statusLabel else { return }
         statusLabel = .uploading
 
-        // 保存先フォルダを復元（未設定なら failed）
-        guard let baseFolder = folderURL ?? restore() else {
-            statusLabel = .failed("No folder")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
-            return
-        }
-
-        // 日付フォルダ（YYYY-MM-DD）を「指定フォルダ直下」に作る
-        let dayName: String
-        if let metadata {
-            dayName = metadata.dayFolderName
-        } else {
-            dayName = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
-        }
-        var destinationFolder = baseFolder.appendingPathComponent(dayName, isDirectory: true)
-
-        if let metadata {
-            let deviceComponent = metadata.deviceID.sanitizedPathComponent()
-            if !deviceComponent.isEmpty {
-                destinationFolder = destinationFolder.appendingPathComponent(deviceComponent, isDirectory: true)
-            }
-        }
-
-        do {
-            try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
-
-            let dest = destinationFolder.appendingPathComponent(originalCSV.lastPathComponent)
-
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            let uploadedISO = isoFormatter.string(from: Date())
-            let dataToWrite = csvDataWithUploadedTimestamp(from: originalCSV, uploadedISO: uploadedISO)
-
-            // 既存があれば置換（原始的に remove → copy）
-            if FileManager.default.fileExists(atPath: dest.path) {
-                try? FileManager.default.removeItem(at: dest)
-            }
-            if dataToWrite.isEmpty {
-                try FileManager.default.copyItem(at: originalCSV, to: dest)
+        let handled = withAccess { baseFolder -> Bool in
+            // 日付フォルダ（YYYY-MM-DD）を「指定フォルダ直下」に作る
+            let dayName: String
+            if let metadata {
+                dayName = metadata.dayFolderName
             } else {
-                try dataToWrite.write(to: dest, options: .atomic)
+                dayName = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
+            }
+            var destinationFolder = baseFolder.appendingPathComponent(dayName, isDirectory: true)
+
+            if let metadata {
+                let deviceComponent = metadata.deviceID.sanitizedPathComponent()
+                if !deviceComponent.isEmpty {
+                    destinationFolder = destinationFolder.appendingPathComponent(deviceComponent, isDirectory: true)
+                }
             }
 
-            print("[Upload] copied \(originalCSV.lastPathComponent) -> \(dest.path)")
-            self.lastUploadedDestination = dest
+            do {
+                try FileManager.default.createDirectory(at: destinationFolder, withIntermediateDirectories: true)
 
-            // 成功 → done に
-            statusLabel = .done
-            // 数秒後に idle に戻す
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
-        } catch {
-            print("[Upload] failed:", error)
-            statusLabel = .failed("Copy error")
+                let dest = destinationFolder.appendingPathComponent(originalCSV.lastPathComponent)
+
+                let isoFormatter = ISO8601DateFormatter()
+                isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                let uploadedISO = isoFormatter.string(from: Date())
+                let dataToWrite = csvDataWithUploadedTimestamp(from: originalCSV, uploadedISO: uploadedISO)
+
+                try coordinateWrite(
+                    destination: dest,
+                    originalCSV: originalCSV,
+                    replacementData: dataToWrite.isEmpty ? nil : dataToWrite
+                )
+
+                print("[Upload] copied \(originalCSV.lastPathComponent) -> \(dest.path)")
+                self.lastUploadedDestination = dest
+
+                // 成功 → done に
+                statusLabel = .done
+                // 数秒後に idle に戻す
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
+                return true
+            } catch {
+                print("[Upload] failed:", error)
+                statusLabel = .failed(error.presentableMessage)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
+                return false
+            }
+        }
+
+        if handled == nil {
+            statusLabel = .failed("No folder")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self.statusLabel = .idle }
         }
     }
@@ -226,6 +224,52 @@ private extension String {
         }
 
         return deduped
+    }
+}
+
+private extension FolderBookmark {
+    /// Security-scoped URL に対して NSFileCoordinator を用いた書き込みを実施する
+    func coordinateWrite(destination dest: URL, originalCSV: URL, replacementData: Data?) throws {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var capturedError: Error?
+
+        coordinator.coordinate(writingItemAt: dest, options: fileCoordinatorOptions(for: dest), error: &coordinationError) { url in
+            do {
+                if let replacementData {
+                    try replacementData.write(to: url, options: .atomic)
+                } else {
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        try FileManager.default.removeItem(at: url)
+                    }
+                    try FileManager.default.copyItem(at: originalCSV, to: url)
+                }
+            } catch {
+                capturedError = error
+            }
+        }
+
+        if let capturedError {
+            throw capturedError
+        }
+
+        if let coordinationError {
+            throw coordinationError
+        }
+    }
+
+    func fileCoordinatorOptions(for destination: URL) -> NSFileCoordinator.WritingOptions {
+        FileManager.default.fileExists(atPath: destination.path) ? [.forReplacing] : []
+    }
+}
+
+private extension Error {
+    var presentableMessage: String {
+        let nsError = self as NSError
+        if nsError.domain == NSCocoaErrorDomain {
+            return nsError.localizedDescription
+        }
+        return localizedDescription
     }
 }
 
@@ -335,6 +379,7 @@ final class GoogleDriveService: ObservableObject {
         lastErrorMessage = nil
     }
 
+    @MainActor
     func signOut() {
         guard supportsInteractiveSignIn else { return }
 #if canImport(GoogleSignIn)
@@ -343,6 +388,7 @@ final class GoogleDriveService: ObservableObject {
         signInState = .signedOut
     }
 
+    @MainActor
     func signIn() async throws {
         guard supportsInteractiveSignIn else { throw DriveError.interactiveSignInUnavailable }
 #if canImport(GoogleSignIn)
@@ -634,6 +680,7 @@ final class GoogleDriveService: ObservableObject {
     }
 
 #if canImport(UIKit)
+    @MainActor
     private func topViewController(base: UIViewController? = UIApplication.shared.connectedScenes.compactMap { scene in
         guard let windowScene = scene as? UIWindowScene else { return nil }
         return windowScene.windows.first { $0.isKeyWindow }?.rootViewController

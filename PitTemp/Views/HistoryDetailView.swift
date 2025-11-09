@@ -72,7 +72,12 @@ struct HistoryDetailView: View {
 
     private func loadSnapshot() async {
         if snapshot != nil || loadError != nil { return }
-        let loaded = await Task.detached(priority: .userInitiated) { history.snapshot(for: summary) }.value
+        let loaded: SessionSnapshot? = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let snapshot = history.snapshot(for: summary)
+                continuation.resume(returning: snapshot)
+            }
+        }
         if let loaded {
             await MainActor.run { self.snapshot = loaded }
         } else {

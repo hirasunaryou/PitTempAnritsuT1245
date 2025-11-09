@@ -85,10 +85,6 @@ struct MeasureView: View {
                     historyStatusCard
 
                     sectionCard {
-                        historySection
-                    }
-
-                    sectionCard {
                         tyreControlsSection
                     }
 
@@ -143,30 +139,11 @@ struct MeasureView: View {
                 }
             }
             .sheet(isPresented: $showHistorySheet) {
-                NavigationStack {
-                    List {
-                        if history.summaries.isEmpty {
-                            Text("保存済み履歴がありません / No archived sessions available")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            ForEach(history.summaries) { summary in
-                                Button {
-                                    loadHistorySummary(summary)
-                                } label: {
-                                    historyRow(for: summary)
-                                }
-                            }
-                        }
-                    }
-                    .navigationTitle("History / 履歴")
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Close") { showHistorySheet = false }
-                        }
-                    }
-                }
+                HistoryListView(
+                    history: history,
+                    onSelect: { summary in loadHistorySummary(summary) },
+                    onClose: { showHistorySheet = false }
+                )
                 .presentationDetents([.medium, .large])
             }
         }
@@ -1617,28 +1594,6 @@ struct MeasureView: View {
         syncManualDefaults(for: selectedWheel)
         syncManualMemo(for: selectedWheel)
         syncManualPressureDefaults(for: selectedWheel)
-    }
-
-    private func historyRow(for summary: SessionHistorySummary) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(summary.displayTitle)
-                    .font(.headline)
-                Spacer()
-                Text(summary.createdAt, style: .date)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Text(summary.displayDetail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if !summary.date.isEmpty {
-                Text("記録日: \(summary.date)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(.vertical, 4)
     }
 
     private func handleNextSessionChoice(_ option: SessionViewModel.NextSessionCarryOver) {

@@ -1425,54 +1425,72 @@ private struct ColumnFilterEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section(header: Text("Contains")) {
-                    TextField("Keyword", text: $text)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
+            formContent
+                .navigationTitle(Text("Filter \(column.rawValue)"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { toolbarContent }
+        }
+    }
 
-                if !suggestions.isEmpty {
-                    Section("Suggestions") {
-                        ForEach(suggestions, id: \.self) { suggestion in
-                            Button {
-                                text = suggestion
-                            } label: {
-                                HStack {
-                                    Text(suggestion)
-                                    Spacer()
-                                    if text == suggestion {
-                                        Image(systemName: "checkmark")
-                                            .foregroundStyle(.accent)
-                                    }
-                                }
-                            }
-                        }
-                    }
+    @ViewBuilder
+    private var formContent: some View {
+        Form {
+            Section(header: Text("Contains")) {
+                TextField("Keyword", text: $text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
+            if !suggestions.isEmpty {
+                suggestionsSection
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var suggestionsSection: some View {
+        Section("Suggestions") {
+            ForEach(suggestions, id: \.self) { suggestion in
+                suggestionRow(for: suggestion)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func suggestionRow(for suggestion: String) -> some View {
+        Button {
+            text = suggestion
+        } label: {
+            HStack {
+                Text(suggestion)
+                Spacer()
+                if text == suggestion {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.accent)
                 }
             }
-            .navigationTitle(Text("Filter \(column.rawValue)"))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .destructiveAction) {
-                    if !initialText.isEmpty || !text.isEmpty {
-                        Button("Clear") {
-                            onClear()
-                            dismiss()
-                        }
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Apply") {
-                        onApply(text)
-                        dismiss()
-                    }
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && initialText.isEmpty)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .destructiveAction) {
+            if !initialText.isEmpty || !text.isEmpty {
+                Button("Clear") {
+                    onClear()
+                    dismiss()
                 }
             }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Apply") {
+                onApply(text)
+                dismiss()
+            }
+            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && initialText.isEmpty)
         }
     }
 }

@@ -85,6 +85,10 @@ struct MeasureView: View {
                     historyStatusCard
 
                     sectionCard {
+                        historySection
+                    }
+
+                    sectionCard {
                         tyreControlsSection
                     }
 

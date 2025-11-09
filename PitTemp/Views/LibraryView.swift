@@ -405,6 +405,7 @@ struct LibraryView: View {
             }
         }
     }
+    }
 
     // MARK: - ファイル一覧
     private func reloadFiles() {

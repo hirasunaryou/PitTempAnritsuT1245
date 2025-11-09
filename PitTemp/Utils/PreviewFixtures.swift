@@ -11,6 +11,7 @@ struct MeasureViewPreviewFixtures {
     let folderBookmark: FolderBookmark
     let bluetooth: BluetoothService
     let registry: DeviceRegistry
+    let driveService: GoogleDriveService
 
     init() {
         settings = SettingsStore()
@@ -22,6 +23,7 @@ struct MeasureViewPreviewFixtures {
         folderBookmark = FolderBookmark()
         bluetooth = BluetoothService()
         registry = DeviceRegistry()
+        driveService = GoogleDriveService()
 
         configureSamples()
     }

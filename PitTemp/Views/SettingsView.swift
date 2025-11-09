@@ -83,24 +83,31 @@ struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                        HStack {
-                            Button {
-                                Task {
-                                    do {
-                                        try await driveService.signIn()
-                                    } catch {
-                                        driveAlertMessage = error.localizedDescription
+                        if driveService.supportsInteractiveSignIn {
+                            HStack {
+                                Button {
+                                    Task {
+                                        do {
+                                            try await driveService.signIn()
+                                        } catch {
+                                            driveAlertMessage = error.localizedDescription
+                                        }
                                     }
+                                } label: {
+                                    Label("Sign in", systemImage: "person.crop.circle.badge.plus")
                                 }
-                            } label: {
-                                Label("Sign in", systemImage: "person.crop.circle.badge.plus")
-                            }
 
-                            Button(role: .destructive) {
-                                driveService.signOut()
-                            } label: {
-                                Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                                Button(role: .destructive) {
+                                    driveService.signOut()
+                                } label: {
+                                    Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                                }
                             }
+                        } else {
+                            Label("Interactive Google sign-in is unavailable in this build. Provide an access token manually or add the GoogleSignIn SDK.", systemImage: "info.circle")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
 
                         Button {

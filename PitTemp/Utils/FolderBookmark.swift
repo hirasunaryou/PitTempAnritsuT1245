@@ -193,6 +193,7 @@ final class GoogleDriveService: ObservableObject {
         case presenterUnavailable
         case invalidResponse
         case server(String)
+        case interactiveSignInUnavailable
 
         var errorDescription: String? {
             switch self {
@@ -208,6 +209,8 @@ final class GoogleDriveService: ObservableObject {
                 return "Google Drive returned an unexpected response."
             case .server(let message):
                 return message
+            case .interactiveSignInUnavailable:
+                return "Interactive Google sign-in is not bundled with this build. Please add the GoogleSignIn SDK or provide a manual access token."
             }
         }
     }
@@ -255,6 +258,18 @@ final class GoogleDriveService: ObservableObject {
 
     private static let driveScope = "https://www.googleapis.com/auth/drive.file"
 
+    var supportsInteractiveSignIn: Bool {
+#if canImport(GoogleSignIn)
+#if canImport(UIKit)
+        return true
+#else
+        return false
+#endif
+#else
+        return false
+#endif
+    }
+
     func isConfigured() -> Bool {
         !parentFolderID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -268,6 +283,7 @@ final class GoogleDriveService: ObservableObject {
     }
 
     func signOut() {
+        guard supportsInteractiveSignIn else { return }
 #if canImport(GoogleSignIn)
         GIDSignIn.sharedInstance.signOut()
 #endif
@@ -275,6 +291,7 @@ final class GoogleDriveService: ObservableObject {
     }
 
     func signIn() async throws {
+        guard supportsInteractiveSignIn else { throw DriveError.interactiveSignInUnavailable }
 #if canImport(GoogleSignIn)
 #if canImport(UIKit)
         guard let presenter = topViewController() else { throw DriveError.presenterUnavailable }

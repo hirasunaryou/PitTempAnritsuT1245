@@ -190,23 +190,36 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
 
     func archiveLatest() {
         guard fileManager.fileExists(atPath: autosaveURL.path) else { return }
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let timestamp = formatter.string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let destination = archiveDirectory.appendingPathComponent("session-\(timestamp).json")
-        let destinationCSV = archiveDirectory.appendingPathComponent("session-\(timestamp).csv")
 
         do {
+            let data = try Data(contentsOf: autosaveURL)
+            let snapshot = try decoder.decode(SessionSnapshot.self, from: data)
+            let day = DateFormatter.cachedDayFormatter.string(from: snapshot.createdAt)
+            let dayDirectory = archiveDirectory.appendingPathComponent(day, isDirectory: true)
+            if !fileManager.fileExists(atPath: dayDirectory.path) {
+                try fileManager.createDirectory(at: dayDirectory, withIntermediateDirectories: true)
+            }
+
+            let destination = dayDirectory
+                .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+                .appendingPathExtension("json")
+            let destinationCSV = dayDirectory
+                .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+                .appendingPathExtension("csv")
+
             if fileManager.fileExists(atPath: destination.path) {
                 try fileManager.removeItem(at: destination)
             }
-            try fileManager.copyItem(at: autosaveURL, to: destination)
+            try data.write(to: destination, options: .atomic)
+
             if fileManager.fileExists(atPath: autosaveCSVURL.path) {
+                let csvData = try Data(contentsOf: autosaveCSVURL)
                 if fileManager.fileExists(atPath: destinationCSV.path) {
                     try fileManager.removeItem(at: destinationCSV)
                 }
-                try fileManager.copyItem(at: autosaveCSVURL, to: destinationCSV)
+                try csvData.write(to: destinationCSV, options: .atomic)
             }
+
             NotificationCenter.default.post(
                 name: .pitSessionHistoryUpdated,
                 object: nil,

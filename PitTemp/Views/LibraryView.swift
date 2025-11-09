@@ -102,6 +102,14 @@ struct LibraryView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("Cloud") {
+                    NavigationLink {
+                        DriveBrowserView()
+                    } label: {
+                        Label("Google Drive", systemImage: "cloud")
+                    }
+                }
+
                 if folderBM.folderURL != nil {
                     // クイック並び替え（個別CSVビュー用）
                     Section {

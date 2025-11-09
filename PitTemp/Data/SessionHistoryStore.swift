@@ -305,9 +305,9 @@ private extension SessionHistoryStore {
     func sanitizeFileNameComponent(_ text: String) -> String {
         var invalidCharacters = CharacterSet(charactersIn: "/:?%*|<>")
         invalidCharacters.insert(charactersIn: "\"\\")
-        let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let components = cleaned.components(separatedBy: invalidCharacters)
-        let normalized = components.filter { !$0.isEmpty }.joined(separator: "-")
-        return normalized.replacingOccurrences(of: "\s+", with: "-", options: .regularExpression)
+        invalidCharacters.formUnion(.whitespacesAndNewlines)
+
+        let components = text.components(separatedBy: invalidCharacters)
+        return components.filter { !$0.isEmpty }.joined(separator: "-")
     }
 }

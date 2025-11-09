@@ -254,7 +254,7 @@ final class SessionHistoryStore: ObservableObject {
         var report = SessionHistoryImportReport()
 
         for url in urls {
-            var didAccess = url.startAccessingSecurityScopedResource()
+            let didAccess = url.startAccessingSecurityScopedResource()
             defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
 
             guard url.pathExtension.lowercased() == "json" else {

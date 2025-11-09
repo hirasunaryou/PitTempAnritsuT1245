@@ -232,6 +232,7 @@ private extension FolderBookmark {
     func coordinateWrite(destination dest: URL, originalCSV: URL, replacementData: Data?) throws {
         let coordinator = NSFileCoordinator(filePresenter: nil)
         var coordinationError: NSError?
+        var capturedError: Error?
 
         coordinator.coordinate(writingItemAt: dest, options: fileCoordinatorOptions(for: dest), error: &coordinationError) { url in
             do {
@@ -244,8 +245,12 @@ private extension FolderBookmark {
                     try FileManager.default.copyItem(at: originalCSV, to: url)
                 }
             } catch {
-                coordinationError = error as NSError
+                capturedError = error
             }
+        }
+
+        if let capturedError {
+            throw capturedError
         }
 
         if let coordinationError {
@@ -374,6 +379,7 @@ final class GoogleDriveService: ObservableObject {
         lastErrorMessage = nil
     }
 
+    @MainActor
     func signOut() {
         guard supportsInteractiveSignIn else { return }
 #if canImport(GoogleSignIn)
@@ -382,6 +388,7 @@ final class GoogleDriveService: ObservableObject {
         signInState = .signedOut
     }
 
+    @MainActor
     func signIn() async throws {
         guard supportsInteractiveSignIn else { throw DriveError.interactiveSignInUnavailable }
 #if canImport(GoogleSignIn)
@@ -673,6 +680,7 @@ final class GoogleDriveService: ObservableObject {
     }
 
 #if canImport(UIKit)
+    @MainActor
     private func topViewController(base: UIViewController? = UIApplication.shared.connectedScenes.compactMap { scene in
         guard let windowScene = scene as? UIWindowScene else { return nil }
         return windowScene.windows.first { $0.isKeyWindow }?.rootViewController

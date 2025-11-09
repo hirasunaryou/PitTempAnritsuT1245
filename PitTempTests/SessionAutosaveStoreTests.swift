@@ -21,7 +21,10 @@ struct SessionAutosaveStoreTests {
             results: [],
             wheelMemos: [:],
             wheelPressures: [:],
-            sessionBeganAt: nil
+            sessionBeganAt: nil,
+            sessionID: UUID(),
+            originDeviceID: "TEST",
+            originDeviceName: "Test Device"
         )
 
         store.save(snapshot)

@@ -93,21 +93,40 @@ final class SpeechMemoManager: NSObject, ObservableObject {
             DispatchQueue.main.async { self.hasSpeechAuthorization = (st == .authorized) }
         }
 
-        let session = AVAudioSession.sharedInstance()
-        switch session.recordPermission {
-        case .granted:
-            DispatchQueue.main.async { self.hasMicrophonePermission = true }
-        case .denied:
-            DispatchQueue.main.async { self.hasMicrophonePermission = false }
-        case .undetermined:
-            if !didRequestRecordPermission {
-                didRequestRecordPermission = true
-                session.requestRecordPermission { granted in
-                    DispatchQueue.main.async { self.hasMicrophonePermission = granted }
+        if #available(iOS 17.0, *) {
+            let application = AVAudioApplication.shared
+            switch application.recordPermission {
+            case .granted:
+                DispatchQueue.main.async { self.hasMicrophonePermission = true }
+            case .denied:
+                DispatchQueue.main.async { self.hasMicrophonePermission = false }
+            case .undetermined:
+                if !didRequestRecordPermission {
+                    didRequestRecordPermission = true
+                    AVAudioApplication.requestRecordPermission { granted in
+                        DispatchQueue.main.async { self.hasMicrophonePermission = granted }
+                    }
                 }
+            @unknown default:
+                DispatchQueue.main.async { self.hasMicrophonePermission = false }
             }
-        @unknown default:
-            DispatchQueue.main.async { self.hasMicrophonePermission = false }
+        } else {
+            let session = AVAudioSession.sharedInstance()
+            switch session.recordPermission {
+            case .granted:
+                DispatchQueue.main.async { self.hasMicrophonePermission = true }
+            case .denied:
+                DispatchQueue.main.async { self.hasMicrophonePermission = false }
+            case .undetermined:
+                if !didRequestRecordPermission {
+                    didRequestRecordPermission = true
+                    session.requestRecordPermission { granted in
+                        DispatchQueue.main.async { self.hasMicrophonePermission = granted }
+                    }
+                }
+            @unknown default:
+                DispatchQueue.main.async { self.hasMicrophonePermission = false }
+            }
         }
     }
 

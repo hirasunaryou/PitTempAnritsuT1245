@@ -84,13 +84,13 @@ private struct MergedCSVDocument: Transferable {
 
     private func makeCSV() -> String {
         guard !rows.isEmpty else {
-            return canonicalHeader.joined(separator: ",") + "\n"
+            return Self.canonicalHeader.joined(separator: ",") + "\n"
         }
 
         let escapedRows = rows.map { row in
             row.canonicalCSVColumns.map { Self.escape($0) }.joined(separator: ",")
         }
-        return ([canonicalHeader.joined(separator: ",")] + escapedRows).joined(separator: "\n") + "\n"
+        return ([Self.canonicalHeader.joined(separator: ",")] + escapedRows).joined(separator: "\n") + "\n"
     }
 
     private static let canonicalHeader: [String] = [
@@ -174,237 +174,291 @@ struct LibraryView: View {
     var body: some View {
         ZStack {
             NavigationStack {
-                List {
-                    Section("Cloud") {
-                        if settings.enableGoogleDriveUpload {
-                            NavigationLink {
-                                DriveBrowserView()
-                            } label: {
-                                Label("Google Drive", systemImage: "cloud")
-                            }
-                        } else {
-                            Label("Google Drive uploads disabled", systemImage: "cloud.slash")
-                                .foregroundStyle(.secondary)
-                        }
+                libraryList
+                    .navigationTitle("Library")
+                    .toolbar { libraryToolbar }
+                    .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
+                    .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
+                    .onAppear { reloadFiles() }
+                    .sheet(item: $selectedFile, content: singleFileSheet)
+                    .sheet(isPresented: $showAllSheet, content: allFilesSheet)
+                    .sheet(isPresented: $showColumnSheet) {
+                        ColumnPickerSheet(allColumns: Column.allCases, selected: $selectedColumns)
+                            .presentationDetents([.medium, .large])
+                            .presentationDragIndicator(.visible)
                     }
-
-                if folderBM.folderURL != nil {
-                    // クイック並び替え（個別CSVビュー用）
-                    Section {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach([SortKey.newest,.oldest,.track,.date,.car,.tyre,.driver,.checker,.wheel], id:\.self) { key in
-                                    Button(key.rawValue) { sortKey = key; applySortForSingle() }
-                                        .buttonStyle(.bordered)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                }
-
-                if !dailyGroups.isEmpty {
-                    Section("Daily collections") {
-                        ForEach(dailyGroups) { group in
-                            Button {
-                                openDailyGroup(group)
-                            } label: {
-                                HStack(alignment: .center, spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(formattedDayTitle(group.day))
-                                            .font(.headline)
-                                        HStack(spacing: 12) {
-                                            Label(group.fileCountText, systemImage: "doc.on.doc")
-                                                .font(.caption)
-                                            HStack(spacing: 4) {
-                                                Image(systemName: "clock")
-                                                Text(group.latestModified, format: .dateTime.year().month().day().hour().minute())
-                                            }
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        }
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.caption)
-                                        .foregroundStyle(.tertiary)
-                                }
-                                .padding(.vertical, 6)
-                                .contentShape(Rectangle())
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-
-                // ファイル一覧
-                ForEach(files, id: \.self) { item in
-                    Button {
-                        rows = parseCSV(item.url)
-                        rawPreview = (try? String(contentsOf: item.url, encoding: .utf8)) ?? ""
-                        selectedFile = item
-                        applySortForSingle()
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading) {
-                                Text(item.url.lastPathComponent).font(.headline)
-                                Text(item.modifiedAt.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "doc.text")
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Library")
-            .toolbar {
-                HStack {
-                    Button("All") {
-                        rows = loadAll()
-                        searchText.removeAll()
-                        applyDynamicSort()
-                        allSheetTitle = "All CSVs"
-                        shareFileName = makeMergedFileName(suffix: "all")
-                        showAllSheet = true
-                    }
-
-                    Button("Columns") { showColumnSheet = true }
-
-                    Menu("Sort") {
-                        Picker("Column", selection: $sortColumn) {
-                            ForEach(Column.allCases) { c in Text(c.rawValue).tag(c) }
-                        }
-                        Toggle("Ascending", isOn: $sortAscending)
-                    }
-
-                    Button { reloadFiles() } label: { Image(systemName: "arrow.clockwise") }
-                }
-            }
-            .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
-            .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
-            .onAppear { reloadFiles() }
-
-            // 個別CSVの詳細
-            .sheet(item: $selectedFile) { file in
-                NavigationStack {
-                    List {
-                        Section("RESULTS") {
-                            Text("\(rows.count) rows").font(.headline)
-                            if !rows.isEmpty { SingleTableView(rows: rows) }
-                        }
-                        Section("RAW") {
-                            ScrollView { Text(rawPreview).font(.footnote).textSelection(.enabled) }
-                        }
-                    }
-                    .navigationTitle(file.url.lastPathComponent)
-                    .toolbar { Button("Close") { selectedFile = nil } }
-                }
-            }
-
-            // ALL表示（列選択・検索・列ヘッダで昇降切替）
-            .sheet(isPresented: $showAllSheet) {
-                NavigationStack {
-                    VStack(spacing: 0) {
-                        // 🔎 検索ボックス
-                        HStack {
-                            Image(systemName: "magnifyingglass")
-                            TextField("Search", text: $searchText)
-                                .textFieldStyle(.plain)
-                        }
-                        .padding(10)
-                        .background(Color(.secondarySystemBackground))
-
-                        ScrollView([.vertical, .horizontal]) {
-                            LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                                Section {
-                                    ForEach(Array(visibleSortedRows.enumerated()), id: \.offset) { index, row in
-                                        HStack(spacing: 0) {
-                                            ForEach(selectedColumns) { col in
-                                                Text(cell(row, col))
-                                                    .font(.footnote.monospacedDigit())
-                                                    .padding(.vertical, 8)
-                                                    .padding(.horizontal, 6)
-                                                    .frame(minWidth: 120, alignment: .leading)
-                                                    .background(index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
-                                            }
-                                        }
-                                        .background(index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
-                                        .clipShape(RoundedRectangle(cornerRadius: 6))
-                                        .padding(.vertical, 1)
-                                    }
-                                } header: {
-                                    HStack(spacing: 0) {
-                                        ForEach(selectedColumns) { col in
-                                            Button {
-                                                if sortColumn == col {
-                                                    sortAscending.toggle()
-                                                } else {
-                                                    sortColumn = col
-                                                    sortAscending = true
-                                                }
-                                            } label: {
-                                                HStack(spacing: 6) {
-                                                    Text(col.rawValue)
-                                                        .font(.footnote.bold())
-                                                    if sortColumn == col {
-                                                        Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
-                                                            .font(.caption2)
-                                                    }
-                                                }
-                                                .frame(minWidth: 120, alignment: .leading)
-                                                .padding(.vertical, 10)
-                                                .padding(.horizontal, 6)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .background(Color(.tertiarySystemBackground))
-                                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                                        }
-                                    }
-                                    .padding(.bottom, 4)
-                                    .background(Color(.systemGroupedBackground))
-                                }
-                            }
-                            .padding(.horizontal)
-                            .padding(.bottom)
-                        }
-                    }
-                    .navigationTitle(allSheetTitle)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Close") { showAllSheet = false }
-                        }
-                        ToolbarItem(placement: .primaryAction) {
-                            if let shareDocument {
-                                ShareLink(item: shareDocument) {
-                                    Label("Export CSV", systemImage: "square.and.arrow.up")
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 列選択（複数を連続でON/OFF & 並べ替え可能）
-            .sheet(isPresented: $showColumnSheet) {
-                ColumnPickerSheet(allColumns: Column.allCases, selected: $selectedColumns)
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
             }
         }
-        .overlay {
-            if isMergingDailyCSV {
-                ZStack {
-                    Color.black.opacity(0.2).ignoresSafeArea()
-                    ProgressView("Merging CSVs…")
-                        .padding(20)
-                        .background(.thinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(mergeOverlay)
+    }
+
+    @ViewBuilder
+    private var libraryList: some View {
+        List {
+            cloudSection
+
+            if folderBM.folderURL != nil {
+                quickSortSection
+            }
+
+            dailyCollectionsSection
+
+            ForEach(files, id: \.self, content: fileRow)
+        }
+    }
+
+    @ViewBuilder
+    private var cloudSection: some View {
+        Section("Cloud") {
+            if settings.enableGoogleDriveUpload {
+                NavigationLink {
+                    DriveBrowserView()
+                } label: {
+                    Label("Google Drive", systemImage: "cloud")
+                }
+            } else {
+                Label("Google Drive uploads disabled", systemImage: "cloud.slash")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var quickSortSection: some View {
+        Section {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach([SortKey.newest, .oldest, .track, .date, .car, .tyre, .driver, .checker, .wheel], id: \.self) { key in
+                        Button(key.rawValue) {
+                            sortKey = key
+                            applySortForSingle()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var dailyCollectionsSection: some View {
+        if !dailyGroups.isEmpty {
+            Section("Daily collections") {
+                ForEach(dailyGroups) { group in
+                    Button { openDailyGroup(group) } label: { dailyCollectionRow(for: group) }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dailyCollectionRow(for group: DailyGroup) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(formattedDayTitle(group.day))
+                    .font(.headline)
+                HStack(spacing: 12) {
+                    Label(group.fileCountText, systemImage: "doc.on.doc")
+                        .font(.caption)
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                        Text(group.latestModified, format: .dateTime.year().month().day().hour().minute())
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func fileRow(for item: FileItem) -> some View {
+        Button {
+            rows = parseCSV(item.url)
+            rawPreview = (try? String(contentsOf: item.url, encoding: .utf8)) ?? ""
+            selectedFile = item
+            applySortForSingle()
+        } label: {
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(item.url.lastPathComponent)
+                        .font(.headline)
+                    Text(item.modifiedAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "doc.text")
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var libraryToolbar: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigationBarTrailing) {
+            Button("All") {
+                rows = loadAll()
+                searchText.removeAll()
+                applyDynamicSort()
+                allSheetTitle = "All CSVs"
+                shareFileName = makeMergedFileName(suffix: "all")
+                showAllSheet = true
+            }
+
+            Button("Columns") { showColumnSheet = true }
+
+            Menu("Sort") {
+                Picker("Column", selection: $sortColumn) {
+                    ForEach(Column.allCases) { c in
+                        Text(c.rawValue).tag(c)
+                    }
+                }
+                Toggle("Ascending", isOn: $sortAscending)
+            }
+
+            Button { reloadFiles() } label: { Image(systemName: "arrow.clockwise") }
+        }
+    }
+
+    @ViewBuilder
+    private func singleFileSheet(file: FileItem) -> some View {
+        NavigationStack {
+            List {
+                Section("RESULTS") {
+                    Text("\(rows.count) rows")
+                        .font(.headline)
+                    if !rows.isEmpty {
+                        SingleTableView(rows: rows)
+                    }
+                }
+                Section("RAW") {
+                    ScrollView {
+                        Text(rawPreview)
+                            .font(.footnote)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .navigationTitle(file.url.lastPathComponent)
+            .toolbar {
+                Button("Close") { selectedFile = nil }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func allFilesSheet() -> some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                searchHeader
+
+                ScrollView([.vertical, .horizontal]) {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            ForEach(Array(visibleSortedRows.enumerated()), id: \.offset) { index, row in
+                                rowView(row, index: index)
+                            }
+                        } header: {
+                            headerRow
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
+                }
+            }
+            .navigationTitle(allSheetTitle)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { showAllSheet = false }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    if let shareDocument {
+                        ShareLink(item: shareDocument) {
+                            Label("Export CSV", systemImage: "square.and.arrow.up")
+                        }
+                    }
                 }
             }
         }
     }
+
+    private var searchHeader: some View {
+        HStack {
+            Image(systemName: "magnifyingglass")
+            TextField("Search", text: $searchText)
+                .textFieldStyle(.plain)
+        }
+        .padding(10)
+        .background(Color(.secondarySystemBackground))
+    }
+
+    private func rowView(_ row: LogRow, index: Int) -> some View {
+        HStack(spacing: 0) {
+            ForEach(selectedColumns) { col in
+                Text(cell(row, col))
+                    .font(.footnote.monospacedDigit())
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 6)
+                    .frame(minWidth: 120, alignment: .leading)
+                    .background(index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
+            }
+        }
+        .background(index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.vertical, 1)
+    }
+
+    private var headerRow: some View {
+        HStack(spacing: 0) {
+            ForEach(selectedColumns) { col in
+                Button {
+                    if sortColumn == col {
+                        sortAscending.toggle()
+                    } else {
+                        sortColumn = col
+                        sortAscending = true
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Text(col.rawValue)
+                            .font(.footnote.bold())
+                        if sortColumn == col {
+                            Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
+                                .font(.caption2)
+                        }
+                    }
+                    .frame(minWidth: 120, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 6)
+                }
+                .buttonStyle(.plain)
+                .background(Color(.tertiarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(.bottom, 4)
+        .background(Color(.systemGroupedBackground))
+    }
+
+    @ViewBuilder
+    private var mergeOverlay: some View {
+        if isMergingDailyCSV {
+            ZStack {
+                Color.black.opacity(0.2).ignoresSafeArea()
+                ProgressView("Merging CSVs…")
+                    .padding(20)
+                    .background(.thinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+        }
     }
 
     // MARK: - ファイル一覧
@@ -449,12 +503,18 @@ struct LibraryView: View {
             }
             .sorted { lhs, rhs in
                 // ISO形式日付優先、それ以外は文字列比較
-                let lDate = LibraryView.isoDayFormatter.date(from: lhs.day)
-                let rDate = LibraryView.isoDayFormatter.date(from: rhs.day)
-                if let lDate, let rDate { return lDate > rDate }
-                if let lDate { return true }
-                if let rDate { return false }
-                return lhs.day > rhs.day
+                let leftDate = LibraryView.isoDayFormatter.date(from: lhs.day)
+                let rightDate = LibraryView.isoDayFormatter.date(from: rhs.day)
+                switch (leftDate, rightDate) {
+                case let (l?, r?):
+                    return l > r
+                case (.some, .none):
+                    return true
+                case (.none, .some):
+                    return false
+                case (nil, nil):
+                    return lhs.day > rhs.day
+                }
             }
         }
     }

@@ -145,7 +145,7 @@ struct HistoryListView: View {
         guard !urls.isEmpty else { return }
         Task {
             let report = await Task.detached(priority: .userInitiated) {
-                history.importSnapshots(from: urls)
+                await history.importSnapshots(from: urls)
             }.value
             await MainActor.run {
                 importReport = report
@@ -181,8 +181,3 @@ private enum HistorySortOption: String, CaseIterable, Identifiable {
     }
 }
 
-private extension SessionHistorySummary {
-    func matches(search text: String) -> Bool {
-        matches(search: text)
-    }
-}

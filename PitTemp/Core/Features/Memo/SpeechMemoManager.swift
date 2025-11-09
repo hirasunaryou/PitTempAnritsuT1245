@@ -103,7 +103,7 @@ final class SpeechMemoManager: NSObject, ObservableObject {
             case .undetermined:
                 if !didRequestRecordPermission {
                     didRequestRecordPermission = true
-                    application.requestRecordPermission { granted in
+                    AVAudioApplication.requestRecordPermission { granted in
                         DispatchQueue.main.async { self.hasMicrophonePermission = granted }
                     }
                 }

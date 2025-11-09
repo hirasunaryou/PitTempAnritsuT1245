@@ -514,6 +514,36 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.bordered)
                     }
+            }
+        }
+        .overlay(mergeOverlay)
+    }
+
+    @ViewBuilder
+    private var libraryList: some View {
+        List {
+            cloudSection
+
+            if folderBM.folderURL != nil {
+                quickSortSection
+            }
+
+            dailyCollectionsSection
+
+            summarySection
+
+            ForEach(files, id: \.self, content: fileRow)
+        }
+    }
+
+    @ViewBuilder
+    private var cloudSection: some View {
+        Section("Cloud") {
+            if settings.enableGoogleDriveUpload {
+                NavigationLink {
+                    DriveBrowserView()
+                } label: {
+                    Label("Google Drive", systemImage: "cloud")
                 }
                 .padding(.vertical, 4)
             }
@@ -692,6 +722,7 @@ struct LibraryView: View {
                     .padding(.horizontal)
                     .padding(.bottom)
                 }
+                .buttonStyle(.plain)
             }
             .navigationTitle(allSheetTitle)
             .toolbar {
@@ -746,6 +777,17 @@ struct LibraryView: View {
                 } label: {
                     Label("Columns", systemImage: "square.grid.2x2")
                 }
+                Section("RAW") {
+                    ScrollView {
+                        Text(rawPreview)
+                            .font(.footnote)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .navigationTitle(file.url.lastPathComponent)
+            .toolbar {
+                Button("Close") { selectedFile = nil }
             }
 
             Text(String(format: NSLocalizedString("Times shown in %@", comment: "Time zone description"), timeZoneOption.label()))
@@ -849,6 +891,9 @@ struct LibraryView: View {
                         }
                     }
                 }
+                .buttonStyle(.plain)
+                .background(Color(.tertiarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
         }
         .padding(.bottom, 4)

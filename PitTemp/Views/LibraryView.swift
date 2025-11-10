@@ -270,6 +270,27 @@ enum Column: String, CaseIterable, Identifiable {
     case lap="LAP", checker="CHECKER", wheel="WHEEL"
     case out="OUT", cl="CL", inT="IN", memo="MEMO", session = "SESSION", exported="EXPORTED", uploaded="UPLOADED"
     var id: String { rawValue }
+
+    static let defaultVisibleColumns: [Column] = [
+        .track,
+        .date,
+        .time,
+        .car,
+        .tyre,
+        .wheel,
+        .out,
+        .cl,
+        .inT,
+        .memo,
+        .exported,
+        .uploaded
+    ]
+}
+
+private struct ActiveFilterToken: Identifiable, Hashable {
+    let column: Column
+    let text: String
+    var id: String { "\(column.id)|\(text)" }
 }
 
 private struct ActiveFilterToken: Identifiable, Hashable {
@@ -360,7 +381,7 @@ struct LibraryView: View {
     // ALL表示用
     @State private var showAllSheet = false
     @State private var searchText = ""
-    @State private var selectedColumns: [Column] = [.track,.date,.time,.car,.tyre,.wheel,.out,.cl,.inT,.memo,.exported,.uploaded]
+    @State private var selectedColumns: [Column] = Column.defaultVisibleColumns
     @State private var sortColumn: Column = .date
     @State private var sortAscending: Bool = true
     @State private var showColumnSheet = false
@@ -892,8 +913,118 @@ struct LibraryView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .background(isFilterActive(col) ? Color.accentColor.opacity(0.12) : Color(.tertiarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .highPriorityGesture(TapGesture(count: 2).onEnded { hideColumn(col) })
+                .contextMenu {
+                    if selectedColumns.count > 1 {
+                        Button {
+                            hideColumn(col)
+                        } label: {
+                            Label("Hide column", systemImage: "eye.slash")
+                        }
+                    }
+                    Button {
+                        openFilterEditor(for: col)
+                    } label: {
+                        Label(isFilterActive(col) ? "Edit filter" : "Filter…", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    if isFilterActive(col) {
+                        Button(role: .destructive) {
+                            clearFilter(for: col)
+                        } label: {
+                            Label("Clear filter", systemImage: "xmark.circle")
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
                 .background(Color(.tertiarySystemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+        }
+        .padding(.bottom, 4)
+        .background(Color(.systemGroupedBackground))
+    }
+
+    private var activeFilterTokens: [ActiveFilterToken] {
+        columnFilters.compactMap { key, value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return ActiveFilterToken(column: key, text: trimmed)
+        }
+        .sorted { lhs, rhs in
+            let visibleOrder = selectedColumns
+            let fallbackOrder = Column.allCases
+            let lIndex = visibleOrder.firstIndex(of: lhs.column) ?? fallbackOrder.firstIndex(of: lhs.column) ?? 0
+            let rIndex = visibleOrder.firstIndex(of: rhs.column) ?? fallbackOrder.firstIndex(of: rhs.column) ?? 0
+            if lIndex == rIndex {
+                return lhs.text.localizedCaseInsensitiveCompare(rhs.text) == .orderedAscending
+            }
+            return lIndex < rIndex
+        }
+    }
+
+    private func handleSortTap(for column: Column) {
+        if sortColumn == column {
+            sortAscending.toggle()
+        } else {
+            sortColumn = column
+            sortAscending = true
+        }
+    }
+
+    private func hideColumn(_ column: Column) {
+        guard selectedColumns.count > 1 else { return }
+        if let idx = selectedColumns.firstIndex(of: column) {
+            selectedColumns.remove(at: idx)
+        }
+        if sortColumn == column, let first = selectedColumns.first {
+            sortColumn = first
+            sortAscending = true
+        }
+        clearFilter(for: column)
+    }
+
+    private func openColumnPicker(closeAllSheetFirst: Bool) {
+        if closeAllSheetFirst, showAllSheet {
+            pendingColumnSheet = true
+            showAllSheet = false
+        } else {
+            pendingColumnSheet = false
+            showColumnSheet = true
+        }
+    }
+
+    private func isFilterActive(_ column: Column) -> Bool {
+        guard let value = columnFilters[column]?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return !value.isEmpty
+    }
+
+    private func openFilterEditor(for column: Column) {
+        filterEditorColumn = column
+    }
+
+    private func applyFilter(_ value: String, for column: Column) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            columnFilters.removeValue(forKey: column)
+        } else {
+            columnFilters[column] = trimmed
+        }
+    }
+
+    private func clearFilter(for column: Column) {
+        columnFilters.removeValue(forKey: column)
+    }
+
+    private func buildSuggestions(for column: Column) -> [String] {
+        var seen: Set<String> = []
+        var unique: [String] = []
+        for raw in rows.map({ displayValue($0, column) }) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if seen.insert(trimmed).inserted {
+                unique.append(trimmed)
             }
         }
         .padding(.bottom, 4)

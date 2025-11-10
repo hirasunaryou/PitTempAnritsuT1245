@@ -20,8 +20,234 @@ struct LogRow: Identifiable {
 
 extension LogRow {
     /// CSVエクスポート時の行データ
-    fileprivate var canonicalCSVColumns: [String] {
-        [track, date, car, driver, tyre, time, lap, checker, wheel, outStr, clStr, inStr, memo, sessionISO, exportedISO, uploadedISO]
+    fileprivate func canonicalCSVColumns(in timeZone: TimeZone) -> [String] {
+        var columns = [track, date, car, driver, tyre, time, lap, checker, wheel, outStr, clStr, inStr, memo, sessionISO, exportedISO, uploadedISO]
+
+        if let referenceDate = LibraryTimestampFormatter.referenceDate(for: self) {
+            columns[1] = LibraryTimestampFormatter.exportDayString(from: referenceDate, timeZone: timeZone)
+            columns[5] = LibraryTimestampFormatter.exportTimeString(from: referenceDate, timeZone: timeZone)
+        }
+
+        columns[13] = LibraryTimestampFormatter.exportISOString(from: sessionISO, timeZone: timeZone)
+        columns[14] = LibraryTimestampFormatter.exportISOString(from: exportedISO, timeZone: timeZone)
+        columns[15] = LibraryTimestampFormatter.exportISOString(from: uploadedISO, timeZone: timeZone)
+
+        return columns
+    }
+}
+
+private enum LibraryTimeZoneOption: String, CaseIterable, Identifiable {
+    case tokyo
+    case device
+    case utc
+
+    var id: String { rawValue }
+
+    var timeZone: TimeZone {
+        switch self {
+        case .tokyo:
+            return TimeZone(identifier: "Asia/Tokyo") ?? .current
+        case .device:
+            return .current
+        case .utc:
+            return TimeZone(secondsFromGMT: 0) ?? .current
+        }
+    }
+
+    var localizedName: String {
+        switch self {
+        case .tokyo:
+            return "Japan Standard Time"
+        case .device:
+            return NSLocalizedString("Device local time", comment: "Time zone menu item")
+        case .utc:
+            return "Coordinated Universal Time"
+        }
+    }
+
+    func label(for date: Date = Date()) -> String {
+        let tz = timeZone
+        let abbreviation = tz.abbreviation(for: date) ?? tz.identifier
+        let offset = tz.secondsFromGMT(for: date)
+        let hours = offset / 3600
+        let minutes = abs(offset / 60) % 60
+        let sign = offset >= 0 ? "+" : "-"
+        return "\(abbreviation) (UTC\(sign)\(String(format: "%02d:%02d", abs(hours), minutes)))"
+    }
+
+    func abbreviation(for date: Date = Date()) -> String {
+        timeZone.abbreviation(for: date) ?? fileSuffix
+    }
+
+    var fileSuffix: String {
+        switch self {
+        case .tokyo:
+            return "JST"
+        case .device:
+            return "LOCAL"
+        case .utc:
+            return "UTC"
+        }
+    }
+}
+
+private enum ShareFileSource {
+    case generated(suffix: String)
+    case fixed(name: String)
+}
+
+private struct LibraryTimestampFormatter {
+    private static let parserWithFraction: ISO8601DateFormatter = {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fmt
+    }()
+
+    private static let parserWithoutFraction: ISO8601DateFormatter = {
+        let fmt = ISO8601DateFormatter()
+        fmt.formatOptions = [.withInternetDateTime]
+        return fmt
+    }()
+
+    private static var exportISOFormatterCache: [String: ISO8601DateFormatter] = [:]
+    private static var exportDayFormatterCache: [String: DateFormatter] = [:]
+    private static var exportTimeFormatterCache: [String: DateFormatter] = [:]
+    private static var displayFormatterCache: [String: DateFormatter] = [:]
+    private static var displayDateFormatterCache: [String: DateFormatter] = [:]
+    private static var displayTimeFormatterCache: [String: DateFormatter] = [:]
+
+    static func parse(_ iso: String) -> Date? {
+        guard !iso.isEmpty else { return nil }
+        if let date = parserWithFraction.date(from: iso) {
+            return date
+        }
+        return parserWithoutFraction.date(from: iso)
+    }
+
+    static func exportISOString(from iso: String, timeZone: TimeZone) -> String {
+        guard let date = parse(iso) else { return iso }
+        let formatter = exportISOFormatter(for: timeZone)
+        return formatter.string(from: date)
+    }
+
+    static func exportDayString(from date: Date, timeZone: TimeZone) -> String {
+        let formatter = exportDayFormatter(for: timeZone)
+        return formatter.string(from: date)
+    }
+
+    static func exportTimeString(from date: Date, timeZone: TimeZone) -> String {
+        let formatter = exportTimeFormatter(for: timeZone)
+        return formatter.string(from: date)
+    }
+
+    static func displayTimestamp(from iso: String, timeZone: TimeZone) -> String {
+        guard let date = parse(iso) else { return iso }
+        let formatter = displayTimestampFormatter(for: timeZone)
+        let formatted = formatter.string(from: date)
+        let abbreviation = timeZone.abbreviation(for: date) ?? timeZone.identifier
+        return "\(formatted) (\(abbreviation))"
+    }
+
+    static func displayDate(from date: Date, timeZone: TimeZone) -> String {
+        let formatter = displayDateFormatter(for: timeZone)
+        return formatter.string(from: date)
+    }
+
+    static func displayTime(from date: Date, timeZone: TimeZone) -> String {
+        let formatter = displayTimeFormatter(for: timeZone)
+        return formatter.string(from: date)
+    }
+
+    static func referenceDate(for row: LogRow) -> Date? {
+        if let exported = parse(row.exportedISO) {
+            return exported
+        }
+        if let session = parse(row.sessionISO) {
+            return session
+        }
+        return parse(row.uploadedISO)
+    }
+
+    private static func exportISOFormatter(for timeZone: TimeZone) -> ISO8601DateFormatter {
+        let key = timeZone.identifier
+        if let cached = exportISOFormatterCache[key] {
+            return cached
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withTimeZone]
+        formatter.timeZone = timeZone
+        exportISOFormatterCache[key] = formatter
+        return formatter
+    }
+
+    private static func exportDayFormatter(for timeZone: TimeZone) -> DateFormatter {
+        let key = timeZone.identifier
+        if let cached = exportDayFormatterCache[key] {
+            return cached
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        exportDayFormatterCache[key] = formatter
+        return formatter
+    }
+
+    private static func exportTimeFormatter(for timeZone: TimeZone) -> DateFormatter {
+        let key = timeZone.identifier
+        if let cached = exportTimeFormatterCache[key] {
+            return cached
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "HH:mm:ss"
+        exportTimeFormatterCache[key] = formatter
+        return formatter
+    }
+
+    private static func displayTimestampFormatter(for timeZone: TimeZone) -> DateFormatter {
+        let key = timeZone.identifier
+        if let cached = displayFormatterCache[key] {
+            return cached
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        displayFormatterCache[key] = formatter
+        return formatter
+    }
+
+    private static func displayDateFormatter(for timeZone: TimeZone) -> DateFormatter {
+        let key = timeZone.identifier
+        if let cached = displayDateFormatterCache[key] {
+            return cached
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "yyyy-MM-dd"
+        displayDateFormatterCache[key] = formatter
+        return formatter
+    }
+
+    private static func displayTimeFormatter(for timeZone: TimeZone) -> DateFormatter {
+        let key = timeZone.identifier
+        if let cached = displayTimeFormatterCache[key] {
+            return cached
+        }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = timeZone
+        formatter.dateFormat = "HH:mm:ss"
+        displayTimeFormatterCache[key] = formatter
+        return formatter
     }
 }
 
@@ -44,6 +270,12 @@ enum Column: String, CaseIterable, Identifiable {
     case lap="LAP", checker="CHECKER", wheel="WHEEL"
     case out="OUT", cl="CL", inT="IN", memo="MEMO", session = "SESSION", exported="EXPORTED", uploaded="UPLOADED"
     var id: String { rawValue }
+}
+
+private struct ActiveFilterToken: Identifiable, Hashable {
+    let column: Column
+    let text: String
+    var id: String { "\(column.id)|\(text)" }
 }
 
 // URLをそのままIdentifiableに拡張しない（将来衝突回避）ための薄いラッパ
@@ -72,6 +304,7 @@ private struct DailyGroup: Identifiable, Hashable {
 private struct MergedCSVDocument: Transferable {
     let fileName: String
     let rows: [LogRow]
+    let timeZone: TimeZone
 
     static var transferRepresentation: some TransferRepresentation {
         DataRepresentation(exportedContentType: .commaSeparatedText) { document in
@@ -88,7 +321,7 @@ private struct MergedCSVDocument: Transferable {
         }
 
         let escapedRows = rows.map { row in
-            row.canonicalCSVColumns.map { Self.escape($0) }.joined(separator: ",")
+            row.canonicalCSVColumns(in: timeZone).map { Self.escape($0) }.joined(separator: ",")
         }
         return ([Self.canonicalHeader.joined(separator: ",")] + escapedRows).joined(separator: "\n") + "\n"
     }
@@ -131,20 +364,40 @@ struct LibraryView: View {
     @State private var sortColumn: Column = .date
     @State private var sortAscending: Bool = true
     @State private var showColumnSheet = false
+    @State private var pendingColumnSheet = false
     @State private var allSheetTitle = "All CSVs"
-    @State private var shareFileName = "PitTemp_All.csv"
+    @State private var timeZoneOption: LibraryTimeZoneOption = .tokyo
+    @State private var shareSource: ShareFileSource = .generated(suffix: "all")
+    @State private var columnFilters: [Column: String] = [:]
+    @State private var filterEditorColumn: Column? = nil
 
     // 可視→検索→ソートを適用した配列
     private var visibleSortedRows: [LogRow] {
         // 1) 検索フィルタ
+        let trimmedFilters = columnFilters.compactMapValues { value -> String? in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        let columnFiltered: [LogRow]
+        if trimmedFilters.isEmpty {
+            columnFiltered = rows
+        } else {
+            columnFiltered = rows.filter { r in
+                trimmedFilters.allSatisfy { (column, keyword) in
+                    displayValue(r, column).localizedCaseInsensitiveContains(keyword)
+                }
+            }
+        }
+
         let filtered: [LogRow]
         if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            filtered = rows
+            filtered = columnFiltered
         } else {
             let q = searchText.lowercased()
-            filtered = rows.filter { r in
+            filtered = columnFiltered.filter { r in
                 selectedColumns.contains(where: { col in
-                    cell(r, col).lowercased().contains(q)
+                    displayValue(r, col).lowercased().contains(q)
                 })
             }
         }
@@ -157,8 +410,8 @@ struct LibraryView: View {
                 let rb = Double(rhs) ?? -Double.infinity
                 return sortAscending ? (la < rb) : (la > rb)
             } else if [.exported, .uploaded, .session].contains(sortColumn) {
-                let fa = ISO8601DateFormatter().date(from: lhs) ?? .distantPast
-                let fb = ISO8601DateFormatter().date(from: rhs) ?? .distantPast
+                let fa = LibraryTimestampFormatter.parse(lhs) ?? .distantPast
+                let fb = LibraryTimestampFormatter.parse(rhs) ?? .distantPast
                 return sortAscending ? (fa < fb) : (fa > fb)
             } else {
                 return sortAscending
@@ -169,25 +422,48 @@ struct LibraryView: View {
     }
 
     private var shareDocument: MergedCSVDocument? {
-        rows.isEmpty ? nil : MergedCSVDocument(fileName: shareFileName, rows: visibleSortedRows)
+        guard !rows.isEmpty else { return nil }
+        return MergedCSVDocument(fileName: resolvedShareFileName, rows: visibleSortedRows, timeZone: timeZoneOption.timeZone)
+    }
+
+    private var resolvedShareFileName: String {
+        switch shareSource {
+        case .generated(let suffix):
+            return makeMergedFileName(suffix: suffix, option: timeZoneOption)
+        case .fixed(let name):
+            return name
+        }
     }
 
     var body: some View {
-        ZStack {
-            NavigationStack {
-                libraryList
-                    .navigationTitle("Library")
-                    .toolbar { libraryToolbar }
-                    .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
-                    .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
-                    .onAppear { reloadFiles() }
-                    .sheet(item: $selectedFile, content: singleFileSheet)
-                    .sheet(isPresented: $showAllSheet, content: allFilesSheet)
-                    .sheet(isPresented: $showColumnSheet) {
-                        ColumnPickerSheet(allColumns: Column.allCases, selected: $selectedColumns)
-                            .presentationDetents([.medium, .large])
-                            .presentationDragIndicator(.visible)
-                    }
+        NavigationStack {
+            libraryList
+                .navigationTitle("Library")
+                .toolbar { libraryToolbar }
+                .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
+                .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
+                .onAppear { reloadFiles() }
+        }
+        .sheet(item: $selectedFile, content: singleFileSheet)
+        .sheet(isPresented: $showAllSheet, content: allFilesSheet)
+        .sheet(isPresented: $showColumnSheet) {
+            ColumnPickerSheet(allColumns: Column.allCases, selected: $selectedColumns)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $filterEditorColumn) { column in
+            ColumnFilterEditorSheet(
+                column: column,
+                initialText: columnFilters[column] ?? "",
+                suggestions: buildSuggestions(for: column),
+                onApply: { value in applyFilter(value, for: column) },
+                onClear: { clearFilter(for: column) }
+            )
+        }
+        .onChange(of: showAllSheet) { _, isPresented in
+            if !isPresented, pendingColumnSheet {
+                pendingColumnSheet = false
+                showColumnSheet = true
             }
         }
         .overlay(mergeOverlay)
@@ -238,6 +514,36 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.bordered)
                     }
+            }
+        }
+        .overlay(mergeOverlay)
+    }
+
+    @ViewBuilder
+    private var libraryList: some View {
+        List {
+            cloudSection
+
+            if folderBM.folderURL != nil {
+                quickSortSection
+            }
+
+            dailyCollectionsSection
+
+            summarySection
+
+            ForEach(files, id: \.self, content: fileRow)
+        }
+    }
+
+    @ViewBuilder
+    private var cloudSection: some View {
+        Section("Cloud") {
+            if settings.enableGoogleDriveUpload {
+                NavigationLink {
+                    DriveBrowserView()
+                } label: {
+                    Label("Google Drive", systemImage: "cloud")
                 }
                 .padding(.vertical, 4)
             }
@@ -284,7 +590,6 @@ struct LibraryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
             }
             Spacer()
             Image(systemName: "chevron.right")
@@ -353,11 +658,11 @@ struct LibraryView: View {
                 searchText.removeAll()
                 applyDynamicSort()
                 allSheetTitle = "All CSVs"
-                shareFileName = makeMergedFileName(suffix: "all")
+                shareSource = .generated(suffix: "all")
                 showAllSheet = true
             }
 
-            Button("Columns") { showColumnSheet = true }
+            Button("Columns") { openColumnPicker(closeAllSheetFirst: false) }
 
             Menu("Sort") {
                 Picker("Column", selection: $sortColumn) {
@@ -380,7 +685,7 @@ struct LibraryView: View {
                     Text("\(rows.count) rows")
                         .font(.headline)
                     if !rows.isEmpty {
-                        SingleTableView(rows: rows)
+                        SingleTableView(rows: rows, timeZone: timeZoneOption)
                     }
                 }
                 Section("RAW") {
@@ -417,6 +722,7 @@ struct LibraryView: View {
                     .padding(.horizontal)
                     .padding(.bottom)
                 }
+                .buttonStyle(.plain)
             }
             .navigationTitle(allSheetTitle)
             .toolbar {
@@ -426,7 +732,7 @@ struct LibraryView: View {
                 ToolbarItem(placement: .primaryAction) {
                     if let shareDocument {
                         ShareLink(item: shareDocument, preview: SharePreview(Text(shareDocument.fileName))) {
-                            Label("Export CSV", systemImage: "square.and.arrow.up")
+                            Label("Export CSV (\(timeZoneOption.abbreviation()))", systemImage: "square.and.arrow.up")
                         }
                     }
                 }
@@ -435,10 +741,83 @@ struct LibraryView: View {
     }
 
     private var searchHeader: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-            TextField("Search", text: $searchText)
-                .textFieldStyle(.plain)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                    TextField("Search", text: $searchText)
+                        .textFieldStyle(.plain)
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 10)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                Spacer(minLength: 8)
+
+                Menu {
+                    ForEach(LibraryTimeZoneOption.allCases) { option in
+                        Button {
+                            timeZoneOption = option
+                        } label: {
+                            if option == timeZoneOption {
+                                Label(option.label(), systemImage: "checkmark")
+                            } else {
+                                Text(option.label())
+                            }
+                        }
+                    }
+                } label: {
+                    Label(timeZoneOption.abbreviation(), systemImage: "globe")
+                        .labelStyle(.titleAndIcon)
+                }
+
+                Button {
+                    openColumnPicker(closeAllSheetFirst: true)
+                } label: {
+                    Label("Columns", systemImage: "square.grid.2x2")
+                }
+                Section("RAW") {
+                    ScrollView {
+                        Text(rawPreview)
+                            .font(.footnote)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .navigationTitle(file.url.lastPathComponent)
+            .toolbar {
+                Button("Close") { selectedFile = nil }
+            }
+
+            Text(String(format: NSLocalizedString("Times shown in %@", comment: "Time zone description"), timeZoneOption.label()))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if !activeFilterTokens.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(activeFilterTokens) { token in
+                            HStack(spacing: 4) {
+                                Text("\(token.column.rawValue): \(token.text)")
+                                    .font(.caption)
+                                Button {
+                                    clearFilter(for: token.column)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor.opacity(0.15))
+                            .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal, 2)
+                }
+            }
         }
         .padding(10)
         .background(Color(.secondarySystemBackground))
@@ -447,12 +826,17 @@ struct LibraryView: View {
     private func rowView(_ row: LogRow, index: Int) -> some View {
         HStack(spacing: 0) {
             ForEach(selectedColumns) { col in
-                Text(cell(row, col))
+                Text(displayValue(row, col))
                     .font(.footnote.monospacedDigit())
                     .padding(.vertical, 8)
                     .padding(.horizontal, 6)
                     .frame(minWidth: 120, alignment: .leading)
-                    .background(index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
+                    .background(
+                        (index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
+                            .overlay(
+                                isFilterActive(col) ? Color.accentColor.opacity(0.08) : Color.clear
+                            )
+                    )
             }
         }
         .background(index.isMultiple(of: 2) ? Color(.systemBackground) : Color(.secondarySystemBackground))
@@ -464,12 +848,7 @@ struct LibraryView: View {
         HStack(spacing: 0) {
             ForEach(selectedColumns) { col in
                 Button {
-                    if sortColumn == col {
-                        sortAscending.toggle()
-                    } else {
-                        sortColumn = col
-                        sortAscending = true
-                    }
+                    handleSortTap(for: col)
                 } label: {
                     HStack(spacing: 6) {
                         Text(col.rawValue)
@@ -478,10 +857,39 @@ struct LibraryView: View {
                             Image(systemName: sortAscending ? "arrow.up" : "arrow.down")
                                 .font(.caption2)
                         }
+                        if isFilterActive(col) {
+                            Image(systemName: "line.3.horizontal.decrease.circle.fill")
+                                .font(.caption2)
+                        }
                     }
                     .frame(minWidth: 120, alignment: .leading)
                     .padding(.vertical, 10)
                     .padding(.horizontal, 6)
+                }
+                .buttonStyle(.plain)
+                .background(isFilterActive(col) ? Color.accentColor.opacity(0.12) : Color(.tertiarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .highPriorityGesture(TapGesture(count: 2).onEnded { hideColumn(col) })
+                .contextMenu {
+                    if selectedColumns.count > 1 {
+                        Button {
+                            hideColumn(col)
+                        } label: {
+                            Label("Hide column", systemImage: "eye.slash")
+                        }
+                    }
+                    Button {
+                        openFilterEditor(for: col)
+                    } label: {
+                        Label(isFilterActive(col) ? "Edit filter" : "Filter…", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    if isFilterActive(col) {
+                        Button(role: .destructive) {
+                            clearFilter(for: col)
+                        } label: {
+                            Label("Clear filter", systemImage: "xmark.circle")
+                        }
+                    }
                 }
                 .buttonStyle(.plain)
                 .background(Color(.tertiarySystemBackground))
@@ -490,6 +898,91 @@ struct LibraryView: View {
         }
         .padding(.bottom, 4)
         .background(Color(.systemGroupedBackground))
+    }
+
+    private var activeFilterTokens: [ActiveFilterToken] {
+        columnFilters.compactMap { key, value in
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return ActiveFilterToken(column: key, text: trimmed)
+        }
+        .sorted { lhs, rhs in
+            let visibleOrder = selectedColumns
+            let fallbackOrder = Column.allCases
+            let lIndex = visibleOrder.firstIndex(of: lhs.column) ?? fallbackOrder.firstIndex(of: lhs.column) ?? 0
+            let rIndex = visibleOrder.firstIndex(of: rhs.column) ?? fallbackOrder.firstIndex(of: rhs.column) ?? 0
+            if lIndex == rIndex {
+                return lhs.text.localizedCaseInsensitiveCompare(rhs.text) == .orderedAscending
+            }
+            return lIndex < rIndex
+        }
+    }
+
+    private func handleSortTap(for column: Column) {
+        if sortColumn == column {
+            sortAscending.toggle()
+        } else {
+            sortColumn = column
+            sortAscending = true
+        }
+    }
+
+    private func hideColumn(_ column: Column) {
+        guard selectedColumns.count > 1 else { return }
+        if let idx = selectedColumns.firstIndex(of: column) {
+            selectedColumns.remove(at: idx)
+        }
+        if sortColumn == column, let first = selectedColumns.first {
+            sortColumn = first
+            sortAscending = true
+        }
+        clearFilter(for: column)
+    }
+
+    private func openColumnPicker(closeAllSheetFirst: Bool) {
+        if closeAllSheetFirst, showAllSheet {
+            pendingColumnSheet = true
+            showAllSheet = false
+        } else {
+            pendingColumnSheet = false
+            showColumnSheet = true
+        }
+    }
+
+    private func isFilterActive(_ column: Column) -> Bool {
+        guard let value = columnFilters[column]?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
+        return !value.isEmpty
+    }
+
+    private func openFilterEditor(for column: Column) {
+        filterEditorColumn = column
+    }
+
+    private func applyFilter(_ value: String, for column: Column) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            columnFilters.removeValue(forKey: column)
+        } else {
+            columnFilters[column] = trimmed
+        }
+    }
+
+    private func clearFilter(for column: Column) {
+        columnFilters.removeValue(forKey: column)
+    }
+
+    private func buildSuggestions(for column: Column) -> [String] {
+        var seen: Set<String> = []
+        var unique: [String] = []
+        for raw in rows.map({ displayValue($0, column) }) {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if seen.insert(trimmed).inserted {
+                unique.append(trimmed)
+            }
+            if unique.count >= 12 { break }
+        }
+        return unique
     }
 
     @ViewBuilder
@@ -603,7 +1096,7 @@ struct LibraryView: View {
                 sortAscending = false
                 applyDynamicSort()
                 allSheetTitle = formattedDayTitle(group.day)
-                shareFileName = makeMergedFileName(suffix: group.day)
+                shareSource = .generated(suffix: group.day)
                 showAllSheet = true
                 isMergingDailyCSV = false
                 if wroteSummary {
@@ -621,14 +1114,17 @@ struct LibraryView: View {
         sortAscending = false
         applyDynamicSort()
         allSheetTitle = formattedDayTitle(item.dayFolder)
-        shareFileName = item.url.lastPathComponent
+        shareSource = .fixed(name: item.url.lastPathComponent)
         showAllSheet = true
     }
 
-    private func makeMergedFileName(suffix: String) -> String {
+    private func makeMergedFileName(suffix: String, option: LibraryTimeZoneOption) -> String {
         let sanitized = suffix.replacingOccurrences(of: "[^0-9A-Za-z_-]", with: "_", options: .regularExpression)
-        let timestamp = LibraryView.exportTimestampFormatter.string(from: Date())
-        return "PitTemp_\(sanitized)_merged_\(timestamp).csv"
+        let now = Date()
+        let timestamp = LibraryTimestampFormatter.exportDayString(from: now, timeZone: option.timeZone)
+            + "_"
+            + LibraryTimestampFormatter.exportTimeString(from: now, timeZone: option.timeZone).replacingOccurrences(of: ":", with: "")
+        return "PitTemp_\(sanitized)_merged_\(timestamp)_\(option.fileSuffix).csv"
     }
 
     private func refreshSummaryFiles() {
@@ -716,7 +1212,11 @@ struct LibraryView: View {
                     withIntermediateDirectories: true,
                     attributes: nil
                 )
-                let document = MergedCSVDocument(fileName: summaryURL.lastPathComponent, rows: rows)
+                let document = MergedCSVDocument(
+                    fileName: summaryURL.lastPathComponent,
+                    rows: rows,
+                    timeZone: LibraryTimeZoneOption.tokyo.timeZone
+                )
                 guard let data = document.csvContent().data(using: .utf8) else { return false }
                 try data.write(to: summaryURL, options: .atomic)
                 return true
@@ -772,13 +1272,6 @@ struct LibraryView: View {
         return df
     }()
 
-    private static let exportTimestampFormatter: DateFormatter = {
-        let df = DateFormatter()
-        df.dateFormat = "yyyyMMdd_HHmm"
-        df.locale = Locale(identifier: "en_US_POSIX")
-        return df
-    }()
-
     private static let summaryFolderName = "DailyMerged"
     private static let summaryFileSuffix = "_PitTempDaily"
 
@@ -808,16 +1301,20 @@ struct LibraryView: View {
             switch sortKey {
             case .newest:
                 // EXPORTEDが空ならSESSIONで比較
-                let la = ISO8601DateFormatter().date(from: a.exportedISO).map { $0.timeIntervalSince1970 }
-                        ?? ISO8601DateFormatter().date(from: a.sessionISO).map { $0.timeIntervalSince1970 } ?? 0
-                let lb = ISO8601DateFormatter().date(from: b.exportedISO).map { $0.timeIntervalSince1970 }
-                        ?? ISO8601DateFormatter().date(from: b.sessionISO).map { $0.timeIntervalSince1970 } ?? 0
+                let la = LibraryTimestampFormatter.parse(a.exportedISO)
+                    ?? LibraryTimestampFormatter.parse(a.sessionISO)
+                    ?? .distantPast
+                let lb = LibraryTimestampFormatter.parse(b.exportedISO)
+                    ?? LibraryTimestampFormatter.parse(b.sessionISO)
+                    ?? .distantPast
                 return la > lb
             case .oldest:
-                let la = ISO8601DateFormatter().date(from: a.exportedISO).map { $0.timeIntervalSince1970 }
-                        ?? ISO8601DateFormatter().date(from: a.sessionISO).map { $0.timeIntervalSince1970 } ?? 0
-                let lb = ISO8601DateFormatter().date(from: b.exportedISO).map { $0.timeIntervalSince1970 }
-                        ?? ISO8601DateFormatter().date(from: b.sessionISO).map { $0.timeIntervalSince1970 } ?? 0
+                let la = LibraryTimestampFormatter.parse(a.exportedISO)
+                    ?? LibraryTimestampFormatter.parse(a.sessionISO)
+                    ?? .distantPast
+                let lb = LibraryTimestampFormatter.parse(b.exportedISO)
+                    ?? LibraryTimestampFormatter.parse(b.sessionISO)
+                    ?? .distantPast
                 return la < lb
             case .track:   return a.track.localizedCaseInsensitiveCompare(b.track) == .orderedAscending
             case .date:    return a.date.localizedCaseInsensitiveCompare(b.date) == .orderedAscending
@@ -840,8 +1337,8 @@ struct LibraryView: View {
                 let rb = Double(rhs) ?? -Double.infinity
                 return sortAscending ? (la < rb) : (la > rb)
             } else if sortColumn == .exported || sortColumn == .uploaded || sortColumn == .session {
-                let fa = ISO8601DateFormatter().date(from: lhs) ?? .distantPast
-                let fb = ISO8601DateFormatter().date(from: rhs) ?? .distantPast
+                let fa = LibraryTimestampFormatter.parse(lhs) ?? .distantPast
+                let fb = LibraryTimestampFormatter.parse(rhs) ?? .distantPast
                 return sortAscending ? (fa < fb) : (fa > fb)
             } else {
                 return sortAscending
@@ -870,6 +1367,30 @@ struct LibraryView: View {
         case .session: return r.sessionISO
         case .exported: return r.exportedISO
         case .uploaded: return r.uploadedISO
+        }
+    }
+
+    private func displayValue(_ row: LogRow, _ column: Column) -> String {
+        let tz = timeZoneOption.timeZone
+        switch column {
+        case .date:
+            if let reference = LibraryTimestampFormatter.referenceDate(for: row) {
+                return LibraryTimestampFormatter.displayDate(from: reference, timeZone: tz)
+            }
+            return row.date
+        case .time:
+            if let reference = LibraryTimestampFormatter.referenceDate(for: row) {
+                return LibraryTimestampFormatter.displayTime(from: reference, timeZone: tz)
+            }
+            return row.time
+        case .session:
+            return LibraryTimestampFormatter.displayTimestamp(from: row.sessionISO, timeZone: tz)
+        case .exported:
+            return LibraryTimestampFormatter.displayTimestamp(from: row.exportedISO, timeZone: tz)
+        case .uploaded:
+            return LibraryTimestampFormatter.displayTimestamp(from: row.uploadedISO, timeZone: tz)
+        default:
+            return cell(row, column)
         }
     }
 
@@ -1162,12 +1683,13 @@ private enum DriveSortOption: String, CaseIterable, Identifiable {
 // MARK: - 個別CSVのシンプルテーブル
 private struct SingleTableView: View {
     let rows: [LogRow]
+    let timeZone: LibraryTimeZoneOption
     var body: some View {
         VStack(spacing: 8) {
             ForEach(rows) { r in
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("\(r.track)  \(r.date)  \(r.car) / \(r.tyre)")
+                        Text("\(r.track)  \(dayText(for: r))  \(r.car) / \(r.tyre)")
                             .font(.subheadline).bold()
                         Spacer()
                         Text(r.wheel).font(.subheadline)
@@ -1175,9 +1697,10 @@ private struct SingleTableView: View {
                     HStack {
                         Text("OUT \(r.outStr.isEmpty ? "-" : r.outStr)  CL \(r.clStr.isEmpty ? "-" : r.clStr)  IN \(r.inStr.isEmpty ? "-" : r.inStr)")
                             .monospacedDigit()
+                        Text(timeText(for: r)).monospacedDigit().foregroundStyle(.secondary)
                         Text("by \(r.driver)").foregroundStyle(.secondary)
                         Spacer()
-                        Text(r.exportedISO.isEmpty ? r.sessionISO : r.exportedISO)
+                        Text(timestampText(for: r))
                             .foregroundStyle(.secondary).font(.footnote)
                     }
                     if !r.memo.isEmpty {
@@ -1188,6 +1711,25 @@ private struct SingleTableView: View {
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color(.secondarySystemBackground)))
             }
         }
+    }
+
+    private func dayText(for row: LogRow) -> String {
+        if let reference = LibraryTimestampFormatter.referenceDate(for: row) {
+            return LibraryTimestampFormatter.displayDate(from: reference, timeZone: timeZone.timeZone)
+        }
+        return row.date
+    }
+
+    private func timeText(for row: LogRow) -> String {
+        if let reference = LibraryTimestampFormatter.referenceDate(for: row) {
+            return LibraryTimestampFormatter.displayTime(from: reference, timeZone: timeZone.timeZone)
+        }
+        return row.time
+    }
+
+    private func timestampText(for row: LogRow) -> String {
+        let iso = row.exportedISO.isEmpty ? row.sessionISO : row.exportedISO
+        return LibraryTimestampFormatter.displayTimestamp(from: iso, timeZone: timeZone.timeZone)
     }
 }
 
@@ -1240,6 +1782,97 @@ private struct ColumnPickerSheet: View {
                 let rest = allColumns.filter { !selected.contains($0) }
                 working = selected + rest
             }
+        }
+    }
+}
+
+private struct ColumnFilterEditorSheet: View {
+    let column: Column
+    let initialText: String
+    let suggestions: [String]
+    let onApply: (String) -> Void
+    let onClear: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var text: String = ""
+
+    init(column: Column, initialText: String, suggestions: [String], onApply: @escaping (String) -> Void, onClear: @escaping () -> Void) {
+        self.column = column
+        self.initialText = initialText
+        self.suggestions = suggestions
+        self.onApply = onApply
+        self.onClear = onClear
+        _text = State(initialValue: initialText)
+    }
+
+    var body: some View {
+        NavigationStack {
+            formContent
+                .navigationTitle(Text("Filter \(column.rawValue)"))
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar { toolbarContent }
+        }
+    }
+
+    @ViewBuilder
+    private var formContent: some View {
+        Form {
+            Section(header: Text("Contains")) {
+                TextField("Keyword", text: $text)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+
+            if !suggestions.isEmpty {
+                suggestionsSection
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var suggestionsSection: some View {
+        Section("Suggestions") {
+            ForEach(suggestions, id: \.self) { suggestion in
+                suggestionRow(for: suggestion)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func suggestionRow(for suggestion: String) -> some View {
+        Button {
+            text = suggestion
+        } label: {
+            HStack {
+                Text(suggestion)
+                Spacer()
+                if text == suggestion {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(.tint)
+                }
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("Cancel") { dismiss() }
+        }
+        ToolbarItem(placement: .destructiveAction) {
+            if !initialText.isEmpty || !text.isEmpty {
+                Button("Clear") {
+                    onClear()
+                    dismiss()
+                }
+            }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button("Apply") {
+                onApply(text)
+                dismiss()
+            }
+            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && initialText.isEmpty)
         }
     }
 }

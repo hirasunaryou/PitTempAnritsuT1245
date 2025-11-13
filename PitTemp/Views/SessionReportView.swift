@@ -38,26 +38,19 @@ struct SessionReportView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { proxy in
-                let size = proxy.size
-                let isLandscape = size.width > size.height
+                let orientation: ReportOrientation = proxy.size.width >= proxy.size.height ? .landscape : .portrait
+                let metrics = layoutMetrics(for: orientation)
+                let scale = min(proxy.size.width / metrics.canvasSize.width,
+                                proxy.size.height / metrics.canvasSize.height)
 
                 ZStack {
                     reportBackground
 
-                    VStack(spacing: isLandscape ? 24 : 18) {
-                        topRow(isLandscape: isLandscape)
-                        middleRow(isLandscape: isLandscape)
-                        identityStrip(isLandscape: isLandscape)
-
-                        if !condensedMemos.isEmpty {
-                            memoStrip
-                        }
-
-                        footerStamp
-                    }
-                    .padding(pageInsets(isLandscape: isLandscape, size: size))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    reportPage(for: orientation, metrics: metrics)
+                        .frame(width: metrics.canvasSize.width, height: metrics.canvasSize.height)
+                        .scaleEffect(scale, anchor: .center)
                 }
+                .frame(width: proxy.size.width, height: proxy.size.height)
             }
             .navigationTitle("Session report / セッションレポート")
             .navigationBarTitleDisplayMode(.inline)
@@ -70,16 +63,26 @@ struct SessionReportView: View {
         .presentationDetents([.large])
     }
 
-    private func pageInsets(isLandscape: Bool, size: CGSize) -> EdgeInsets {
-        let horizontal = isLandscape ? max(28, size.width * 0.06) : 20
-        let vertical = isLandscape ? max(18, size.height * 0.08) : 20
-        return EdgeInsets(top: vertical, leading: horizontal, bottom: vertical, trailing: horizontal)
+    private func reportPage(for orientation: ReportOrientation, metrics: ReportLayoutMetrics) -> some View {
+        VStack(spacing: metrics.sectionSpacing) {
+            topRow(isLandscape: orientation.isLandscape)
+            middleRow(isLandscape: orientation.isLandscape)
+            identityStrip(isLandscape: orientation.isLandscape)
+
+            if !condensedMemos.isEmpty {
+                memoStrip
+            }
+
+            footerStamp
+        }
+        .padding(metrics.pagePadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     @ViewBuilder
     private func topRow(isLandscape: Bool) -> some View {
         if isLandscape {
-            HStack(spacing: 24, alignment: .top) {
+            HStack(alignment: .top, spacing: 24) {
                 timeBanner
                 keyMetricStack
                     .frame(maxWidth: 320)
@@ -235,7 +238,7 @@ struct SessionReportView: View {
     @ViewBuilder
     private func middleRow(isLandscape: Bool) -> some View {
         if isLandscape {
-            HStack(spacing: 24, alignment: .top) {
+            HStack(alignment: .top, spacing: 24) {
                 wheelQuadrantMap
                     .frame(maxWidth: 360)
                 temperatureDetailPanel
@@ -393,10 +396,10 @@ struct SessionReportView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        
+
         return Group {
             if isLandscape {
-                HStack(spacing: 16, alignment: .top) { content }
+                HStack(alignment: .top, spacing: 16) { content }
             } else {
                 VStack(alignment: .leading, spacing: 8) { content }
             }
@@ -628,6 +631,36 @@ struct SessionReportView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 8)
+    }
+
+    private enum ReportOrientation {
+        case landscape
+        case portrait
+
+        var isLandscape: Bool { self == .landscape }
+    }
+
+    private struct ReportLayoutMetrics {
+        let canvasSize: CGSize
+        let sectionSpacing: CGFloat
+        let pagePadding: EdgeInsets
+    }
+
+    private func layoutMetrics(for orientation: ReportOrientation) -> ReportLayoutMetrics {
+        switch orientation {
+        case .landscape:
+            return ReportLayoutMetrics(
+                canvasSize: CGSize(width: 1060, height: 640),
+                sectionSpacing: 26,
+                pagePadding: EdgeInsets(top: 38, leading: 44, bottom: 34, trailing: 44)
+            )
+        case .portrait:
+            return ReportLayoutMetrics(
+                canvasSize: CGSize(width: 820, height: 1180),
+                sectionSpacing: 22,
+                pagePadding: EdgeInsets(top: 32, leading: 28, bottom: 32, trailing: 28)
+            )
+        }
     }
 }
 

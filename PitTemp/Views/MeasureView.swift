@@ -42,8 +42,8 @@ struct MeasureView: View {
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
-    private let manualPressureStep: Double = 5
-    private let manualPressureDefault: Double = 200
+    private let manualPressureStep: Double = 1
+    private let manualPressureDefault: Double = 210
     private let zoneButtonHeight: CGFloat = 112
 
     private var isHistoryMode: Bool { vm.loadedHistorySummary != nil }
@@ -863,7 +863,10 @@ struct MeasureView: View {
                         .accessibilityLabel("Tyre position \(title(wheel))")
                 }
 
-                Spacer()
+                WheelQuadrantDiagram(selectedWheel: wheel)
+                    .frame(width: 88)
+
+                Spacer(minLength: 8)
 
                 if pressureSpeech.isRecording && pressureSpeech.currentWheel == wheel {
                     HStack(spacing: 6) {
@@ -899,8 +902,9 @@ struct MeasureView: View {
             } label: {
                 HStack {
                     if showPlaceholder {
-                        Text("Tap to enter value")
-                            .foregroundStyle(.secondary)
+                        Text("Enter value / 例: \(Int(manualPressureDefault)) kPa")
+                            .foregroundStyle(Color.secondary.opacity(0.7))
+                            .italic()
                     } else {
                         Text("\(displayText) kPa")
                             .font(.title3.monospacedDigit())
@@ -924,6 +928,12 @@ struct MeasureView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Inner pressure value input")
             .accessibilityHint("Opens keypad to edit pressure")
+
+            if showPlaceholder {
+                Text("Not saved yet / 未入力")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
 
             if activePressureWheel == wheel && canEditPressure {
                 PressureKeypad(
@@ -1047,6 +1057,89 @@ struct MeasureView: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground).opacity(0.6)))
     }
 
+    private struct WheelQuadrantDiagram: View {
+        let selectedWheel: WheelPos
+
+        var body: some View {
+            VStack(spacing: 6) {
+                Text("Wheel map / タイヤ位置")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 4) {
+                    HStack(spacing: 4) {
+                        quadrant(.FL)
+                        quadrant(.FR)
+                    }
+                    HStack(spacing: 4) {
+                        quadrant(.RL)
+                        quadrant(.RR)
+                    }
+                }
+                .padding(6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(.tertiarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(diagramAccessibilityLabel)
+            .accessibilityHint("Highlights the selected wheel position")
+        }
+
+        @ViewBuilder
+        private func quadrant(_ wheel: WheelPos) -> some View {
+            let isSelected = wheel == selectedWheel
+            Text(shortLabel(for: wheel))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                .frame(width: 34, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+                )
+        }
+
+        private func shortLabel(for wheel: WheelPos) -> String {
+            switch wheel {
+            case .FL: return "FL"
+            case .FR: return "FR"
+            case .RL: return "RL"
+            case .RR: return "RR"
+            }
+        }
+
+        private var diagramAccessibilityLabel: String {
+            "Wheel map / タイヤ位置 — \(fullTitle(for: selectedWheel)) selected (現在: \(fullTitleJP(for: selectedWheel)))"
+        }
+
+        private func fullTitle(for wheel: WheelPos) -> String {
+            switch wheel {
+            case .FL: return "Front Left"
+            case .FR: return "Front Right"
+            case .RL: return "Rear Left"
+            case .RR: return "Rear Right"
+            }
+        }
+
+        private func fullTitleJP(for wheel: WheelPos) -> String {
+            switch wheel {
+            case .FL: return "フロント左"
+            case .FR: return "フロント右"
+            case .RL: return "リア左"
+            case .RR: return "リア右"
+            }
+        }
+    }
+
     private struct PressureKeypad: View {
         @Binding var value: String
         let range: ClosedRange<Double>
@@ -1075,8 +1168,6 @@ struct MeasureView: View {
                 HStack(spacing: 8) {
                     quickAdjustButton(label: "-1", delta: -1)
                     quickAdjustButton(label: "+1", delta: 1)
-                    quickAdjustButton(label: "+5", delta: 5)
-                    quickAdjustButton(label: "+10", delta: 10)
                 }
 
                 HStack {

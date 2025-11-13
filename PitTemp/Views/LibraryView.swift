@@ -293,12 +293,6 @@ private struct ActiveFilterToken: Identifiable, Hashable {
     var id: String { "\(column.id)|\(text)" }
 }
 
-private struct ActiveFilterToken: Identifiable, Hashable {
-    let column: Column
-    let text: String
-    var id: String { "\(column.id)|\(text)" }
-}
-
 // URLをそのままIdentifiableに拡張しない（将来衝突回避）ための薄いラッパ
 struct FileItem: Identifiable, Hashable {
     let url: URL
@@ -500,7 +494,6 @@ struct LibraryView: View {
             }
 
             dailyCollectionsSection
-
             summarySection
 
             ForEach(files, id: \.self, content: fileRow)
@@ -516,6 +509,7 @@ struct LibraryView: View {
                 } label: {
                     Label("Google Drive", systemImage: "cloud")
                 }
+                .padding(.vertical, 4)
             } else {
                 Label("Google Drive uploads disabled", systemImage: "cloud.slash")
                     .foregroundStyle(.secondary)
@@ -535,36 +529,6 @@ struct LibraryView: View {
                         }
                         .buttonStyle(.bordered)
                     }
-            }
-        }
-        .overlay(mergeOverlay)
-    }
-
-    @ViewBuilder
-    private var libraryList: some View {
-        List {
-            cloudSection
-
-            if folderBM.folderURL != nil {
-                quickSortSection
-            }
-
-            dailyCollectionsSection
-
-            summarySection
-
-            ForEach(files, id: \.self, content: fileRow)
-        }
-    }
-
-    @ViewBuilder
-    private var cloudSection: some View {
-        Section("Cloud") {
-            if settings.enableGoogleDriveUpload {
-                NavigationLink {
-                    DriveBrowserView()
-                } label: {
-                    Label("Google Drive", systemImage: "cloud")
                 }
                 .padding(.vertical, 4)
             }
@@ -798,17 +762,6 @@ struct LibraryView: View {
                 } label: {
                     Label("Columns", systemImage: "square.grid.2x2")
                 }
-                Section("RAW") {
-                    ScrollView {
-                        Text(rawPreview)
-                            .font(.footnote)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-            .navigationTitle(file.url.lastPathComponent)
-            .toolbar {
-                Button("Close") { selectedFile = nil }
             }
 
             Text(String(format: NSLocalizedString("Times shown in %@", comment: "Time zone description"), timeZoneOption.label()))
@@ -912,119 +865,6 @@ struct LibraryView: View {
                         }
                     }
                 }
-                .buttonStyle(.plain)
-                .background(isFilterActive(col) ? Color.accentColor.opacity(0.12) : Color(.tertiarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .highPriorityGesture(TapGesture(count: 2).onEnded { hideColumn(col) })
-                .contextMenu {
-                    if selectedColumns.count > 1 {
-                        Button {
-                            hideColumn(col)
-                        } label: {
-                            Label("Hide column", systemImage: "eye.slash")
-                        }
-                    }
-                    Button {
-                        openFilterEditor(for: col)
-                    } label: {
-                        Label(isFilterActive(col) ? "Edit filter" : "Filter…", systemImage: "line.3.horizontal.decrease.circle")
-                    }
-                    if isFilterActive(col) {
-                        Button(role: .destructive) {
-                            clearFilter(for: col)
-                        } label: {
-                            Label("Clear filter", systemImage: "xmark.circle")
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                .background(Color(.tertiarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-            }
-        }
-        .padding(.bottom, 4)
-        .background(Color(.systemGroupedBackground))
-    }
-
-    private var activeFilterTokens: [ActiveFilterToken] {
-        columnFilters.compactMap { key, value in
-            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            return ActiveFilterToken(column: key, text: trimmed)
-        }
-        .sorted { lhs, rhs in
-            let visibleOrder = selectedColumns
-            let fallbackOrder = Column.allCases
-            let lIndex = visibleOrder.firstIndex(of: lhs.column) ?? fallbackOrder.firstIndex(of: lhs.column) ?? 0
-            let rIndex = visibleOrder.firstIndex(of: rhs.column) ?? fallbackOrder.firstIndex(of: rhs.column) ?? 0
-            if lIndex == rIndex {
-                return lhs.text.localizedCaseInsensitiveCompare(rhs.text) == .orderedAscending
-            }
-            return lIndex < rIndex
-        }
-    }
-
-    private func handleSortTap(for column: Column) {
-        if sortColumn == column {
-            sortAscending.toggle()
-        } else {
-            sortColumn = column
-            sortAscending = true
-        }
-    }
-
-    private func hideColumn(_ column: Column) {
-        guard selectedColumns.count > 1 else { return }
-        if let idx = selectedColumns.firstIndex(of: column) {
-            selectedColumns.remove(at: idx)
-        }
-        if sortColumn == column, let first = selectedColumns.first {
-            sortColumn = first
-            sortAscending = true
-        }
-        clearFilter(for: column)
-    }
-
-    private func openColumnPicker(closeAllSheetFirst: Bool) {
-        if closeAllSheetFirst, showAllSheet {
-            pendingColumnSheet = true
-            showAllSheet = false
-        } else {
-            pendingColumnSheet = false
-            showColumnSheet = true
-        }
-    }
-
-    private func isFilterActive(_ column: Column) -> Bool {
-        guard let value = columnFilters[column]?.trimmingCharacters(in: .whitespacesAndNewlines) else { return false }
-        return !value.isEmpty
-    }
-
-    private func openFilterEditor(for column: Column) {
-        filterEditorColumn = column
-    }
-
-    private func applyFilter(_ value: String, for column: Column) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            columnFilters.removeValue(forKey: column)
-        } else {
-            columnFilters[column] = trimmed
-        }
-    }
-
-    private func clearFilter(for column: Column) {
-        columnFilters.removeValue(forKey: column)
-    }
-
-    private func buildSuggestions(for column: Column) -> [String] {
-        var seen: Set<String> = []
-        var unique: [String] = []
-        for raw in rows.map({ displayValue($0, column) }) {
-            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            if seen.insert(trimmed).inserted {
-                unique.append(trimmed)
             }
         }
         .padding(.bottom, 4)

@@ -38,17 +38,21 @@ struct MeasureView: View {
     @State private var showHistorySheet = false
     @State private var historyError: String? = nil
     @State private var historyEditingEnabled = false
+    @State private var activePressureWheel: WheelPos? = nil
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
-    private let manualPressureStep: Double = 5
-    private let manualPressureDefault: Double = 200
+    private let manualPressureStep: Double = 1
+    private let manualPressureDefault: Double = 210
     private let zoneButtonHeight: CGFloat = 112
 
     private var isHistoryMode: Bool { vm.loadedHistorySummary != nil }
     private var isManualInteractionActive: Bool {
         if isHistoryMode { return historyEditingEnabled }
         return isManualMode
+    }
+    private var canEditPressure: Bool {
+        !isHistoryMode || historyEditingEnabled
     }
     private var historyBackgroundColor: Color {
         isHistoryMode ? Color.orange.opacity(0.08) : .clear
@@ -188,9 +192,11 @@ struct MeasureView: View {
                 clearManualFeedback()
                 if pressureSpeech.isRecording { pressureSpeech.stop() }
             }
+            activePressureWheel = nil
         }
         .onChange(of: selectedWheel) { _, newWheel in
             syncManualPressureDefaults(for: newWheel)
+            activePressureWheel = nil
             if isManualInteractionActive {
                 clearManualFeedback(for: newWheel)
                 syncManualDefaults(for: newWheel)
@@ -212,6 +218,8 @@ struct MeasureView: View {
                 syncManualDefaults(for: selectedWheel)
                 syncManualMemo(for: selectedWheel)
                 syncManualPressureDefaults(for: selectedWheel)
+            } else {
+                activePressureWheel = nil
             }
         }
         .onChange(of: vm.loadedHistorySummary) { _, summary in
@@ -839,22 +847,43 @@ struct MeasureView: View {
     }
 
     private func pressureEntryCard(for wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Inner pressure (kPa)")
-                    .font(.headline)
-                if pressureSpeech.isRecording && pressureSpeech.currentWheel == wheel {
-                    Spacer(minLength: 8)
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
-                    Text("Recording…")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Inner pressure (kPa)")
+                        .font(.headline)
+                    Text(title(wheel))
+                        .font(.caption.weight(.semibold))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(Color.accentColor.opacity(0.12))
+                        )
+                        .accessibilityLabel("Tyre position \(title(wheel))")
                 }
-                Spacer()
+
+                WheelQuadrantDiagram(selectedWheel: wheel)
+                    .frame(width: 88)
+
+                Spacer(minLength: 8)
+
+                if pressureSpeech.isRecording && pressureSpeech.currentWheel == wheel {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                        Text("Recording…")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Button {
                     commitManualPressure(for: wheel)
+                    if manualPressureError(for: wheel) == nil {
+                        activePressureWheel = nil
+                    }
                 } label: {
                     Label("Save", systemImage: "checkmark.circle.fill")
                         .labelStyle(.titleAndIcon)
@@ -862,11 +891,66 @@ struct MeasureView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            TextField("200", text: manualPressureBinding(for: wheel))
-                .textFieldStyle(.roundedBorder)
-                .keyboardType(.decimalPad)
-                .disableAutocorrection(true)
-                .onSubmit { commitManualPressure(for: wheel) }
+            let manualText = manualPressureBinding(for: wheel).wrappedValue.trimmingCharacters(in: .whitespaces)
+            let existingPressure = vm.wheelPressures[wheel].map { String(format: "%.1f", $0) }
+            let displayText = !manualText.isEmpty ? manualText : (existingPressure ?? "")
+            let showPlaceholder = displayText.isEmpty
+
+            Button {
+                activePressureWheel = wheel
+                Haptics.impactLight()
+            } label: {
+                HStack {
+                    if showPlaceholder {
+                        Text("Enter value / 例: \(Int(manualPressureDefault)) kPa")
+                            .foregroundStyle(Color.secondary.opacity(0.7))
+                            .italic()
+                    } else {
+                        Text("\(displayText) kPa")
+                            .font(.title3.monospacedDigit())
+                    }
+                    Spacer()
+                    Image(systemName: "keyboard")
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(.systemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Inner pressure value input")
+            .accessibilityHint("Opens keypad to edit pressure")
+
+            if showPlaceholder {
+                Text("Not saved yet / 未入力")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if activePressureWheel == wheel && canEditPressure {
+                PressureKeypad(
+                    value: manualPressureBinding(for: wheel),
+                    range: manualPressureRange,
+                    onCommit: {
+                        commitManualPressure(for: wheel)
+                        if manualPressureError(for: wheel) == nil {
+                            activePressureWheel = nil
+                        }
+                    },
+                    onClose: {
+                        activePressureWheel = nil
+                    }
+                )
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
 
             Stepper(value: manualPressureStepperBinding(for: wheel), in: manualPressureRange, step: manualPressureStep) {
                 Text("Adjust: \(manualPressureDisplay(for: wheel)) kPa")
@@ -879,6 +963,9 @@ struct MeasureView: View {
                         pressureSpeech.stop()
                         let transcript = pressureSpeech.takeFinalText()
                         applyPressureTranscript(transcript, to: wheel)
+                        if manualPressureError(for: wheel) == nil {
+                            activePressureWheel = nil
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                 } else {
@@ -886,6 +973,9 @@ struct MeasureView: View {
                         let (prevWheel, prevText) = pressureSpeech.stopAndTakeText()
                         if let prevWheel, !prevText.isEmpty {
                             applyPressureTranscript(prevText, to: prevWheel)
+                            if manualPressureError(for: prevWheel) == nil {
+                                activePressureWheel = nil
+                            }
                         }
                         do {
                             try pressureSpeech.start(for: wheel)
@@ -924,6 +1014,7 @@ struct MeasureView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
         )
+        .animation(.easeInOut(duration: 0.2), value: activePressureWheel == wheel)
     }
 
     private func manualZoneRow(for wheel: WheelPos, zone: Zone) -> some View {
@@ -964,6 +1055,225 @@ struct MeasureView: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground).opacity(0.6)))
+    }
+
+    private struct WheelQuadrantDiagram: View {
+        let selectedWheel: WheelPos
+
+        var body: some View {
+            VStack(spacing: 6) {
+                Text("Wheel map / タイヤ位置")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 4) {
+                    HStack(spacing: 4) {
+                        quadrant(.FL)
+                        quadrant(.FR)
+                    }
+                    HStack(spacing: 4) {
+                        quadrant(.RL)
+                        quadrant(.RR)
+                    }
+                }
+                .padding(6)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(.tertiarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(diagramAccessibilityLabel)
+            .accessibilityHint("Highlights the selected wheel position")
+        }
+
+        @ViewBuilder
+        private func quadrant(_ wheel: WheelPos) -> some View {
+            let isSelected = wheel == selectedWheel
+            Text(shortLabel(for: wheel))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                .frame(width: 34, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+                )
+        }
+
+        private func shortLabel(for wheel: WheelPos) -> String {
+            switch wheel {
+            case .FL: return "FL"
+            case .FR: return "FR"
+            case .RL: return "RL"
+            case .RR: return "RR"
+            }
+        }
+
+        private var diagramAccessibilityLabel: String {
+            "Wheel map / タイヤ位置 — \(fullTitle(for: selectedWheel)) selected (現在: \(fullTitleJP(for: selectedWheel)))"
+        }
+
+        private func fullTitle(for wheel: WheelPos) -> String {
+            switch wheel {
+            case .FL: return "Front Left"
+            case .FR: return "Front Right"
+            case .RL: return "Rear Left"
+            case .RR: return "Rear Right"
+            }
+        }
+
+        private func fullTitleJP(for wheel: WheelPos) -> String {
+            switch wheel {
+            case .FL: return "フロント左"
+            case .FR: return "フロント右"
+            case .RL: return "リア左"
+            case .RR: return "リア右"
+            }
+        }
+    }
+
+    private struct PressureKeypad: View {
+        @Binding var value: String
+        let range: ClosedRange<Double>
+        var onCommit: () -> Void
+        var onClose: () -> Void
+
+        private let digitColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
+        private let digits: [String] = ["7", "8", "9", "4", "5", "6", "1", "2", "3"]
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                LazyVGrid(columns: digitColumns, spacing: 8) {
+                    ForEach(digits, id: \.self) { symbol in
+                        keypadButton(title: symbol) {
+                            append(symbol)
+                        }
+                    }
+
+                    keypadButton(title: ".") { appendDecimal() }
+                    keypadButton(title: "0") { append("0") }
+                    keypadButton(title: "⌫", systemImage: "delete.left") {
+                        backspace()
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    quickAdjustButton(label: "-1", delta: -1)
+                    quickAdjustButton(label: "+1", delta: 1)
+                }
+
+                HStack {
+                    Button("Clear") {
+                        value = ""
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+
+                    Button("Close") {
+                        onClose()
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Apply") {
+                        onCommit()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(.systemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+        }
+
+        private func keypadButton(title: String, systemImage: String? = nil, action: @escaping () -> Void) -> some View {
+            Button(action: action) {
+                if let systemImage {
+                    Image(systemName: systemImage)
+                        .font(.title3)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.vertical, 8)
+                } else {
+                    Text(title)
+                        .font(.title3.monospacedDigit())
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.vertical, 8)
+                }
+            }
+            .buttonStyle(.bordered)
+        }
+
+        private func quickAdjustButton(label: String, delta: Double) -> some View {
+            Button(label) {
+                adjust(by: delta)
+            }
+            .buttonStyle(.bordered)
+        }
+
+        private func append(_ symbol: String) {
+            if symbol == "0" && value == "0" { return }
+            value.append(symbol)
+            sanitize()
+        }
+
+        private func appendDecimal() {
+            if value.contains(".") { return }
+            if value.isEmpty { value = "0" }
+            value.append(".")
+            sanitize()
+        }
+
+        private func backspace() {
+            if !value.isEmpty {
+                value.removeLast()
+            }
+        }
+
+        private func adjust(by delta: Double) {
+            let current = Double(value) ?? 0
+            let adjusted = min(max(current + delta, range.lowerBound), range.upperBound)
+            value = Self.format(adjusted)
+        }
+
+        private func sanitize() {
+            let allowed = Set("0123456789.")
+            value = value.filter { allowed.contains($0) }
+
+            if let dotIndex = value.firstIndex(of: ".") {
+                let afterDot = value.index(after: dotIndex)
+                let integerPart = String(value[..<dotIndex])
+                let fractionalPart = value[afterDot...].replacingOccurrences(of: ".", with: "")
+                value = integerPart + "." + fractionalPart
+            } else {
+                value = value.replacingOccurrences(of: ".", with: "")
+            }
+
+            while value.hasPrefix("0") && value.count > 1 && !value.hasPrefix("0.") {
+                value.removeFirst()
+            }
+        }
+
+        private static func format(_ value: Double) -> String {
+            if value.truncatingRemainder(dividingBy: 1) == 0 {
+                return String(format: "%.0f", value)
+            }
+            return String(format: "%.1f", value)
+        }
     }
 
     private func manualValueBinding(for wheel: WheelPos, zone: Zone) -> Binding<String> {
@@ -1163,7 +1473,7 @@ struct MeasureView: View {
     }
 
     private func commitManualPressure(for wheel: WheelPos) {
-        guard isManualInteractionActive else { return }
+        guard canEditPressure else { return }
         let rawText = manualPressureValues[wheel] ?? ""
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -1252,7 +1562,7 @@ struct MeasureView: View {
     }
 
     private func applyPressureTranscript(_ text: String, to wheel: WheelPos) {
-        guard isManualInteractionActive else { return }
+        guard canEditPressure else { return }
         let sanitized = text.replacingOccurrences(of: "[^0-9,\\.]", with: "", options: .regularExpression)
         let normalized = sanitized.replacingOccurrences(of: ",", with: ".")
         let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)

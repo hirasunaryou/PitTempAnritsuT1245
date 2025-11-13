@@ -56,7 +56,7 @@ struct SessionReportView: View {
 
                 content(isWide: isWide)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(isWide ? 32 : 20)
+                    .padding(isWide ? 28 : 18)
             }
         }
         .navigationTitle("Session report / セッションレポート")
@@ -66,19 +66,17 @@ struct SessionReportView: View {
     @ViewBuilder
     private func content(isWide: Bool) -> some View {
         if isWide {
-            VStack(spacing: 20) {
-                HStack(alignment: .top, spacing: 20) {
-                    VStack(spacing: 20) {
+            VStack(spacing: 18) {
+                HStack(alignment: .top, spacing: 18) {
+                    VStack(spacing: 16) {
                         headerCard
                         tyreMatrix
                             .layoutPriority(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
 
-                    VStack(spacing: 20) {
-                        metricsStack
-                    }
-                    .frame(maxWidth: 320, alignment: .top)
+                    metricsStack
+                        .frame(maxWidth: 320, alignment: .top)
                 }
 
                 if memoAvailable {
@@ -86,7 +84,7 @@ struct SessionReportView: View {
                 }
             }
         } else {
-            VStack(spacing: 18) {
+            VStack(spacing: 16) {
                 headerCard
                 tyreMatrix
                     .layoutPriority(1)
@@ -99,46 +97,59 @@ struct SessionReportView: View {
     }
 
     private var metricsStack: some View {
-        VStack(spacing: 18) {
-            if summary.hasPressures {
-                pressureCard
+        ViewThatFits {
+            HStack(alignment: .top, spacing: 14) {
+                if summary.hasPressures {
+                    pressureCard
+                }
+                sessionInfoCard
             }
-            sessionInfoCard
+            .frame(maxWidth: .infinity, alignment: .top)
+
+            VStack(spacing: 14) {
+                if summary.hasPressures {
+                    pressureCard
+                }
+                sessionInfoCard
+            }
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .frame(maxWidth: .infinity, alignment: .top)
     }
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
                     Text(summary.displayTitle)
-                        .font(.title2.bold())
+                        .font(.title3.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
-                        .minimumScaleFactor(0.85)
-                    Text("Session ID / セッションID: \(snapshot.sessionID.uuidString)")
+                        .minimumScaleFactor(0.8)
+                    Text("Session ID / セッションID")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                    Text(snapshot.sessionID.uuidString)
                         .font(.caption2.monospaced())
                         .foregroundStyle(.white.opacity(0.65))
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
                 }
                 Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
+                VStack(alignment: .trailing, spacing: 2) {
                     Text(headlineDate)
-                        .font(.headline.weight(.semibold))
+                        .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                    Text("Time / 時刻: \(recordedAtDescription)")
-                        .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
+                    Text("Time / 時刻")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                    Text(recordedAtDescription)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.75))
                         .multilineTextAlignment(.trailing)
                 }
             }
 
-            Divider()
-                .background(Color.white.opacity(0.2))
-
-            Grid(horizontalSpacing: 12, verticalSpacing: 10) {
+            Grid(horizontalSpacing: 10, verticalSpacing: 8) {
                 GridRow {
                     infoChip(title: "Track / サーキット", value: summary.track)
                     infoChip(title: "Car / 車両", value: summary.car)
@@ -153,51 +164,49 @@ struct SessionReportView: View {
                 }
             }
         }
-        .padding(20)
-        .background(cardBackground(cornerRadius: 26))
+        .padding(16)
+        .background(cardBackground(cornerRadius: 22))
     }
 
     private func infoChip(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.6))
+                .foregroundStyle(.white.opacity(0.55))
             Text(value.ifEmpty("-"))
-                .font(.callout.weight(.medium))
+                .font(.footnote.weight(.medium))
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .minimumScaleFactor(0.85)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.06))
+                .fill(Color.white.opacity(0.05))
         )
     }
 
     private var tyreMatrix: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Tyre metrics / タイヤ主要値")
-                .font(.headline)
-                .foregroundStyle(.white.opacity(0.85))
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Tyre focus / タイヤフォーカス")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
 
-            Grid(alignment: .top, horizontalSpacing: 16, verticalSpacing: 16) {
+            Grid(alignment: .center, horizontalSpacing: 14, verticalSpacing: 14) {
                 GridRow {
                     wheelCard(for: .FL)
-                    axleIndicator(title: "Front", subtitle: "フロント", systemImage: "car.front.waves.up.fill")
                     wheelCard(for: .FR)
                 }
                 GridRow {
                     wheelCard(for: .RL)
-                    axleIndicator(title: "Rear", subtitle: "リア", systemImage: "car.rear.waves.up.fill")
                     wheelCard(for: .RR)
                 }
             }
         }
-        .padding(22)
-        .background(cardBackground(cornerRadius: 30))
+        .padding(18)
+        .background(cardBackground(cornerRadius: 26))
     }
 
     private func wheelCard(for wheel: WheelPos) -> some View {
@@ -208,60 +217,38 @@ struct SessionReportView: View {
         )
     }
 
-    private func axleIndicator(title: String, subtitle: String, systemImage: String) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: systemImage)
-                .font(.system(size: 26))
-                .foregroundStyle(Color.white.opacity(0.45))
-            VStack(spacing: 2) {
-                Text(title)
-                Text(subtitle)
-            }
-            .font(.caption2)
-            .foregroundStyle(Color.white.opacity(0.55))
-        }
-        .frame(width: 82)
-    }
-
     private var pressureCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Tyre pressures / タイヤ内圧")
-                .font(.headline)
-                .foregroundStyle(.white.opacity(0.85))
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
 
-            Grid(horizontalSpacing: 12, verticalSpacing: 10) {
+            Grid(horizontalSpacing: 10, verticalSpacing: 0) {
                 GridRow {
-                    Text("")
                     ForEach(WheelPos.allCases) { wheel in
-                        Text(localizedWheelShort(for: wheel))
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.6))
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-                GridRow {
-                    Text("kPa")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.6))
-                    ForEach(WheelPos.allCases) { wheel in
-                        Text(summary.formattedPressure(for: wheel))
-                            .font(.title3.monospacedDigit())
-                            .foregroundStyle(.white)
-                            .frame(maxWidth: .infinity)
+                        VStack(spacing: 4) {
+                            Text(localizedWheelShort(for: wheel))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .multilineTextAlignment(.center)
+                            Text(summary.formattedPressure(for: wheel))
+                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                 }
             }
         }
-        .padding(20)
-        .background(cardBackground(cornerRadius: 24))
+        .padding(16)
+        .background(cardBackground(cornerRadius: 22))
     }
 
     private var sessionInfoCard: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Timing & device / 計測タイミングと端末")
-                .font(.headline)
-                .foregroundStyle(.white.opacity(0.85))
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
 
             infoLine(icon: "calendar", title: "Captured / 記録", detail: "\(headlineDate) · \(recordedAtDescription)")
 
@@ -283,23 +270,23 @@ struct SessionReportView: View {
                 infoLine(icon: "barcode", title: "Device ID / デバイスID", detail: deviceID)
             }
         }
-        .padding(20)
-        .background(cardBackground(cornerRadius: 24))
+        .padding(16)
+        .background(cardBackground(cornerRadius: 22))
     }
 
     private func infoLine(icon: String, title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Color.white.opacity(0.6))
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 3) {
+                .foregroundStyle(Color.white.opacity(0.55))
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.white.opacity(0.55))
                 Text(detail)
-                    .font(.callout)
-                    .foregroundStyle(.white)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
             }
@@ -307,34 +294,34 @@ struct SessionReportView: View {
     }
 
     private var memoStrip: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("Notes / メモ")
-                .font(.headline)
-                .foregroundStyle(.white.opacity(0.85))
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.9))
 
-            let columns = [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)]
-            LazyVGrid(columns: columns, alignment: .leading, spacing: 12) {
+            let columns = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
                 ForEach(memoItems, id: \.0) { wheel, memo in
-                    VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
                         Text(localizedWheelTitle(for: wheel))
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.white.opacity(0.65))
+                            .foregroundStyle(.white.opacity(0.6))
                         Text(memo)
-                            .font(.callout)
-                            .foregroundStyle(.white)
-                            .lineLimit(4)
+                            .font(.footnote)
+                            .foregroundStyle(.white.opacity(0.9))
+                            .lineLimit(3)
                     }
-                    .padding(14)
+                    .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
                             .fill(Color.white.opacity(0.08))
                     )
                 }
             }
         }
-        .padding(20)
-        .background(cardBackground(cornerRadius: 26))
+        .padding(16)
+        .background(cardBackground(cornerRadius: 22))
     }
 
     private func localizedWheelTitle(for wheel: WheelPos) -> String {
@@ -370,62 +357,64 @@ struct SessionReportView: View {
         let snapshot: SessionSnapshot
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(localizedWheelTitle(for: wheel))
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                    Spacer()
-                    if let pressureText {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("Pressure / 内圧")
-                                .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.6))
-                            Text(pressureText)
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white)
-                        }
-                    }
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(localizedWheelTitle(for: wheel))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
 
-                HStack(alignment: .top, spacing: 10) {
+                HStack(alignment: .bottom, spacing: 8) {
                     ForEach(Zone.allCases) { zone in
                         VStack(spacing: 4) {
                             Text(localizedZoneTitle(for: zone))
                                 .font(.caption2)
-                                .foregroundStyle(.white.opacity(0.6))
+                                .foregroundStyle(.white.opacity(0.55))
                             Text(summary.formattedTemperature(for: wheel, zone: zone))
-                                .font(.system(size: 18, weight: .semibold, design: .rounded))
+                                .font(.system(size: 28, weight: .heavy, design: .rounded))
                                 .foregroundStyle(.white)
-                                .minimumScaleFactor(0.8)
+                                .minimumScaleFactor(0.75)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 6)
                         .background(
                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.white.opacity(0.1))
+                                .fill(Color.white.opacity(0.12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                                )
                         )
+                    }
+                }
+
+                if let pressureText {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gauge")
+                            .font(.caption)
+                            .foregroundStyle(Color.white.opacity(0.65))
+                        Text(pressureText)
+                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
                     }
                 }
 
                 if let memo {
                     Text(memo)
-                        .font(.caption)
+                        .font(.caption2)
                         .foregroundStyle(.white.opacity(0.85))
-                        .lineLimit(3)
+                        .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .padding(16)
-            .frame(maxWidth: 220)
+            .padding(14)
+            .frame(maxWidth: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.white.opacity(0.1))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 24, style: .continuous)
-                            .stroke(Color.white.opacity(0.18), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(Color.white.opacity(0.16), lineWidth: 1)
                     )
             )
         }

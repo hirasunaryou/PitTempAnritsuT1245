@@ -4,6 +4,9 @@ struct SessionReportView: View {
     let summary: SessionHistorySummary
     let snapshot: SessionSnapshot
 
+    @AppStorage("sessionReportLanguage")
+    private var languageRaw: String = ReportLanguage.english.rawValue
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
@@ -43,6 +46,11 @@ struct SessionReportView: View {
 
     private var memoAvailable: Bool { !memoItems.isEmpty }
 
+    private var language: ReportLanguage {
+        get { ReportLanguage(rawValue: languageRaw) ?? .english }
+        set { languageRaw = newValue.rawValue }
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let isWide = proxy.size.width > proxy.size.height
@@ -59,24 +67,30 @@ struct SessionReportView: View {
                     .padding(isWide ? 28 : 18)
             }
         }
-        .navigationTitle("Session report / セッションレポート")
+        .navigationTitle(localized("Session report", "セッションレポート"))
         .navigationBarTitleDisplayMode(.inline)
     }
 
     @ViewBuilder
     private func content(isWide: Bool) -> some View {
+        let headerStack = VStack(spacing: 12) {
+            languagePicker
+            headerCard
+        }
+
         if isWide {
-            VStack(spacing: 18) {
-                HStack(alignment: .top, spacing: 18) {
+            VStack(spacing: 16) {
+                HStack(alignment: .top, spacing: 16) {
                     VStack(spacing: 16) {
-                        headerCard
+                        headerStack
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         tyreMatrix
                             .layoutPriority(1)
                     }
                     .frame(maxWidth: .infinity, alignment: .top)
 
                     metricsStack
-                        .frame(maxWidth: 320, alignment: .top)
+                        .frame(maxWidth: 300, alignment: .top)
                 }
 
                 if memoAvailable {
@@ -84,8 +98,9 @@ struct SessionReportView: View {
                 }
             }
         } else {
-            VStack(spacing: 16) {
-                headerCard
+            VStack(spacing: 14) {
+                headerStack
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 tyreMatrix
                     .layoutPriority(1)
                 metricsStack
@@ -117,17 +132,14 @@ struct SessionReportView: View {
     }
 
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 10) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(summary.displayTitle)
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
-                    Text("Session ID / セッションID")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
                     Text(snapshot.sessionID.uuidString)
                         .font(.caption2.monospaced())
                         .foregroundStyle(.white.opacity(0.65))
@@ -139,48 +151,45 @@ struct SessionReportView: View {
                     Text(headlineDate)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
-                    Text("Time / 時刻")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
                     Text(recordedAtDescription)
-                        .font(.caption.weight(.medium))
+                        .font(.footnote.weight(.medium))
                         .foregroundStyle(.white.opacity(0.75))
                         .multilineTextAlignment(.trailing)
                 }
             }
 
-            Grid(horizontalSpacing: 10, verticalSpacing: 8) {
+            Grid(horizontalSpacing: 8, verticalSpacing: 6) {
                 GridRow {
-                    infoChip(title: "Track / サーキット", value: summary.track)
-                    infoChip(title: "Car / 車両", value: summary.car)
+                    infoChip(title: localized("Track", "サーキット"), value: summary.track)
+                    infoChip(title: localized("Car", "車両"), value: summary.car)
                 }
                 GridRow {
-                    infoChip(title: "Driver / ドライバー", value: summary.driver)
-                    infoChip(title: "Tyre / タイヤ", value: summary.tyre)
+                    infoChip(title: localized("Driver", "ドライバー"), value: summary.driver)
+                    infoChip(title: localized("Tyre", "タイヤ"), value: summary.tyre)
                 }
                 GridRow {
-                    infoChip(title: "Lap / ラップ", value: summary.lap.ifEmpty("-"))
-                    infoChip(title: "Date meta / 計測日メモ", value: summary.date.ifEmpty("-"))
+                    infoChip(title: localized("Lap", "ラップ"), value: summary.lap.ifEmpty("-"))
+                    infoChip(title: localized("Date memo", "計測日メモ"), value: summary.date.ifEmpty("-"))
                 }
             }
         }
-        .padding(16)
-        .background(cardBackground(cornerRadius: 22))
+        .padding(14)
+        .background(cardBackground(cornerRadius: 20))
     }
 
     private func infoChip(title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(title)
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(.white.opacity(0.5))
             Text(value.ifEmpty("-"))
-                .font(.footnote.weight(.medium))
+                .font(.system(size: 13, weight: .medium, design: .default))
                 .foregroundStyle(.white)
-                .lineLimit(2)
-                .minimumScaleFactor(0.85)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .padding(.horizontal, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
@@ -190,9 +199,9 @@ struct SessionReportView: View {
 
     private var tyreMatrix: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Tyre focus / タイヤフォーカス")
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.9))
+            Text(localized("Tyre focus", "タイヤフォーカス"))
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.95))
 
             Grid(alignment: .center, horizontalSpacing: 14, verticalSpacing: 14) {
                 GridRow {
@@ -205,21 +214,22 @@ struct SessionReportView: View {
                 }
             }
         }
-        .padding(18)
-        .background(cardBackground(cornerRadius: 26))
+        .padding(16)
+        .background(cardBackground(cornerRadius: 24))
     }
 
     private func wheelCard(for wheel: WheelPos) -> some View {
         SessionReportWheelCard(
             wheel: wheel,
             summary: summary,
-            snapshot: snapshot
+            snapshot: snapshot,
+            language: language
         )
     }
 
     private var pressureCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Tyre pressures / タイヤ内圧")
+            Text(localized("Tyre pressures", "タイヤ内圧"))
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.9))
 
@@ -228,11 +238,11 @@ struct SessionReportView: View {
                     ForEach(WheelPos.allCases) { wheel in
                         VStack(spacing: 4) {
                             Text(localizedWheelShort(for: wheel))
-                                .font(.caption2.weight(.semibold))
+                                .font(.caption.weight(.semibold))
                                 .foregroundStyle(.white.opacity(0.6))
                                 .multilineTextAlignment(.center)
                             Text(summary.formattedPressure(for: wheel))
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
                                 .foregroundStyle(.white)
                         }
                         .frame(maxWidth: .infinity)
@@ -240,38 +250,38 @@ struct SessionReportView: View {
                 }
             }
         }
-        .padding(16)
-        .background(cardBackground(cornerRadius: 22))
+        .padding(14)
+        .background(cardBackground(cornerRadius: 20))
     }
 
     private var sessionInfoCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Timing & device / 計測タイミングと端末")
+            Text(localized("Timing & device", "計測タイミングと端末"))
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.9))
 
-            infoLine(icon: "calendar", title: "Captured / 記録", detail: "\(headlineDate) · \(recordedAtDescription)")
+            infoLine(icon: "calendar", title: localized("Captured", "記録"), detail: "\(headlineDate) · \(recordedAtDescription)")
 
             if let began = snapshot.sessionBeganAt {
                 let beginText = Self.timeFormatter.string(from: began)
-                infoLine(icon: "timer", title: "Session start / 計測開始", detail: beginText)
+                infoLine(icon: "timer", title: localized("Session start", "計測開始"), detail: beginText)
             }
 
-            infoLine(icon: "square.grid.3x3.fill", title: "Measurements / 計測数", detail: "\(summary.resultCount)")
+            infoLine(icon: "square.grid.3x3.fill", title: localized("Measurements", "計測数"), detail: "\(summary.resultCount)")
 
             infoLine(
                 icon: "iphone.gen3",
-                title: "Device / デバイス",
+                title: localized("Device", "デバイス"),
                 detail: snapshot.originDeviceName.ifEmpty(summary.originDeviceDisplayName.ifEmpty("-"))
             )
 
             let deviceID = snapshot.originDeviceID.ifEmpty(summary.originDeviceID)
             if !deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                infoLine(icon: "barcode", title: "Device ID / デバイスID", detail: deviceID)
+                infoLine(icon: "barcode", title: localized("Device ID", "デバイスID"), detail: deviceID)
             }
         }
-        .padding(16)
-        .background(cardBackground(cornerRadius: 22))
+        .padding(14)
+        .background(cardBackground(cornerRadius: 20))
     }
 
     private func infoLine(icon: String, title: String, detail: String) -> some View {
@@ -283,9 +293,9 @@ struct SessionReportView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(0.5))
                 Text(detail)
-                    .font(.footnote)
+                    .font(.system(size: 13))
                     .foregroundStyle(.white.opacity(0.85))
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
@@ -295,7 +305,7 @@ struct SessionReportView: View {
 
     private var memoStrip: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Notes / メモ")
+            Text(localized("Notes", "メモ"))
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.9))
 
@@ -326,19 +336,19 @@ struct SessionReportView: View {
 
     private func localizedWheelTitle(for wheel: WheelPos) -> String {
         switch wheel {
-        case .FL: return "Front left / フロント左"
-        case .FR: return "Front right / フロント右"
-        case .RL: return "Rear left / リア左"
-        case .RR: return "Rear right / リア右"
+        case .FL: return localized("Front left", "フロント左")
+        case .FR: return localized("Front right", "フロント右")
+        case .RL: return localized("Rear left", "リア左")
+        case .RR: return localized("Rear right", "リア右")
         }
     }
 
     private func localizedWheelShort(for wheel: WheelPos) -> String {
         switch wheel {
-        case .FL: return "Front L\nフロント左"
-        case .FR: return "Front R\nフロント右"
-        case .RL: return "Rear L\nリア左"
-        case .RR: return "Rear R\nリア右"
+        case .FL: return localized("Front L", "フロント左")
+        case .FR: return localized("Front R", "フロント右")
+        case .RL: return localized("Rear L", "リア左")
+        case .RR: return localized("Rear R", "リア右")
         }
     }
 
@@ -351,18 +361,40 @@ struct SessionReportView: View {
             )
     }
 
+    private func localized(_ english: String, _ japanese: String) -> String {
+        language == .english ? english : japanese
+    }
+
+    private var languagePicker: some View {
+        Picker(localized("Language", "言語"), selection: Binding(get: { language }, set: { language = $0 })) {
+            Text("EN").tag(ReportLanguage.english)
+            Text("日本語").tag(ReportLanguage.japanese)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(maxWidth: 220)
+    }
+
+    private enum ReportLanguage: String, CaseIterable, Identifiable {
+        case english
+        case japanese
+
+        var id: String { rawValue }
+    }
+
     private struct SessionReportWheelCard: View {
         let wheel: WheelPos
         let summary: SessionHistorySummary
         let snapshot: SessionSnapshot
+        let language: ReportLanguage
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(localizedWheelTitle(for: wheel))
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.85)
 
                 HStack(alignment: .bottom, spacing: 8) {
                     ForEach(Zone.allCases) { zone in
@@ -371,9 +403,11 @@ struct SessionReportView: View {
                                 .font(.caption2)
                                 .foregroundStyle(.white.opacity(0.55))
                             Text(summary.formattedTemperature(for: wheel, zone: zone))
-                                .font(.system(size: 28, weight: .heavy, design: .rounded))
+                                .font(.system(size: 32, weight: .heavy, design: .rounded))
                                 .foregroundStyle(.white)
                                 .minimumScaleFactor(0.75)
+                                .lineLimit(1)
+                                .fixedSize()
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -394,7 +428,7 @@ struct SessionReportView: View {
                             .font(.caption)
                             .foregroundStyle(Color.white.opacity(0.65))
                         Text(pressureText)
-                            .font(.system(size: 18, weight: .semibold, design: .rounded))
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
                             .foregroundStyle(.white)
                     }
                 }
@@ -433,19 +467,23 @@ struct SessionReportView: View {
 
         private func localizedWheelTitle(for wheel: WheelPos) -> String {
             switch wheel {
-            case .FL: return "Front left / フロント左"
-            case .FR: return "Front right / フロント右"
-            case .RL: return "Rear left / リア左"
-            case .RR: return "Rear right / リア右"
+            case .FL: return localized("Front left", "フロント左")
+            case .FR: return localized("Front right", "フロント右")
+            case .RL: return localized("Rear left", "リア左")
+            case .RR: return localized("Rear right", "リア右")
             }
         }
 
         private func localizedZoneTitle(for zone: Zone) -> String {
             switch zone {
-            case .IN: return "Inner / インナー"
-            case .CL: return "Center / センター"
-            case .OUT: return "Outer / アウター"
+            case .IN: return localized("Inner", "インナー")
+            case .CL: return localized("Center", "センター")
+            case .OUT: return localized("Outer", "アウター")
             }
+        }
+
+        private func localized(_ english: String, _ japanese: String) -> String {
+            language == .english ? english : japanese
         }
     }
 }

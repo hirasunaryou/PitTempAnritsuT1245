@@ -79,36 +79,41 @@ struct SessionReportView: View {
         }
 
         if isWide {
-            VStack(spacing: layout.sectionSpacing) {
-                HStack(alignment: .top, spacing: layout.sectionSpacing) {
-                    VStack(spacing: layout.sectionSpacing) {
-                        headerStack
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        tyreMatrix(layout: layout)
-                            .layoutPriority(1)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .top)
-
-                    metricsStack(layout: layout)
-                        .frame(maxWidth: layout.metricsColumnMaxWidth, alignment: .top)
-                }
-
-                if layout.showMemo, memoAvailable {
-                    memoStrip(layout: layout)
-                }
-            }
-        } else {
-            VStack(spacing: layout.sectionSpacing) {
-                headerStack
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(alignment: .top, spacing: layout.sectionSpacing) {
                 tyreMatrix(layout: layout)
                     .layoutPriority(1)
-                metricsStack(layout: layout)
-                if layout.showMemo, memoAvailable {
-                    memoStrip(layout: layout)
+
+                VStack(alignment: .leading, spacing: layout.sectionSpacing) {
+                    headerStack
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    metricsStack(layout: layout)
+                    if layout.showMemo, memoAvailable {
+                        memoStrip(layout: layout)
+                    }
                 }
+                .frame(maxWidth: layout.metricsColumnMaxWidth, alignment: .top)
             }
+        } else {
+            rotatePrompt()
         }
+    }
+
+    private func rotatePrompt() -> some View {
+        VStack(spacing: 16) {
+            Image(systemName: "iphone.landscape")
+                .font(.system(size: 48))
+                .foregroundStyle(.white.opacity(0.75))
+            Text(localized("Rotate to landscape to view the full session report", "端末を横向きにしてレポート全体を表示してください"))
+                .font(.system(size: 18, weight: .semibold))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.white.opacity(0.85))
+            Text(localized("The report is optimized for a single landscape screen so the tyre temperatures and pressures stay legible.", "タイヤの温度と内圧を大きく見せるため、レポートは横向き1画面専用レイアウトです。"))
+                .font(.system(size: 14))
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.white.opacity(0.7))
+                .padding(.horizontal, 20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func metricsStack(layout: LayoutProfile) -> some View {
@@ -159,17 +164,12 @@ struct SessionReportView: View {
             }
 
             Grid(horizontalSpacing: layout.metadataGridSpacing, verticalSpacing: layout.metadataGridSpacing) {
-                GridRow {
-                    infoChip(title: localized("Track", "サーキット"), value: summary.track, layout: layout)
-                    infoChip(title: localized("Car", "車両"), value: summary.car, layout: layout)
-                }
-                GridRow {
-                    infoChip(title: localized("Driver", "ドライバー"), value: summary.driver, layout: layout)
-                    infoChip(title: localized("Tyre", "タイヤ"), value: summary.tyre, layout: layout)
-                }
-                GridRow {
-                    infoChip(title: localized("Lap", "ラップ"), value: summary.lap.ifEmpty("-"), layout: layout)
-                    infoChip(title: localized("Date memo", "計測日メモ"), value: summary.date.ifEmpty("-"), layout: layout)
+                ForEach(Array(layout.metadataRows.enumerated()), id: \.offset) { _, row in
+                    GridRow {
+                        ForEach(row, id: \.self) { field in
+                            infoChip(for: field, layout: layout)
+                        }
+                    }
                 }
             }
 
@@ -193,7 +193,31 @@ struct SessionReportView: View {
         .background(cardBackground(cornerRadius: layout.headerCardCornerRadius))
     }
 
-    private func infoChip(title: String, value: String, layout: LayoutProfile) -> some View {
+    private func infoChip(for field: MetadataField, layout: LayoutProfile) -> some View {
+        let title: String
+        let value: String
+
+        switch field {
+        case .track:
+            title = localized("Track", "サーキット")
+            value = summary.track
+        case .car:
+            title = localized("Car", "車両")
+            value = summary.car
+        case .driver:
+            title = localized("Driver", "ドライバー")
+            value = summary.driver
+        case .tyre:
+            title = localized("Tyre", "タイヤ")
+            value = summary.tyre
+        case .lap:
+            title = localized("Lap", "ラップ")
+            value = summary.lap.ifEmpty("-")
+        case .dateMemo:
+            title = localized("Date memo", "計測日メモ")
+            value = summary.date.ifEmpty("-")
+        }
+
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .font(.system(size: layout.metadataTitleSize, weight: .semibold))
@@ -258,11 +282,16 @@ struct SessionReportView: View {
                                 .font(.system(size: layout.infoLabelSize, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.6))
                                 .multilineTextAlignment(.center)
-                            Text(summary.formattedPressure(for: wheel))
-                                .font(.system(size: layout.pressureFontSize, weight: .bold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.85)
+                            ViewThatFits {
+                                Text(summary.formattedPressure(for: wheel))
+                                    .font(.system(size: layout.pressureFontSize, weight: .bold, design: .rounded))
+                                Text(summary.formattedPressure(for: wheel))
+                                    .font(.system(size: layout.pressureFallbackFontSize, weight: .bold, design: .rounded))
+                            }
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.9)
+                            .monospacedDigit()
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -431,7 +460,9 @@ struct SessionReportView: View {
         let wheelTitleSize: CGFloat
         let zoneTitleSize: CGFloat
         let temperatureFontSize: CGFloat
+        let temperatureFallbackFontSize: CGFloat
         let pressureFontSize: CGFloat
+        let pressureFallbackFontSize: CGFloat
         let wheelMemoFontSize: CGFloat
         let wheelMemoLineLimit: Int
         let wheelBadgeSpacing: CGFloat
@@ -455,9 +486,23 @@ struct SessionReportView: View {
         let memoCardCornerRadius: CGFloat
         let memoGridSpacing: CGFloat
         let showMemo: Bool
+        let metadataRows: [[MetadataField]]
+    }
+
+    private enum MetadataField: Hashable {
+        case track
+        case car
+        case driver
+        case tyre
+        case lap
+        case dateMemo
     }
 
     private static func layoutProfile(for size: CGSize) -> LayoutProfile {
+        if size.width > size.height {
+            return landscapeLayout
+        }
+
         let height = size.height
         if height < 620 {
             return compactLayout
@@ -467,6 +512,64 @@ struct SessionReportView: View {
             return regularLayout
         }
     }
+
+    private static let landscapeLayout = LayoutProfile(
+        pagePadding: 18,
+        widePagePadding: 22,
+        sectionSpacing: 18,
+        headerSpacing: 10,
+        headerContentSpacing: 8,
+        headerTitleSize: 18,
+        headerIDSize: 10,
+        headerDateSize: 16,
+        headerTimeSize: 14,
+        headerCardPadding: 14,
+        headerCardCornerRadius: 22,
+        metadataGridSpacing: 8,
+        metadataChipVerticalPadding: 4,
+        metadataChipHorizontalPadding: 8,
+        metadataTitleSize: 10,
+        metadataValueSize: 12,
+        tyreMatrixHeaderSpacing: 10,
+        tyreMatrixTitleSize: 22,
+        tyreMatrixSpacing: 20,
+        tyreMatrixPadding: 18,
+        tyreMatrixCornerRadius: 28,
+        wheelCardPadding: 14,
+        wheelCardCornerRadius: 24,
+        wheelContentSpacing: 12,
+        wheelZoneSpacing: 12,
+        wheelTitleSize: 19,
+        zoneTitleSize: 13,
+        temperatureFontSize: 56,
+        temperatureFallbackFontSize: 48,
+        pressureFontSize: 28,
+        pressureFallbackFontSize: 24,
+        wheelMemoFontSize: 12,
+        wheelMemoLineLimit: 2,
+        wheelBadgeSpacing: 8,
+        infoCardHeaderSpacing: 10,
+        infoHeaderSize: 16,
+        infoLabelSize: 11,
+        infoCardPadding: 14,
+        infoCardCornerRadius: 22,
+        infoLineSpacing: 7,
+        infoIconSize: 13,
+        infoTitleSize: 11,
+        infoDetailSize: 13,
+        metricsSpacing: 14,
+        metricsColumnMaxWidth: 320,
+        languagePickerWidth: 200,
+        memoHeaderSpacing: 8,
+        memoTitleSize: 15,
+        memoFontSize: 12,
+        memoLineLimit: 2,
+        memoCardPadding: 14,
+        memoCardCornerRadius: 22,
+        memoGridSpacing: 10,
+        showMemo: false,
+        metadataRows: [[.track, .driver], [.car, .tyre]]
+    )
 
     private static let regularLayout = LayoutProfile(
         pagePadding: 20,
@@ -497,7 +600,9 @@ struct SessionReportView: View {
         wheelTitleSize: 20,
         zoneTitleSize: 12,
         temperatureFontSize: 38,
+        temperatureFallbackFontSize: 32,
         pressureFontSize: 24,
+        pressureFallbackFontSize: 20,
         wheelMemoFontSize: 12,
         wheelMemoLineLimit: 2,
         wheelBadgeSpacing: 6,
@@ -520,7 +625,8 @@ struct SessionReportView: View {
         memoCardPadding: 16,
         memoCardCornerRadius: 22,
         memoGridSpacing: 10,
-        showMemo: true
+        showMemo: true,
+        metadataRows: [[.track, .car], [.driver, .tyre], [.lap, .dateMemo]]
     )
 
     private static let tightLayout = LayoutProfile(
@@ -552,7 +658,9 @@ struct SessionReportView: View {
         wheelTitleSize: 18,
         zoneTitleSize: 11,
         temperatureFontSize: 34,
+        temperatureFallbackFontSize: 30,
         pressureFontSize: 22,
+        pressureFallbackFontSize: 19,
         wheelMemoFontSize: 11.5,
         wheelMemoLineLimit: 2,
         wheelBadgeSpacing: 6,
@@ -575,7 +683,8 @@ struct SessionReportView: View {
         memoCardPadding: 14,
         memoCardCornerRadius: 20,
         memoGridSpacing: 10,
-        showMemo: true
+        showMemo: true,
+        metadataRows: [[.track, .car], [.driver, .tyre], [.lap, .dateMemo]]
     )
 
     private static let compactLayout = LayoutProfile(
@@ -607,7 +716,9 @@ struct SessionReportView: View {
         wheelTitleSize: 17,
         zoneTitleSize: 10,
         temperatureFontSize: 31,
+        temperatureFallbackFontSize: 27,
         pressureFontSize: 19,
+        pressureFallbackFontSize: 17,
         wheelMemoFontSize: 11,
         wheelMemoLineLimit: 1,
         wheelBadgeSpacing: 5,
@@ -630,7 +741,8 @@ struct SessionReportView: View {
         memoCardPadding: 12,
         memoCardCornerRadius: 18,
         memoGridSpacing: 8,
-        showMemo: false
+        showMemo: false,
+        metadataRows: [[.track, .car], [.driver, .tyre]]
     )
 
     private struct SessionReportWheelCard: View {
@@ -654,12 +766,17 @@ struct SessionReportView: View {
                             Text(localizedZoneTitle(for: zone))
                                 .font(.system(size: layout.zoneTitleSize, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.55))
-                            Text(summary.formattedTemperature(for: wheel, zone: zone))
-                                .font(.system(size: layout.temperatureFontSize, weight: .heavy, design: .rounded))
-                                .foregroundStyle(.white)
-                                .minimumScaleFactor(0.75)
-                                .lineLimit(1)
-                                .fixedSize()
+                            ViewThatFits {
+                                Text(summary.formattedTemperature(for: wheel, zone: zone))
+                                    .font(.system(size: layout.temperatureFontSize, weight: .heavy, design: .rounded))
+                                Text(summary.formattedTemperature(for: wheel, zone: zone))
+                                    .font(.system(size: layout.temperatureFallbackFontSize, weight: .heavy, design: .rounded))
+                            }
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.9)
+                            .fixedSize()
+                            .monospacedDigit()
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -679,11 +796,16 @@ struct SessionReportView: View {
                         Image(systemName: "gauge")
                             .font(.system(size: layout.infoLabelSize, weight: .semibold))
                             .foregroundStyle(Color.white.opacity(0.65))
-                        Text(pressureText)
-                            .font(.system(size: layout.pressureFontSize, weight: .semibold, design: .rounded))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                        ViewThatFits {
+                            Text(pressureText)
+                                .font(.system(size: layout.pressureFontSize, weight: .semibold, design: .rounded))
+                            Text(pressureText)
+                                .font(.system(size: layout.pressureFallbackFontSize, weight: .semibold, design: .rounded))
+                        }
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.9)
+                        .monospacedDigit()
                     }
                 }
 

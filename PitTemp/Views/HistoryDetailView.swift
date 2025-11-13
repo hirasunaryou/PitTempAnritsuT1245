@@ -7,6 +7,7 @@ struct HistoryDetailView: View {
 
     @State private var snapshot: SessionSnapshot? = nil
     @State private var loadError: String? = nil
+    @State private var showReport = false
 
     private static let metaLabelWidth: CGFloat = 96
     private static let timelineDateFormatter: DateFormatter = {
@@ -60,11 +61,25 @@ struct HistoryDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await loadSnapshot() }
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if snapshot != nil {
+                    Button {
+                        showReport = true
+                    } label: {
+                        Label("Report", systemImage: "doc.richtext")
+                    }
+                }
                 Button {
                     onLoad(summary)
                 } label: {
                     Label("Load", systemImage: "square.and.arrow.down.on.square")
+                }
+            }
+        }
+        .sheet(isPresented: $showReport) {
+            if let snapshot {
+                NavigationStack {
+                    SessionReportView(summary: summary, snapshot: snapshot)
                 }
             }
         }

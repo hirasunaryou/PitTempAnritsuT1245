@@ -516,6 +516,26 @@ final class SessionViewModel: ObservableObject {
         autosaveStore.save(snapshot)
     }
 
+    // MARK: - Session report helpers
+
+    func makeLiveSnapshotForReport() -> SessionSnapshot {
+        SessionSnapshot(
+            meta: meta,
+            results: results,
+            wheelMemos: wheelMemos,
+            wheelPressures: wheelPressures,
+            sessionBeganAt: sessionBeganAt,
+            sessionID: currentSessionID,
+            originDeviceID: deviceIdentity.id,
+            originDeviceName: deviceIdentity.name
+        )
+    }
+
+    func makeLiveSummary(for snapshot: SessionSnapshot? = nil) -> SessionHistorySummary {
+        let snapshot = snapshot ?? makeLiveSnapshotForReport()
+        return SessionHistorySummary.makeLiveSummary(from: snapshot, isFromCurrentDevice: true)
+    }
+
     private func applySnapshot(_ snapshot: SessionSnapshot, historySummary: SessionHistorySummary? = nil) {
         isRestoringAutosave = true
         meta = snapshot.meta

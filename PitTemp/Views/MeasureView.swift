@@ -915,37 +915,17 @@ struct MeasureView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            HStack(spacing: 8) {
-                Text(wheelCode(wheel))
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(Color.accentColor.opacity(0.12))
-                    )
-                    .accessibilityLabel("Tyre position \(title(wheel))")
-
-                if settings.enableWheelVoiceInput,
-                   pressureSpeech.isRecording,
-                   pressureSpeech.currentWheel == wheel {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 8, height: 8)
-                        Text("Recording…")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+            if settings.enableWheelVoiceInput,
+               pressureSpeech.isRecording,
+               pressureSpeech.currentWheel == wheel {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                    Text("Recording…")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
                 }
-
-                Spacer(minLength: 8)
-            }
-
-            if showPlaceholder {
-                Text("Not saved yet / 未入力")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
 
             if activePressureWheel == wheel && canEditPressure {
@@ -1036,7 +1016,7 @@ struct MeasureView: View {
         } label: {
             HStack {
                 if showPlaceholder {
-                    Text("Enter value / 例: \(Int(manualPressureDefault)) kPa")
+                    Text("ex) \(Int(manualPressureDefault))kPa")
                         .foregroundStyle(Color.secondary.opacity(0.7))
                         .italic()
                 } else {
@@ -1069,12 +1049,7 @@ struct MeasureView: View {
             pressureAdjustButton(title: "-5", delta: -5, for: wheel)
             pressureAdjustButton(title: "-1", delta: -1, for: wheel)
 
-            Spacer(minLength: 8)
-
-            Text("Adjust: \(manualPressureDisplay(for: wheel)) kPa")
-                .font(.body.monospacedDigit())
-
-            Spacer(minLength: 8)
+            Spacer(minLength: 12)
 
             pressureAdjustButton(title: "+1", delta: 1, for: wheel)
             pressureAdjustButton(title: "+5", delta: 5, for: wheel)
@@ -1325,16 +1300,6 @@ struct MeasureView: View {
             get: { manualPressureValues[wheel] ?? "" },
             set: { newValue in updateManualPressureValue(newValue, for: wheel) }
         )
-    }
-
-    private func manualPressureDisplay(for wheel: WheelPos) -> String {
-        if let text = manualPressureValues[wheel], !text.isEmpty {
-            return text
-        }
-        if let existing = vm.wheelPressures[wheel] {
-            return String(format: "%.1f", existing)
-        }
-        return String(format: "%.0f", manualPressureDefault)
     }
 
     private func adjustManualPressure(for wheel: WheelPos, delta: Double) {
@@ -1838,15 +1803,6 @@ struct MeasureView: View {
         case .IN: return "IN"
         case .CL: return "CL"
         case .OUT: return "OUT"
-        }
-    }
-
-    private func wheelCode(_ wheel: WheelPos) -> String {
-        switch wheel {
-        case .FL: return "FL"
-        case .FR: return "FR"
-        case .RL: return "RL"
-        case .RR: return "RR"
         }
     }
 

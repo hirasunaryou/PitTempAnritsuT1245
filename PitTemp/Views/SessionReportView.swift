@@ -389,9 +389,13 @@ struct SessionReportView: View {
                 .font(.system(size: metrics.pressureValueFontSize, weight: .heavy, design: .rounded))
                 .foregroundStyle(Color.black.opacity(0.85))
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(metrics.pressureValueMinimumScale)
             Text("kPa")
                 .font(.system(size: metrics.pressureUnitFontSize, weight: .semibold))
                 .foregroundStyle(Color.black.opacity(0.6))
+                .lineLimit(1)
+                .minimumScaleFactor(metrics.pressureUnitMinimumScale)
         }
     }
 
@@ -476,6 +480,8 @@ struct SessionReportView: View {
         let temperatureFontSize: CGFloat
         let pressureValueFontSize: CGFloat
         let pressureUnitFontSize: CGFloat
+        let pressureValueMinimumScale: CGFloat
+        let pressureUnitMinimumScale: CGFloat
         let zoneLabelSize: CGFloat
         let memoFontSize: CGFloat
         let memoSpacing: CGFloat
@@ -513,6 +519,8 @@ struct SessionReportView: View {
                 temperatureFontSize = 24
                 pressureValueFontSize = 24
                 pressureUnitFontSize = 12
+                pressureValueMinimumScale = 0.82
+                pressureUnitMinimumScale = 0.82
                 zoneLabelSize = 11
                 memoFontSize = 11
                 memoSpacing = 6
@@ -546,6 +554,8 @@ struct SessionReportView: View {
                 temperatureFontSize = 28
                 pressureValueFontSize = 28
                 pressureUnitFontSize = 13
+                pressureValueMinimumScale = 0.85
+                pressureUnitMinimumScale = 0.85
                 zoneLabelSize = 12
                 memoFontSize = 12
                 memoSpacing = 8
@@ -579,6 +589,8 @@ struct SessionReportView: View {
                 temperatureFontSize = 32
                 pressureValueFontSize = 32
                 pressureUnitFontSize = 14
+                pressureValueMinimumScale = 0.88
+                pressureUnitMinimumScale = 0.9
                 zoneLabelSize = 13
                 memoFontSize = 13
                 memoSpacing = 10

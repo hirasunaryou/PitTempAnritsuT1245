@@ -168,7 +168,11 @@ struct SettingsView: View {
                         Text("Chart Width: \(Int(settings.chartWindowSec)) s")
                     }
                     Toggle("Autofill Date/Time if empty", isOn: $settings.autofillDateTime)
-                    
+
+                    Toggle("Enable tyre voice input controls", isOn: $settings.enableWheelVoiceInput)
+                        .tint(.orange)
+                        .accessibilityHint("When off, pressure and memo voice buttons stay hidden by default")
+
                     // 👇 追加：Zone順序の切替
                     Picker(
                         "Zone order",

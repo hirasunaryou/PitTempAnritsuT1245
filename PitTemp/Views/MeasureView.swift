@@ -43,7 +43,6 @@ struct MeasureView: View {
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
-    private let manualPressureStep: Double = 1
     private let manualPressureDefault: Double = 210
     private let zoneButtonHeight: CGFloat = 112
 
@@ -171,8 +170,10 @@ struct MeasureView: View {
         }
         .background(historyBackgroundColor.ignoresSafeArea())
         .onAppear {
-            speech.requestAuth()
-            pressureSpeech.requestAuth()
+            if settings.enableWheelVoiceInput {
+                speech.requestAuth()
+                pressureSpeech.requestAuth()
+            }
             ble.startScan()
             ble.autoConnectOnDiscover = settings.bleAutoConnect
             // registry の autoConnect=true だけを優先対象に
@@ -219,6 +220,15 @@ struct MeasureView: View {
                 syncManualDefaults(for: newWheel)
             }
             showWheelDetails = false
+        }
+        .onChange(of: settings.enableWheelVoiceInput) { _, newValue in
+            if newValue {
+                speech.requestAuth()
+                pressureSpeech.requestAuth()
+            } else {
+                if speech.isRecording { speech.stop() }
+                if pressureSpeech.isRecording { pressureSpeech.stop() }
+            }
         }
         .onReceive(vm.$results) { _ in
             if isManualInteractionActive { syncManualDefaults(for: selectedWheel) }
@@ -518,6 +528,17 @@ struct MeasureView: View {
                 let vmRef = vm
                 Task { @MainActor in vmRef.appendMemo(prevText, to: pw) }
             }
+
+            if wheel != selectedWheel {
+                let currentWheel = selectedWheel
+                if hasPendingManualPressure(for: currentWheel) {
+                    autoCommitManualPressureIfNeeded(for: currentWheel)
+                    if manualPressureError(for: currentWheel) != nil {
+                        return
+                    }
+                }
+            }
+
             selectedWheel = wheel
             Haptics.impactLight()
         } label: {
@@ -672,14 +693,16 @@ struct MeasureView: View {
         VStack(alignment: .leading, spacing: 12) {
             wheelSelector
 
+            pressureEntrySection(for: selectedWheel)
+
             zoneSelector(for: selectedWheel)
 
-            selectedWheelSection(selectedWheel)
+            wheelExtrasSection(for: selectedWheel)
         }
     }
 
-    private func selectedWheelSection(_ wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+    private func pressureEntrySection(for wheel: WheelPos) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .topLeading) {
                 pressureEntryCard(for: wheel)
 
@@ -692,36 +715,40 @@ struct MeasureView: View {
             if isHistoryMode && !historyEditingEnabled {
                 historyLockedFootnote()
             }
+        }
+    }
 
-            DisclosureGroup(isExpanded: $showWheelDetails) {
-                VStack(alignment: .leading, spacing: 14) {
-                    if isHistoryMode {
-                        historyManualControls(for: wheel)
-                    } else {
-                        manualModeToggle
+    private func wheelExtrasSection(for wheel: WheelPos) -> some View {
+        DisclosureGroup(isExpanded: $showWheelDetails) {
+            VStack(alignment: .leading, spacing: 14) {
+                if isHistoryMode {
+                    historyManualControls(for: wheel)
+                } else {
+                    manualModeToggle
 
-                        if isManualMode {
-                            manualEntrySection(for: wheel)
-                        }
-
-                        voiceMemoSection(for: wheel)
+                    if isManualMode {
+                        manualEntrySection(for: wheel)
                     }
 
-                    Divider()
-
-                    wheelDetailCard(for: wheel)
+                    if settings.enableWheelVoiceInput {
+                        voiceMemoSection(for: wheel)
+                    }
                 }
-            } label: {
-                Label(
-                    showWheelDetails ? "Hide extra controls / 詳細を閉じる" : "More controls / 詳細設定",
-                    systemImage: showWheelDetails ? "chevron.up.circle.fill" : "chevron.down.circle"
-                )
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+
+                Divider()
+
+                wheelDetailCard(for: wheel)
             }
-            .animation(.easeInOut(duration: 0.2), value: showWheelDetails)
-            .animation(.easeInOut(duration: 0.2), value: wheel)
+        } label: {
+            Label(
+                showWheelDetails ? "Hide extra controls / 詳細を閉じる" : "More controls / 詳細設定",
+                systemImage: showWheelDetails ? "chevron.up.circle.fill" : "chevron.down.circle"
+            )
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.secondary)
         }
+        .animation(.easeInOut(duration: 0.2), value: showWheelDetails)
+        .animation(.easeInOut(duration: 0.2), value: wheel)
     }
 
     private func zoneSelector(for wheel: WheelPos) -> some View {
@@ -798,7 +825,9 @@ struct MeasureView: View {
 
             manualEntrySection(for: wheel)
 
-            voiceMemoSection(for: wheel)
+            if settings.enableWheelVoiceInput {
+                voiceMemoSection(for: wheel)
+            }
         } else {
             historyLockedMessage()
         }
@@ -864,37 +893,17 @@ struct MeasureView: View {
     }
 
     private func pressureEntryCard(for wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top, spacing: 12) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Inner pressure (kPa)")
-                        .font(.headline)
-                    Text(title(wheel))
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            Capsule()
-                                .fill(Color.accentColor.opacity(0.12))
-                        )
-                        .accessibilityLabel("Tyre position \(title(wheel))")
-                }
+        VStack(alignment: .leading, spacing: 12) {
+            let manualText = manualPressureBinding(for: wheel).wrappedValue.trimmingCharacters(in: .whitespaces)
+            let existingPressure = vm.wheelPressures[wheel].map { String(format: "%.1f", $0) }
+            let displayText = !manualText.isEmpty ? manualText : (existingPressure ?? "")
+            let showPlaceholder = displayText.isEmpty
 
-                WheelQuadrantDiagram(selectedWheel: wheel)
-                    .frame(width: 88)
+            HStack(alignment: .center, spacing: 12) {
+                Text("I.P.")
+                    .font(.title3.weight(.semibold))
 
-                Spacer(minLength: 8)
-
-                if pressureSpeech.isRecording && pressureSpeech.currentWheel == wheel {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 8, height: 8)
-                        Text("Recording…")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                pressureValueButton(for: wheel, displayText: displayText, showPlaceholder: showPlaceholder)
 
                 Button {
                     commitManualPressure(for: wheel)
@@ -908,48 +917,17 @@ struct MeasureView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            let manualText = manualPressureBinding(for: wheel).wrappedValue.trimmingCharacters(in: .whitespaces)
-            let existingPressure = vm.wheelPressures[wheel].map { String(format: "%.1f", $0) }
-            let displayText = !manualText.isEmpty ? manualText : (existingPressure ?? "")
-            let showPlaceholder = displayText.isEmpty
-
-            Button {
-                activePressureWheel = wheel
-                Haptics.impactLight()
-            } label: {
-                HStack {
-                    if showPlaceholder {
-                        Text("Enter value / 例: \(Int(manualPressureDefault)) kPa")
-                            .foregroundStyle(Color.secondary.opacity(0.7))
-                            .italic()
-                    } else {
-                        Text("\(displayText) kPa")
-                            .font(.title3.monospacedDigit())
-                    }
-                    Spacer()
-                    Image(systemName: "keyboard")
+            if settings.enableWheelVoiceInput,
+               pressureSpeech.isRecording,
+               pressureSpeech.currentWheel == wheel {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.red)
+                        .frame(width: 8, height: 8)
+                    Text("Recording…")
+                        .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(.systemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Inner pressure value input")
-            .accessibilityHint("Opens keypad to edit pressure")
-
-            if showPlaceholder {
-                Text("Not saved yet / 未入力")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
 
             if activePressureWheel == wheel && canEditPressure {
@@ -969,47 +947,46 @@ struct MeasureView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
-            Stepper(value: manualPressureStepperBinding(for: wheel), in: manualPressureRange, step: manualPressureStep) {
-                Text("Adjust: \(manualPressureDisplay(for: wheel)) kPa")
-                    .monospacedDigit()
-            }
+            pressureAdjustRow(for: wheel)
 
-            HStack {
-                if pressureSpeech.isRecording && pressureSpeech.currentWheel == wheel {
-                    Button("Stop") {
-                        pressureSpeech.stop()
-                        let transcript = pressureSpeech.takeFinalText()
-                        applyPressureTranscript(transcript, to: wheel)
-                        if manualPressureError(for: wheel) == nil {
-                            activePressureWheel = nil
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                } else {
-                    Button {
-                        let (prevWheel, prevText) = pressureSpeech.stopAndTakeText()
-                        if let prevWheel, !prevText.isEmpty {
-                            applyPressureTranscript(prevText, to: prevWheel)
-                            if manualPressureError(for: prevWheel) == nil {
+            if settings.enableWheelVoiceInput {
+                HStack {
+                    if pressureSpeech.isRecording && pressureSpeech.currentWheel == wheel {
+                        Button("Stop") {
+                            pressureSpeech.stop()
+                            let transcript = pressureSpeech.takeFinalText()
+                            applyPressureTranscript(transcript, to: wheel)
+                            if manualPressureError(for: wheel) == nil {
                                 activePressureWheel = nil
                             }
                         }
-                        do {
-                            try pressureSpeech.start(for: wheel)
-                            Haptics.impactLight()
-                        } catch {
-                            if let error = error as? SpeechMemoManager.RecordingError {
-                                setManualPressureError(error.localizedDescription, for: wheel)
-                                setManualPressureSuccess(nil, for: wheel)
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Button {
+                            let (prevWheel, prevText) = pressureSpeech.stopAndTakeText()
+                            if let prevWheel, !prevText.isEmpty {
+                                applyPressureTranscript(prevText, to: prevWheel)
+                                if manualPressureError(for: prevWheel) == nil {
+                                    activePressureWheel = nil
+                                }
                             }
+                            do {
+                                try pressureSpeech.start(for: wheel)
+                                Haptics.impactLight()
+                            } catch {
+                                if let error = error as? SpeechMemoManager.RecordingError {
+                                    setManualPressureError(error.localizedDescription, for: wheel)
+                                    setManualPressureSuccess(nil, for: wheel)
+                                }
+                            }
+                        } label: {
+                            Label("Voice input", systemImage: "mic.fill")
                         }
-                    } label: {
-                        Label("Voice input", systemImage: "mic.fill")
+                        .buttonStyle(.bordered)
+                        .disabled(!pressureSpeech.isAuthorized)
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!pressureSpeech.isAuthorized)
+                    Spacer()
                 }
-                Spacer()
             }
 
             if let error = manualPressureError(for: wheel) {
@@ -1032,6 +1009,63 @@ struct MeasureView: View {
                 .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
         )
         .animation(.easeInOut(duration: 0.2), value: activePressureWheel == wheel)
+    }
+
+    private func pressureValueButton(for wheel: WheelPos, displayText: String, showPlaceholder: Bool) -> some View {
+        Button {
+            activePressureWheel = wheel
+            Haptics.impactLight()
+        } label: {
+            HStack {
+                if showPlaceholder {
+                    Text("ex) \(Int(manualPressureDefault))kPa")
+                        .foregroundStyle(Color.secondary.opacity(0.7))
+                        .italic()
+                } else {
+                    Text("\(displayText) kPa")
+                        .font(.title3.monospacedDigit())
+                }
+                Spacer()
+                Image(systemName: "keyboard")
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color(.systemBackground))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Inner pressure value input")
+        .accessibilityHint("Opens keypad to edit pressure")
+    }
+
+    private func pressureAdjustRow(for wheel: WheelPos) -> some View {
+        HStack(spacing: 10) {
+            pressureAdjustButton(title: "-5", delta: -5, for: wheel)
+            pressureAdjustButton(title: "-1", delta: -1, for: wheel)
+
+            Spacer(minLength: 12)
+
+            pressureAdjustButton(title: "+1", delta: 1, for: wheel)
+            pressureAdjustButton(title: "+5", delta: 5, for: wheel)
+        }
+    }
+
+    private func pressureAdjustButton(title: String, delta: Double, for wheel: WheelPos) -> some View {
+        Button(title) {
+            adjustManualPressure(for: wheel, delta: delta)
+        }
+        .buttonStyle(.bordered)
+        .font(.callout.weight(.semibold))
+        .frame(minWidth: 48)
+        .disabled(!canEditPressure)
     }
 
     private func manualZoneRow(for wheel: WheelPos, zone: Zone) -> some View {
@@ -1072,89 +1106,6 @@ struct MeasureView: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(.systemBackground).opacity(0.6)))
-    }
-
-    private struct WheelQuadrantDiagram: View {
-        let selectedWheel: WheelPos
-
-        var body: some View {
-            VStack(spacing: 6) {
-                Text("Wheel map / タイヤ位置")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                VStack(spacing: 4) {
-                    HStack(spacing: 4) {
-                        quadrant(.FL)
-                        quadrant(.FR)
-                    }
-                    HStack(spacing: 4) {
-                        quadrant(.RL)
-                        quadrant(.RR)
-                    }
-                }
-                .padding(6)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(.tertiarySystemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
-                )
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(diagramAccessibilityLabel)
-            .accessibilityHint("Highlights the selected wheel position")
-        }
-
-        @ViewBuilder
-        private func quadrant(_ wheel: WheelPos) -> some View {
-            let isSelected = wheel == selectedWheel
-            Text(shortLabel(for: wheel))
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(isSelected ? Color.white : Color.secondary)
-                .frame(width: 34, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: isSelected ? 2 : 1)
-                )
-        }
-
-        private func shortLabel(for wheel: WheelPos) -> String {
-            switch wheel {
-            case .FL: return "FL"
-            case .FR: return "FR"
-            case .RL: return "RL"
-            case .RR: return "RR"
-            }
-        }
-
-        private var diagramAccessibilityLabel: String {
-            "Wheel map / タイヤ位置 — \(fullTitle(for: selectedWheel)) selected (現在: \(fullTitleJP(for: selectedWheel)))"
-        }
-
-        private func fullTitle(for wheel: WheelPos) -> String {
-            switch wheel {
-            case .FL: return "Front Left"
-            case .FR: return "Front Right"
-            case .RL: return "Rear Left"
-            case .RR: return "Rear Right"
-            }
-        }
-
-        private func fullTitleJP(for wheel: WheelPos) -> String {
-            switch wheel {
-            case .FL: return "フロント左"
-            case .FR: return "フロント右"
-            case .RL: return "リア左"
-            case .RR: return "リア右"
-            }
-        }
     }
 
     private struct PressureKeypad: View {
@@ -1353,31 +1304,22 @@ struct MeasureView: View {
         )
     }
 
-    private func manualPressureStepperBinding(for wheel: WheelPos) -> Binding<Double> {
-        Binding(
-            get: {
-                if let text = manualPressureValues[wheel], let parsed = parseManualValue(text) {
-                    return min(max(parsed, manualPressureRange.lowerBound), manualPressureRange.upperBound)
-                }
-                if let existing = vm.wheelPressures[wheel] {
-                    return existing
-                }
-                return manualPressureDefault
-            },
-            set: { newValue in
-                updateManualPressureValue(String(format: "%.1f", newValue), for: wheel)
-            }
-        )
-    }
+    private func adjustManualPressure(for wheel: WheelPos, delta: Double) {
+        guard canEditPressure else { return }
 
-    private func manualPressureDisplay(for wheel: WheelPos) -> String {
-        if let text = manualPressureValues[wheel], !text.isEmpty {
-            return text
+        let rawText = manualPressureValues[wheel]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let currentValue: Double
+
+        if let parsed = parseManualValue(rawText) {
+            currentValue = parsed
+        } else if let existing = vm.wheelPressures[wheel] {
+            currentValue = existing
+        } else {
+            currentValue = manualPressureDefault
         }
-        if let existing = vm.wheelPressures[wheel] {
-            return String(format: "%.1f", existing)
-        }
-        return String(format: "%.0f", manualPressureDefault)
+
+        let clamped = min(max(currentValue + delta, manualPressureRange.lowerBound), manualPressureRange.upperBound)
+        updateManualPressureValue(String(format: "%.1f", clamped), for: wheel)
     }
 
     private func updateManualValue(_ value: String, for wheel: WheelPos, zone: Zone) {
@@ -1393,6 +1335,27 @@ struct MeasureView: View {
         manualPressureValues[wheel] = value
         setManualPressureError(nil, for: wheel)
         setManualPressureSuccess(nil, for: wheel)
+    }
+
+    private func hasPendingManualPressure(for wheel: WheelPos) -> Bool {
+        guard canEditPressure else { return false }
+
+        let trimmed = (manualPressureValues[wheel] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return false
+        }
+
+        guard let value = parseManualValue(trimmed) else {
+            return true
+        }
+
+        if let existing = vm.wheelPressures[wheel] {
+            if abs(existing - value) < 0.001 {
+                return false
+            }
+        }
+
+        return true
     }
 
     private func defaultManualValue(for wheel: WheelPos, zone: Zone) -> Double {
@@ -1518,6 +1481,11 @@ struct MeasureView: View {
         setManualPressureError(nil, for: wheel)
         setManualPressureSuccess(Date(), for: wheel)
         Haptics.success()
+    }
+
+    private func autoCommitManualPressureIfNeeded(for wheel: WheelPos) {
+        guard hasPendingManualPressure(for: wheel) else { return }
+        commitManualPressure(for: wheel)
     }
 
     private func parseManualValue(_ text: String) -> Double? {
@@ -1677,6 +1645,16 @@ struct MeasureView: View {
         let progress = autoStopLimit > 0 ? min(vm.elapsed / autoStopLimit, 1.0) : 0
 
         return Button {
+            if wheel != selectedWheel {
+                let currentWheel = selectedWheel
+                if hasPendingManualPressure(for: currentWheel) {
+                    autoCommitManualPressureIfNeeded(for: currentWheel)
+                    if manualPressureError(for: currentWheel) != nil {
+                        return
+                    }
+                }
+            }
+
             selectedWheel = wheel
             vm.tapCell(wheel: wheel, zone: zone)
             focusTick &+= 1

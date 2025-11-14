@@ -158,6 +158,15 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Voice Features") {
+                    Toggle("Enable tyre voice controls", isOn: $settings.enableWheelVoiceInput)
+
+                    Text("Turn ON to show voice input buttons and tyre voice memos in Measure.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
 
                 // 測定パラメータ
                 Section("Measurement") {

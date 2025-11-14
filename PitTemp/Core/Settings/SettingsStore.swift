@@ -44,6 +44,7 @@ final class SettingsStore: ObservableObject {
 
     // 自動補完や識別情報
     @AppStorage("pref.autofillDateTime") var autofillDateTime: Bool = true
+    @AppStorage("pref.enableWheelVoiceInput") var enableWheelVoiceInput: Bool = false
     @AppStorage("hr2500.id") var hr2500ID: String = ""
 
     // クラウド連携の有効/無効

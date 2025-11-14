@@ -686,17 +686,17 @@ struct MeasureView: View {
     }
 
     private var tyreControlsSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 16) {
+            selectedWheelSection(selectedWheel)
+
             wheelSelector
 
             zoneSelector(for: selectedWheel)
-
-            selectedWheelSection(selectedWheel)
         }
     }
 
     private func selectedWheelSection(_ wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 16) {
             ZStack(alignment: .topLeading) {
                 pressureEntryCard(for: wheel)
 
@@ -709,6 +709,10 @@ struct MeasureView: View {
             if isHistoryMode && !historyEditingEnabled {
                 historyLockedFootnote()
             }
+
+            wheelDetailCard(for: wheel)
+
+            Divider()
 
             DisclosureGroup(isExpanded: $showWheelDetails) {
                 VStack(alignment: .leading, spacing: 14) {
@@ -725,10 +729,6 @@ struct MeasureView: View {
                             voiceMemoSection(for: wheel)
                         }
                     }
-
-                    Divider()
-
-                    wheelDetailCard(for: wheel)
                 }
             } label: {
                 Label(

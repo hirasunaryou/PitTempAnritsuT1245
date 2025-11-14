@@ -43,24 +43,12 @@ struct MeasureView: View {
     @State private var reportSnapshot: SessionSnapshot?
     @State private var reportSummary: SessionHistorySummary?
     @State private var isInlineMetaEditing = false
-    @FocusState private var focusedMetaField: MetaField?
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
     private let manualPressureStep: Double = 1
     private let manualPressureDefault: Double = 210
     private let zoneButtonHeight: CGFloat = 112
-
-    private enum MetaField: Hashable {
-        case track
-        case date
-        case time
-        case lap
-        case car
-        case driver
-        case tyre
-        case checker
-    }
 
     private var isHistoryMode: Bool { vm.loadedHistorySummary != nil }
     private var isManualInteractionActive: Bool {
@@ -387,20 +375,20 @@ struct MeasureView: View {
                     .buttonStyle(.bordered)
             }
 
-            EditableMetaRow(label: "TRACK", text: $vm.meta.track, field: .track)
-            EditableMetaRow(label: "DATE", text: $vm.meta.date, field: .date, keyboard: .numbersAndPunctuation)
+            editableMetaRow(label: "TRACK", text: $vm.meta.track)
+            editableMetaRow(label: "DATE", text: $vm.meta.date, keyboard: .numbersAndPunctuation)
 
             HStack(alignment: .top, spacing: 12) {
-                EditableMetaRow(label: "TIME", text: $vm.meta.time, field: .time, keyboard: .numbersAndPunctuation)
+                editableMetaRow(label: "TIME", text: $vm.meta.time, keyboard: .numbersAndPunctuation)
                     .frame(maxWidth: .infinity)
-                EditableMetaRow(label: "LAP", text: $vm.meta.lap, field: .lap, keyboard: .numberPad)
+                editableMetaRow(label: "LAP", text: $vm.meta.lap, keyboard: .numberPad)
                     .frame(maxWidth: .infinity)
             }
 
-            EditableMetaRow(label: "CAR", text: $vm.meta.car, field: .car)
-            EditableMetaRow(label: "DRIVER", text: $vm.meta.driver, field: .driver)
-            EditableMetaRow(label: "TYRE", text: $vm.meta.tyre, field: .tyre)
-            EditableMetaRow(label: "CHECKER", text: $vm.meta.checker, field: .checker)
+            editableMetaRow(label: "CAR", text: $vm.meta.car)
+            editableMetaRow(label: "DRIVER", text: $vm.meta.driver)
+            editableMetaRow(label: "TYRE", text: $vm.meta.tyre)
+            editableMetaRow(label: "CHECKER", text: $vm.meta.checker)
         }
     }
 
@@ -556,9 +544,8 @@ struct MeasureView: View {
         .padding(.vertical, 2)
     }
 
-    private func EditableMetaRow(label: String,
+    private func editableMetaRow(label: String,
                                  text: Binding<String>,
-                                 field: MetaField,
                                  keyboard: UIKeyboardType = .default) -> some View {
         HStack(spacing: 12) {
             Text(label)
@@ -581,9 +568,6 @@ struct MeasureView: View {
                         .stroke(Color.secondary.opacity(0.12))
                 )
                 .keyboardType(keyboard)
-                .focused($focusedMetaField, equals: field)
-                .submitLabel(field == .checker ? .done : .next)
-                .onSubmit { focusNext(after: field) }
         }
     }
 
@@ -592,38 +576,18 @@ struct MeasureView: View {
         withAnimation(.easeInOut(duration: 0.2)) {
             isInlineMetaEditing = true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-            if isInlineMetaEditing { focusedMetaField = .track }
-        }
     }
 
     private func finishInlineMetaEditing() {
         guard isInlineMetaEditing else { return }
-        focusedMetaField = nil
+        dismissKeyboard()
         withAnimation(.easeInOut(duration: 0.2)) {
             isInlineMetaEditing = false
         }
     }
 
-    private func focusNext(after field: MetaField) {
-        switch field {
-        case .track:
-            focusedMetaField = .date
-        case .date:
-            focusedMetaField = .time
-        case .time:
-            focusedMetaField = .lap
-        case .lap:
-            focusedMetaField = .car
-        case .car:
-            focusedMetaField = .driver
-        case .driver:
-            focusedMetaField = .tyre
-        case .tyre:
-            focusedMetaField = .checker
-        case .checker:
-            finishInlineMetaEditing()
-        }
+    private func dismissKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 
     private var wheelSelector: some View {

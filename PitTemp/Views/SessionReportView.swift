@@ -218,7 +218,7 @@ struct SessionReportView: View {
             value = summary.date.ifEmpty("-")
         }
 
-        VStack(alignment: .leading, spacing: 3) {
+        return VStack(alignment: .leading, spacing: 3) {
             Text(title)
                 .font(.system(size: layout.metadataTitleSize, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.5))
@@ -256,6 +256,7 @@ struct SessionReportView: View {
         }
         .padding(layout.tyreMatrixPadding)
         .background(cardBackground(cornerRadius: layout.tyreMatrixCornerRadius))
+        .layoutPriority(3)
     }
 
     private func wheelCard(for wheel: WheelPos, layout: LayoutProfile) -> some View {
@@ -282,16 +283,17 @@ struct SessionReportView: View {
                                 .font(.system(size: layout.infoLabelSize, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.6))
                                 .multilineTextAlignment(.center)
-                            ViewThatFits {
-                                Text(summary.formattedPressure(for: wheel))
-                                    .font(.system(size: layout.pressureFontSize, weight: .bold, design: .rounded))
-                                Text(summary.formattedPressure(for: wheel))
-                                    .font(.system(size: layout.pressureFallbackFontSize, weight: .bold, design: .rounded))
-                            }
+                            adaptiveValueText(
+                                summary.formattedPressure(for: wheel),
+                                fonts: [
+                                    layout.pressureFontSize,
+                                    layout.pressureFallbackFontSize,
+                                    layout.pressureSecondaryFallbackFontSize
+                                ],
+                                weight: .bold,
+                                design: .rounded
+                            )
                             .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.9)
-                            .monospacedDigit()
                         }
                         .frame(maxWidth: .infinity)
                     }
@@ -414,6 +416,40 @@ struct SessionReportView: View {
         language == .english ? english : japanese
     }
 
+    @ViewBuilder
+    private func adaptiveValueText(
+        _ text: String,
+        fonts: [CGFloat],
+        weight: Font.Weight,
+        design: Font.Design
+    ) -> some View {
+        ViewThatFits {
+            if let first = fonts.first {
+                Text(text)
+                    .font(.system(size: first, weight: weight, design: design))
+            }
+
+            if fonts.count > 1 {
+                Text(text)
+                    .font(.system(size: fonts[1], weight: weight, design: design))
+            }
+
+            if fonts.count > 2 {
+                Text(text)
+                    .font(.system(size: fonts[2], weight: weight, design: design))
+            }
+
+            if fonts.isEmpty {
+                Text(text)
+                    .font(.system(size: 12, weight: weight, design: design))
+            }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.35)
+        .allowsTightening(true)
+        .monospacedDigit()
+    }
+
     private func languagePicker(layout: LayoutProfile) -> some View {
         Picker(localized("Language", "言語"), selection: Binding(get: { languageRaw }, set: { languageRaw = $0 })) {
             Text("EN").tag(ReportLanguage.english.rawValue)
@@ -461,8 +497,10 @@ struct SessionReportView: View {
         let zoneTitleSize: CGFloat
         let temperatureFontSize: CGFloat
         let temperatureFallbackFontSize: CGFloat
+        let temperatureSecondaryFallbackFontSize: CGFloat
         let pressureFontSize: CGFloat
         let pressureFallbackFontSize: CGFloat
+        let pressureSecondaryFallbackFontSize: CGFloat
         let wheelMemoFontSize: CGFloat
         let wheelMemoLineLimit: Int
         let wheelBadgeSpacing: CGFloat
@@ -543,8 +581,10 @@ struct SessionReportView: View {
         zoneTitleSize: 13,
         temperatureFontSize: 56,
         temperatureFallbackFontSize: 48,
+        temperatureSecondaryFallbackFontSize: 42,
         pressureFontSize: 28,
         pressureFallbackFontSize: 24,
+        pressureSecondaryFallbackFontSize: 20,
         wheelMemoFontSize: 12,
         wheelMemoLineLimit: 2,
         wheelBadgeSpacing: 8,
@@ -601,8 +641,10 @@ struct SessionReportView: View {
         zoneTitleSize: 12,
         temperatureFontSize: 38,
         temperatureFallbackFontSize: 32,
+        temperatureSecondaryFallbackFontSize: 28,
         pressureFontSize: 24,
         pressureFallbackFontSize: 20,
+        pressureSecondaryFallbackFontSize: 18,
         wheelMemoFontSize: 12,
         wheelMemoLineLimit: 2,
         wheelBadgeSpacing: 6,
@@ -659,8 +701,10 @@ struct SessionReportView: View {
         zoneTitleSize: 11,
         temperatureFontSize: 34,
         temperatureFallbackFontSize: 30,
+        temperatureSecondaryFallbackFontSize: 26,
         pressureFontSize: 22,
         pressureFallbackFontSize: 19,
+        pressureSecondaryFallbackFontSize: 17,
         wheelMemoFontSize: 11.5,
         wheelMemoLineLimit: 2,
         wheelBadgeSpacing: 6,
@@ -717,8 +761,10 @@ struct SessionReportView: View {
         zoneTitleSize: 10,
         temperatureFontSize: 31,
         temperatureFallbackFontSize: 27,
+        temperatureSecondaryFallbackFontSize: 23,
         pressureFontSize: 19,
         pressureFallbackFontSize: 17,
+        pressureSecondaryFallbackFontSize: 15,
         wheelMemoFontSize: 11,
         wheelMemoLineLimit: 1,
         wheelBadgeSpacing: 5,
@@ -766,17 +812,17 @@ struct SessionReportView: View {
                             Text(localizedZoneTitle(for: zone))
                                 .font(.system(size: layout.zoneTitleSize, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.55))
-                            ViewThatFits {
-                                Text(summary.formattedTemperature(for: wheel, zone: zone))
-                                    .font(.system(size: layout.temperatureFontSize, weight: .heavy, design: .rounded))
-                                Text(summary.formattedTemperature(for: wheel, zone: zone))
-                                    .font(.system(size: layout.temperatureFallbackFontSize, weight: .heavy, design: .rounded))
-                            }
+                            adaptiveValueText(
+                                summary.formattedTemperature(for: wheel, zone: zone),
+                                fonts: [
+                                    layout.temperatureFontSize,
+                                    layout.temperatureFallbackFontSize,
+                                    layout.temperatureSecondaryFallbackFontSize
+                                ],
+                                weight: .heavy,
+                                design: .rounded
+                            )
                             .foregroundStyle(.white)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.9)
-                            .fixedSize()
-                            .monospacedDigit()
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -796,16 +842,17 @@ struct SessionReportView: View {
                         Image(systemName: "gauge")
                             .font(.system(size: layout.infoLabelSize, weight: .semibold))
                             .foregroundStyle(Color.white.opacity(0.65))
-                        ViewThatFits {
-                            Text(pressureText)
-                                .font(.system(size: layout.pressureFontSize, weight: .semibold, design: .rounded))
-                            Text(pressureText)
-                                .font(.system(size: layout.pressureFallbackFontSize, weight: .semibold, design: .rounded))
-                        }
+                        adaptiveValueText(
+                            pressureText,
+                            fonts: [
+                                layout.pressureFontSize,
+                                layout.pressureFallbackFontSize,
+                                layout.pressureSecondaryFallbackFontSize
+                            ],
+                            weight: .semibold,
+                            design: .rounded
+                        )
                         .foregroundStyle(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.9)
-                        .monospacedDigit()
                     }
                 }
 

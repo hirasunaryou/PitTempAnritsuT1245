@@ -9,15 +9,27 @@ struct SessionReportView: View {
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy/MM/dd"
         return formatter
     }()
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "h:mm a"
+        formatter.amSymbol = "AM"
+        formatter.pmSymbol = "PM"
+        return formatter
+    }()
+
+    private static let manualDateParser: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy/MM/dd HH:mm"
         return formatter
     }()
 
@@ -42,8 +54,14 @@ struct SessionReportView: View {
     private var language: ReportLanguage { ReportLanguage(rawValue: languageRaw) ?? .english }
 
     private var displayedDate: String {
-        let base = summary.date.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !base.isEmpty { return base }
+        if let start = measurementStart {
+            return Self.dateFormatter.string(from: start)
+        }
+
+        if let manual = sanitizedManualDate(from: summary.date) {
+            return manual
+        }
+
         return Self.dateFormatter.string(from: summary.createdAt)
     }
 
@@ -73,10 +91,14 @@ struct SessionReportView: View {
     }
 
     private var displayedTime: String {
-        if let start = measurementStart {
-            return Self.timeFormatter.string(from: start)
-        }
-        return Self.timeFormatter.string(from: summary.createdAt)
+        let date = measurementStart ?? summary.createdAt
+        let time = Self.timeFormatter.string(from: date)
+        let zone = timeZoneAbbreviation(for: date)
+        return zone.isEmpty ? time : "\(time) \(zone)"
+    }
+
+    private func timeZoneAbbreviation(for date: Date) -> String {
+        TimeZone.current.abbreviation(for: date) ?? TimeZone.current.identifier
     }
 
     private var memoItems: [(WheelPos, String)] {
@@ -85,6 +107,35 @@ struct SessionReportView: View {
                   !memo.isEmpty else { return nil }
             return (wheel, memo)
         }
+    }
+
+    private func sanitizedManualDate(from raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let parsed = Self.manualDateParser.date(from: trimmed) {
+            return Self.dateFormatter.string(from: parsed)
+        }
+
+        var components = trimmed
+        if let range = components.range(of: "T") {
+            components = String(components[..<range.lowerBound])
+        }
+        if let range = components.range(of: " ") {
+            components = String(components[..<range.lowerBound])
+        }
+        if let range = components.range(of: ",") {
+            components = String(components[..<range.lowerBound])
+        }
+        if let range = components.range(of: "\n") {
+            components = String(components[..<range.lowerBound])
+        }
+        if let range = components.range(of: "\r") {
+            components = String(components[..<range.lowerBound])
+        }
+
+        let sanitized = components.trimmingCharacters(in: .whitespacesAndNewlines)
+        return sanitized.isEmpty ? nil : sanitized
     }
 
     var body: some View {
@@ -183,7 +234,7 @@ struct SessionReportView: View {
             ])
             fieldRow(metrics: metrics, fields: [
                 .init(label: localized("Tyre", "タイヤ"), value: displayedTyre),
-                .init(label: localized("Session ID", "セッション ID"), value: String(snapshot.sessionID.uuidString.prefix(8)) + "…")
+                .init(label: localized("Session ID", "セッション ID"), value: snapshot.sessionID.uuidString, style: .monospaced)
             ])
         }
     }
@@ -199,11 +250,18 @@ struct SessionReportView: View {
                         .frame(height: 1)
                         .frame(maxWidth: .infinity)
                         .foregroundStyle(Color.black.opacity(0.15))
-                    Text(field.value.ifEmpty("-"))
-                        .font(.system(size: metrics.fieldValueSize, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.black.opacity(0.85))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
+                    Group {
+                        if field.style == .monospaced {
+                            Text(field.value.ifEmpty("-"))
+                                .monospacedDigit()
+                        } else {
+                            Text(field.value.ifEmpty("-"))
+                        }
+                    }
+                    .font(.system(size: metrics.fieldValueSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.black.opacity(0.85))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.3)
                 }
             }
         }
@@ -235,10 +293,8 @@ struct SessionReportView: View {
                     .font(.system(size: metrics.wheelLabelSize, weight: .bold, design: .rounded))
                     .foregroundStyle(Color.black.opacity(0.8))
                 Spacer()
-                if let pressure = pressureText(for: wheel) {
-                    Text(pressure)
-                        .font(.system(size: metrics.pressureFontSize, weight: .semibold, design: .rounded))
-                        .foregroundStyle(Color.black.opacity(0.7))
+                if let pressure = pressureValue(for: wheel) {
+                    pressureDisplay(for: pressure, metrics: metrics)
                 }
             }
 
@@ -255,6 +311,7 @@ struct SessionReportView: View {
                         Text(temperatureText(for: wheel, zone: zone))
                             .font(.system(size: metrics.temperatureFontSize, weight: .heavy, design: .rounded))
                             .foregroundStyle(Color.black.opacity(0.9))
+                            .monospacedDigit()
                             .minimumScaleFactor(0.6)
                             .lineLimit(1)
                     }
@@ -307,11 +364,22 @@ struct SessionReportView: View {
         return Self.temperatureFormatter.string(from: NSNumber(value: value)) ?? "-"
     }
 
-    private func pressureText(for wheel: WheelPos) -> String? {
+    private func pressureValue(for wheel: WheelPos) -> Double? {
         guard let value = summary.wheelPressures[wheel], value.isFinite else { return nil }
-        let text = Self.pressureFormatter.string(from: NSNumber(value: value)) ?? ""
-        if text.isEmpty { return nil }
-        return text + " kPa"
+        return value
+    }
+
+    private func pressureDisplay(for value: Double, metrics: LayoutMetrics) -> some View {
+        let number = Self.pressureFormatter.string(from: NSNumber(value: value))?.ifEmpty("") ?? ""
+        return HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Text(number.ifEmpty("-"))
+                .font(.system(size: metrics.pressureValueFontSize, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.black.opacity(0.85))
+                .monospacedDigit()
+            Text("kPa")
+                .font(.system(size: metrics.pressureUnitFontSize, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.6))
+        }
     }
 
     private func memoText(for wheel: WheelPos) -> String? {
@@ -323,27 +391,27 @@ struct SessionReportView: View {
 
     private func localizedWheelTitle(for wheel: WheelPos) -> String {
         switch wheel {
-        case .FL: return localized("Front Left", "フロント左")
-        case .FR: return localized("Front Right", "フロント右")
-        case .RL: return localized("Rear Left", "リア左")
-        case .RR: return localized("Rear Right", "リア右")
+        case .FL: return language == .english ? "FRONT L" : "Fr-L"
+        case .FR: return language == .english ? "FRONT R" : "Fr-R"
+        case .RL: return language == .english ? "REAR L" : "Re-L"
+        case .RR: return language == .english ? "REAR R" : "Re-R"
         }
     }
 
     private func localizedWheelShort(for wheel: WheelPos) -> String {
         switch wheel {
-        case .FL: return localized("FL", "FL")
-        case .FR: return localized("FR", "FR")
-        case .RL: return localized("RL", "RL")
-        case .RR: return localized("RR", "RR")
+        case .FL: return language == .english ? "FL" : "Fr-L"
+        case .FR: return language == .english ? "FR" : "Fr-R"
+        case .RL: return language == .english ? "RL" : "Re-L"
+        case .RR: return language == .english ? "RR" : "Re-R"
         }
     }
 
     private func localizedZoneTitle(for zone: Zone) -> String {
         switch zone {
-        case .OUT: return localized("OUT", "外")
-        case .CL: return localized("MID", "中")
-        case .IN: return localized("IN", "内")
+        case .OUT: return localized("Out", "Out")
+        case .CL: return localized("CL", "CL")
+        case .IN: return localized("In", "In")
         }
     }
 
@@ -354,9 +422,21 @@ struct SessionReportView: View {
     private var zoneOrder: [Zone] { [.OUT, .CL, .IN] }
 
     private struct Field: Identifiable {
+        enum Style {
+            case standard
+            case monospaced
+        }
+
         let id = UUID()
         let label: String
         let value: String
+        let style: Style
+
+        init(label: String, value: String, style: Style = .standard) {
+            self.label = label
+            self.value = value
+            self.style = style
+        }
     }
 
     private struct LayoutMetrics {
@@ -377,7 +457,8 @@ struct SessionReportView: View {
         let zoneInnerSpacing: CGFloat
         let wheelLabelSize: CGFloat
         let temperatureFontSize: CGFloat
-        let pressureFontSize: CGFloat
+        let pressureValueFontSize: CGFloat
+        let pressureUnitFontSize: CGFloat
         let zoneLabelSize: CGFloat
         let memoFontSize: CGFloat
         let memoSpacing: CGFloat
@@ -413,7 +494,8 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 4
                 wheelLabelSize = 14
                 temperatureFontSize = 24
-                pressureFontSize = 13
+                pressureValueFontSize = 20
+                pressureUnitFontSize = 12
                 zoneLabelSize = 11
                 memoFontSize = 11
                 memoSpacing = 6
@@ -445,7 +527,8 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 6
                 wheelLabelSize = 16
                 temperatureFontSize = 28
-                pressureFontSize = 14
+                pressureValueFontSize = 22
+                pressureUnitFontSize = 13
                 zoneLabelSize = 12
                 memoFontSize = 12
                 memoSpacing = 8
@@ -477,7 +560,8 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 6
                 wheelLabelSize = 18
                 temperatureFontSize = 32
-                pressureFontSize = 15
+                pressureValueFontSize = 24
+                pressureUnitFontSize = 14
                 zoneLabelSize = 13
                 memoFontSize = 13
                 memoSpacing = 10

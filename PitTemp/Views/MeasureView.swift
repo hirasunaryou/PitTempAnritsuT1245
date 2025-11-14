@@ -39,6 +39,9 @@ struct MeasureView: View {
     @State private var historyError: String? = nil
     @State private var historyEditingEnabled = false
     @State private var activePressureWheel: WheelPos? = nil
+    @State private var showReport = false
+    @State private var reportSummary: SessionHistorySummary? = nil
+    @State private var reportSnapshot: SessionSnapshot? = nil
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
@@ -121,7 +124,12 @@ struct MeasureView: View {
                     appTitleHeader
                 }
 
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        presentSessionReport()
+                    } label: {
+                        Label("Report", systemImage: "doc.richtext")
+                    }
                     Button("Edit") { showMetaEditor = true }
                 }
             }
@@ -150,6 +158,13 @@ struct MeasureView: View {
                     onClose: { showHistorySheet = false }
                 )
                 .presentationDetents([.medium, .large])
+            }
+            .sheet(isPresented: $showReport) {
+                if let reportSummary, let reportSnapshot {
+                    NavigationStack {
+                        SessionReportView(summary: reportSummary, snapshot: reportSnapshot)
+                    }
+                }
             }
         }
         .background(historyBackgroundColor.ignoresSafeArea())
@@ -1861,6 +1876,14 @@ struct MeasureView: View {
         let core = Self.captureTimeFormatter.string(from: date)
         let abbreviation = TimeZone.current.abbreviation() ?? ""
         return abbreviation.isEmpty ? core : core + " " + abbreviation
+    }
+
+    private func presentSessionReport() {
+        let snapshot = vm.makeLiveSnapshotForReport()
+        let summary = vm.makeLiveSummary(for: snapshot)
+        reportSnapshot = snapshot
+        reportSummary = summary
+        showReport = true
     }
 
     private func loadHistorySummary(_ summary: SessionHistorySummary) {

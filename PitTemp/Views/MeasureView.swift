@@ -39,7 +39,9 @@ struct MeasureView: View {
     @State private var historyError: String? = nil
     @State private var historyEditingEnabled = false
     @State private var activePressureWheel: WheelPos? = nil
-    @State private var showSessionReport = false
+    @State private var showReport = false
+    @State private var reportSnapshot: SessionSnapshot?
+    @State private var reportSummary: SessionHistorySummary?
     @State private var isInlineMetaEditing = false
     @FocusState private var focusedMetaField: MetaField?
 
@@ -142,20 +144,13 @@ struct MeasureView: View {
                     Button {
                         presentSessionReport()
                     } label: {
-                        Label("Report", systemImage: "doc.richtext")
+                        Label("Report / レポート", systemImage: "doc.richtext")
                     }
                     Button("Edit") {
                         finishInlineMetaEditing()
                         showMetaEditor = true
                     }
                         .disabled(!canEditMeta)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSessionReport = true
-                    } label: {
-                        Label("Report / レポート", systemImage: "doc.text.image")
-                    }
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -189,9 +184,13 @@ struct MeasureView: View {
                 )
                 .presentationDetents([.medium, .large])
             }
-            .sheet(isPresented: $showSessionReport) {
-                SessionReportView()
-                    .environmentObject(vm)
+            .sheet(isPresented: $showReport, onDismiss: clearReportPreview) {
+                if let snapshot = reportSnapshot, let summary = reportSummary {
+                    LiveReportPreview(snapshot: snapshot, summary: summary)
+                } else {
+                    ProgressView()
+                        .padding()
+                }
             }
         }
         .background(historyBackgroundColor.ignoresSafeArea())
@@ -2020,11 +2019,17 @@ struct MeasureView: View {
     }
 
     private func presentSessionReport() {
+        finishInlineMetaEditing()
         let snapshot = vm.makeLiveSnapshotForReport()
         let summary = vm.makeLiveSummary(for: snapshot)
         reportSnapshot = snapshot
         reportSummary = summary
         showReport = true
+    }
+
+    private func clearReportPreview() {
+        reportSnapshot = nil
+        reportSummary = nil
     }
 
     private func loadHistorySummary(_ summary: SessionHistorySummary) {
@@ -2431,6 +2436,21 @@ struct MeasureView: View {
             UIActivityViewController(activityItems: items, applicationActivities: nil)
         }
         func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
+    }
+
+    private struct LiveReportPreview: View {
+        @StateObject private var reportVM: SessionViewModel
+
+        init(snapshot: SessionSnapshot, summary: SessionHistorySummary) {
+            let viewModel = SessionViewModel()
+            viewModel.loadHistorySnapshot(snapshot, summary: summary)
+            _reportVM = StateObject(wrappedValue: viewModel)
+        }
+
+        var body: some View {
+            SessionReportView()
+                .environmentObject(reportVM)
+        }
     }
 
 

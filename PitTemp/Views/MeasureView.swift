@@ -40,6 +40,8 @@ struct MeasureView: View {
     @State private var historyEditingEnabled = false
     @State private var activePressureWheel: WheelPos? = nil
     @State private var showSessionReport = false
+    @State private var isInlineMetaEditing = false
+    @FocusState private var focusedMetaField: MetaField?
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
@@ -47,12 +49,26 @@ struct MeasureView: View {
     private let manualPressureDefault: Double = 210
     private let zoneButtonHeight: CGFloat = 112
 
+    private enum MetaField: Hashable {
+        case track
+        case date
+        case time
+        case lap
+        case car
+        case driver
+        case tyre
+        case checker
+    }
+
     private var isHistoryMode: Bool { vm.loadedHistorySummary != nil }
     private var isManualInteractionActive: Bool {
         if isHistoryMode { return historyEditingEnabled }
         return isManualMode
     }
     private var canEditPressure: Bool {
+        !isHistoryMode || historyEditingEnabled
+    }
+    private var canEditMeta: Bool {
         !isHistoryMode || historyEditingEnabled
     }
     private var historyBackgroundColor: Color {
@@ -95,7 +111,7 @@ struct MeasureView: View {
                     }
 
                     sectionCard {
-                        headerReadOnly
+                        metaSection
                     }
 
                     sectionCard {
@@ -128,7 +144,11 @@ struct MeasureView: View {
                     } label: {
                         Label("Report", systemImage: "doc.richtext")
                     }
-                    Button("Edit") { showMetaEditor = true }
+                    Button("Edit") {
+                        finishInlineMetaEditing()
+                        showMetaEditor = true
+                    }
+                        .disabled(!canEditMeta)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -136,6 +156,11 @@ struct MeasureView: View {
                     } label: {
                         Label("Report / レポート", systemImage: "doc.text.image")
                     }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { finishInlineMetaEditing() }
+                        .disabled(!isInlineMetaEditing)
                 }
             }
             .sheet(isPresented: $showMetaEditor) {
@@ -237,12 +262,14 @@ struct MeasureView: View {
                 syncManualPressureDefaults(for: selectedWheel)
             } else {
                 activePressureWheel = nil
+                if isHistoryMode { finishInlineMetaEditing() }
             }
         }
         .onChange(of: vm.loadedHistorySummary) { _, summary in
             deactivateHistoryEditing()
             if summary != nil {
                 isManualMode = false
+                finishInlineMetaEditing()
             }
         }
         .onChange(of: showHistorySheet) { _, presenting in
@@ -260,6 +287,7 @@ struct MeasureView: View {
                 syncManualMemo(for: .FL)
             }
             syncManualPressureDefaults(for: .FL)
+            finishInlineMetaEditing()
         }
         .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
             if let url = note.userInfo?["url"] as? URL {
@@ -322,6 +350,19 @@ struct MeasureView: View {
 
     private var topStatusRow: some View { connectBar }
 
+    private var metaSection: some View {
+        Group {
+            if isInlineMetaEditing {
+                inlineMetaEditor
+            } else {
+                headerReadOnly
+                    .contentShape(Rectangle())
+                    .onTapGesture { startInlineMetaEditing() }
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: isInlineMetaEditing)
+    }
+
     private func sectionCard<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -334,6 +375,34 @@ struct MeasureView: View {
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(Color.secondary.opacity(0.08))
             )
+    }
+
+    private var inlineMetaEditor: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Session meta")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Done") { finishInlineMetaEditing() }
+                    .buttonStyle(.bordered)
+            }
+
+            EditableMetaRow(label: "TRACK", text: $vm.meta.track, field: .track)
+            EditableMetaRow(label: "DATE", text: $vm.meta.date, field: .date, keyboard: .numbersAndPunctuation)
+
+            HStack(alignment: .top, spacing: 12) {
+                EditableMetaRow(label: "TIME", text: $vm.meta.time, field: .time, keyboard: .numbersAndPunctuation)
+                    .frame(maxWidth: .infinity)
+                EditableMetaRow(label: "LAP", text: $vm.meta.lap, field: .lap, keyboard: .numberPad)
+                    .frame(maxWidth: .infinity)
+            }
+
+            EditableMetaRow(label: "CAR", text: $vm.meta.car, field: .car)
+            EditableMetaRow(label: "DRIVER", text: $vm.meta.driver, field: .driver)
+            EditableMetaRow(label: "TYRE", text: $vm.meta.tyre, field: .tyre)
+            EditableMetaRow(label: "CHECKER", text: $vm.meta.checker, field: .checker)
+        }
     }
 
     @ViewBuilder
@@ -486,6 +555,76 @@ struct MeasureView: View {
                 .font(.headline)
         }
         .padding(.vertical, 2)
+    }
+
+    private func EditableMetaRow(label: String,
+                                 text: Binding<String>,
+                                 field: MetaField,
+                                 keyboard: UIKeyboardType = .default) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 16)
+
+            TextField(label, text: text)
+                .multilineTextAlignment(.trailing)
+                .textFieldStyle(.plain)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(Color(.secondarySystemBackground))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.12))
+                )
+                .keyboardType(keyboard)
+                .focused($focusedMetaField, equals: field)
+                .submitLabel(field == .checker ? .done : .next)
+                .onSubmit { focusNext(after: field) }
+        }
+    }
+
+    private func startInlineMetaEditing() {
+        guard canEditMeta, !isInlineMetaEditing else { return }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isInlineMetaEditing = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            if isInlineMetaEditing { focusedMetaField = .track }
+        }
+    }
+
+    private func finishInlineMetaEditing() {
+        guard isInlineMetaEditing else { return }
+        focusedMetaField = nil
+        withAnimation(.easeInOut(duration: 0.2)) {
+            isInlineMetaEditing = false
+        }
+    }
+
+    private func focusNext(after field: MetaField) {
+        switch field {
+        case .track:
+            focusedMetaField = .date
+        case .date:
+            focusedMetaField = .time
+        case .time:
+            focusedMetaField = .lap
+        case .lap:
+            focusedMetaField = .car
+        case .car:
+            focusedMetaField = .driver
+        case .driver:
+            focusedMetaField = .tyre
+        case .tyre:
+            focusedMetaField = .checker
+        case .checker:
+            finishInlineMetaEditing()
+        }
     }
 
     private var wheelSelector: some View {

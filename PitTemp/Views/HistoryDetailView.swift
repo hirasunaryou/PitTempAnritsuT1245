@@ -78,9 +78,7 @@ struct HistoryDetailView: View {
         }
         .sheet(isPresented: $showReport) {
             if let snapshot {
-                NavigationStack {
-                    SessionReportView(summary: summary, snapshot: snapshot)
-                }
+                HistoryReportPreview(summary: summary, snapshot: snapshot)
             }
         }
     }
@@ -231,5 +229,26 @@ struct HistoryDetailView: View {
     private func displayValue(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "-" : trimmed
+    }
+}
+
+private struct HistoryReportPreview: View {
+    let summary: SessionHistorySummary
+    let snapshot: SessionSnapshot
+
+    @StateObject private var reportVM: SessionViewModel
+
+    init(summary: SessionHistorySummary, snapshot: SessionSnapshot) {
+        self.summary = summary
+        self.snapshot = snapshot
+
+        let viewModel = SessionViewModel()
+        viewModel.loadHistorySnapshot(snapshot, summary: summary)
+        _reportVM = StateObject(wrappedValue: viewModel)
+    }
+
+    var body: some View {
+        SessionReportView()
+            .environmentObject(reportVM)
     }
 }

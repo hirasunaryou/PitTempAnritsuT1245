@@ -11,6 +11,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
     let driver: String
     let tyre: String
     let lap: String
+    let checker: String
     let resultCount: Int
     let zonePeaks: [WheelPos: [Zone: Double]]
     let wheelPressures: [WheelPos: Double]
@@ -81,6 +82,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
             date,
             car,
             driver,
+            checker,
             tyre,
             lap,
             sessionID.uuidString,
@@ -119,6 +121,55 @@ struct SessionHistorySummary: Identifiable, Equatable {
         formatter.timeStyle = .short
         return formatter
     }()
+
+    static func zonePeaks(from results: [MeasureResult]) -> [WheelPos: [Zone: Double]] {
+        var matrix: [WheelPos: [Zone: (Date, Double)]] = [:]
+        for result in results {
+            guard result.peakC.isFinite else { continue }
+            var wheelMap = matrix[result.wheel, default: [:]]
+            if let existing = wheelMap[result.zone], existing.0 >= result.endedAt {
+                continue
+            }
+            wheelMap[result.zone] = (result.endedAt, result.peakC)
+            matrix[result.wheel] = wheelMap
+        }
+
+        var peaks: [WheelPos: [Zone: Double]] = [:]
+        for (wheel, zoneMap) in matrix {
+            var wheelPeaks: [Zone: Double] = [:]
+            for (zone, record) in zoneMap {
+                wheelPeaks[zone] = record.1
+            }
+            peaks[wheel] = wheelPeaks
+        }
+        return peaks
+    }
+
+    static func makeLiveSummary(from snapshot: SessionSnapshot, isFromCurrentDevice: Bool = true) -> SessionHistorySummary {
+        let placeholderDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let filename = "pittemp-live-\(snapshot.sessionID.uuidString).json"
+        let placeholderURL = placeholderDirectory.appendingPathComponent(filename, isDirectory: false)
+
+        return SessionHistorySummary(
+            fileURL: placeholderURL,
+            createdAt: snapshot.createdAt,
+            sessionBeganAt: snapshot.sessionBeganAt,
+            sessionID: snapshot.sessionID,
+            track: snapshot.meta.track,
+            date: snapshot.meta.date,
+            car: snapshot.meta.car,
+            driver: snapshot.meta.driver,
+            tyre: snapshot.meta.tyre,
+            lap: snapshot.meta.lap,
+            checker: snapshot.meta.checker,
+            resultCount: snapshot.results.count,
+            zonePeaks: zonePeaks(from: snapshot.results),
+            wheelPressures: snapshot.wheelPressures,
+            originDeviceID: snapshot.originDeviceID,
+            originDeviceName: snapshot.originDeviceName,
+            isFromCurrentDevice: isFromCurrentDevice
+        )
+    }
 }
 
 struct SessionHistoryImportReport {
@@ -198,6 +249,7 @@ final class SessionHistoryStore: ObservableObject {
                 guard let snapshot = try? decoder.decode(SessionSnapshot.self, from: data) else { continue }
                 let trimmedDeviceID = snapshot.originDeviceID.trimmingCharacters(in: .whitespacesAndNewlines)
                 let isLocal = !trimmedDeviceID.isEmpty && !localDeviceID.isEmpty && trimmedDeviceID == localDeviceID
+
                 let summary = SessionHistorySummary(
                     fileURL: url,
                     createdAt: snapshot.createdAt,
@@ -209,8 +261,9 @@ final class SessionHistoryStore: ObservableObject {
                     driver: snapshot.meta.driver,
                     tyre: snapshot.meta.tyre,
                     lap: snapshot.meta.lap,
+                    checker: snapshot.meta.checker,
                     resultCount: snapshot.results.count,
-                    zonePeaks: SessionHistoryStore.zonePeaks(from: snapshot.results),
+                    zonePeaks: SessionHistorySummary.zonePeaks(from: snapshot.results),
                     wheelPressures: snapshot.wheelPressures,
                     originDeviceID: snapshot.originDeviceID,
                     originDeviceName: snapshot.originDeviceName,
@@ -288,29 +341,6 @@ extension String {
 }
 
 private extension SessionHistoryStore {
-    static func zonePeaks(from results: [MeasureResult]) -> [WheelPos: [Zone: Double]] {
-        var matrix: [WheelPos: [Zone: (Date, Double)]] = [:]
-        for result in results {
-            guard result.peakC.isFinite else { continue }
-            var wheelMap = matrix[result.wheel, default: [:]]
-            if let existing = wheelMap[result.zone], existing.0 >= result.endedAt {
-                continue
-            }
-            wheelMap[result.zone] = (result.endedAt, result.peakC)
-            matrix[result.wheel] = wheelMap
-        }
-
-        var peaks: [WheelPos: [Zone: Double]] = [:]
-        for (wheel, zoneMap) in matrix {
-            var wheelPeaks: [Zone: Double] = [:]
-            for (zone, record) in zoneMap {
-                wheelPeaks[zone] = record.1
-            }
-            peaks[wheel] = wheelPeaks
-        }
-        return peaks
-    }
-
     func uniqueDestinationURL(for snapshot: SessionSnapshot, original: URL) -> URL {
         _ = original
         let day = DateFormatter.cachedDayFormatter.string(from: snapshot.createdAt)

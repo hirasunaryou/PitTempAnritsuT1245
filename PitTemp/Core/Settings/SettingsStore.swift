@@ -38,13 +38,13 @@ final class SettingsStore: ObservableObject {
     @AppStorage("pref.advanceWithReturn") var advanceWithReturn: Bool = true
     @AppStorage("pref.minAdvanceSec") var minAdvanceSec: Double = 0.3
     @AppStorage("ble.autoConnect") var bleAutoConnect: Bool = true
-    
+    @AppStorage("pref.enableWheelVoiceInput") var enableWheelVoiceInput: Bool = false
+
     // ← zone順序は “Raw値” を保存して UI では型安全enumで扱う
     @AppStorage("pref.zoneOrder") private var zoneOrderRaw: Int = 0   // 0: IN-CL-OUT, 1: OUT-CL-IN
 
     // 自動補完や識別情報
     @AppStorage("pref.autofillDateTime") var autofillDateTime: Bool = true
-    @AppStorage("pref.enableWheelVoiceInput") var enableWheelVoiceInput: Bool = false
     @AppStorage("hr2500.id") var hr2500ID: String = ""
 
     // クラウド連携の有効/無効

@@ -158,15 +158,6 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Voice Features") {
-                    Toggle("Enable tyre voice controls", isOn: $settings.enableWheelVoiceInput)
-
-                    Text("Turn ON to show voice input buttons and tyre voice memos in Measure.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
 
                 // 測定パラメータ
                 Section("Measurement") {
@@ -177,7 +168,11 @@ struct SettingsView: View {
                         Text("Chart Width: \(Int(settings.chartWindowSec)) s")
                     }
                     Toggle("Autofill Date/Time if empty", isOn: $settings.autofillDateTime)
-                    
+
+                    Toggle("Enable tyre voice input controls", isOn: $settings.enableWheelVoiceInput)
+                        .tint(.orange)
+                        .accessibilityHint("When off, pressure and memo voice buttons stay hidden by default")
+
                     // 👇 追加：Zone順序の切替
                     Picker(
                         "Zone order",

@@ -886,12 +886,25 @@ struct MeasureView: View {
 
     private func pressureEntryCard(for wheel: WheelPos) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 16) {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("I.P.")
                         .font(.title3.weight(.semibold))
                         .accessibilityLabel("Inner pressure for \(title(wheel))")
                         .accessibilityHint("Manual entry for tyre pressure")
+
+                    if settings.enableWheelVoiceInput,
+                       pressureSpeech.isRecording,
+                       pressureSpeech.currentWheel == wheel {
+                        HStack(spacing: 6) {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                            Text("Recording…")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
 
                 WheelQuadrantDiagram(
@@ -900,32 +913,7 @@ struct MeasureView: View {
                 ) { tappedWheel in
                     handleWheelSelection(tappedWheel)
                 }
-
-                Spacer(minLength: 8)
-
-                if settings.enableWheelVoiceInput,
-                   pressureSpeech.isRecording,
-                   pressureSpeech.currentWheel == wheel {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.red)
-                            .frame(width: 8, height: 8)
-                        Text("Recording…")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Button {
-                    commitManualPressure(for: wheel)
-                    if manualPressureError(for: wheel) == nil {
-                        activePressureWheel = nil
-                    }
-                } label: {
-                    Label("Save", systemImage: "checkmark.circle.fill")
-                        .labelStyle(.titleAndIcon)
-                }
-                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             let manualText = manualPressureBinding(for: wheel).wrappedValue.trimmingCharacters(in: .whitespaces)
@@ -1241,7 +1229,7 @@ struct MeasureView: View {
                     }
                     .buttonStyle(.bordered)
 
-                    Button("Apply") {
+                    Button("Save") {
                         onCommit()
                     }
                     .buttonStyle(.borderedProminent)
@@ -1407,6 +1395,7 @@ struct MeasureView: View {
             },
             set: { newValue in
                 updateManualPressureValue(String(format: "%.1f", newValue), for: wheel)
+                commitManualPressure(for: wheel)
             }
         )
     }

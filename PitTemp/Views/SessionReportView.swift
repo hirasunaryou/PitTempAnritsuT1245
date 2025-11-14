@@ -244,7 +244,8 @@ struct SessionReportView: View {
                 .init(label: localized("Session ID", "セッション ID"),
                       value: snapshot.sessionID.uuidString,
                       style: .monospaced,
-                      maxLines: 2)
+                      maxLines: 1,
+                      weight: .regular)
             ])
         }
     }
@@ -268,10 +269,10 @@ struct SessionReportView: View {
                             Text(field.value.ifEmpty("-"))
                         }
                     }
-                    .font(.system(size: metrics.fieldValueSize, weight: .semibold, design: .rounded))
+                    .font(.system(size: metrics.fieldValueSize, weight: field.weight, design: .rounded))
                     .foregroundStyle(Color.black.opacity(0.85))
                     .lineLimit(field.maxLines)
-                    .minimumScaleFactor(field.maxLines == 1 ? 0.3 : 0.85)
+                    .minimumScaleFactor(field.maxLines == 1 ? 0.55 : 0.85)
                     .fixedSize(horizontal: false, vertical: true)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -403,10 +404,10 @@ struct SessionReportView: View {
 
     private func localizedWheelTitle(for wheel: WheelPos) -> String {
         switch wheel {
-        case .FL: return language == .english ? "FRONT L" : "Fr-L"
-        case .FR: return language == .english ? "FRONT R" : "Fr-R"
-        case .RL: return language == .english ? "REAR L" : "Re-L"
-        case .RR: return language == .english ? "REAR R" : "Re-R"
+        case .FL: return language == .english ? "Fr-L" : "Fr-L"
+        case .FR: return language == .english ? "Fr-R" : "Fr-R"
+        case .RL: return language == .english ? "Re-L" : "Re-L"
+        case .RR: return language == .english ? "Re-R" : "Re-R"
         }
     }
 
@@ -444,12 +445,14 @@ struct SessionReportView: View {
         let value: String
         let style: Style
         let maxLines: Int
+        let weight: Font.Weight
 
-        init(label: String, value: String, style: Style = .standard, maxLines: Int = 1) {
+        init(label: String, value: String, style: Style = .standard, maxLines: Int = 1, weight: Font.Weight = .semibold) {
             self.label = label
             self.value = value
             self.style = style
             self.maxLines = maxLines
+            self.weight = weight
         }
     }
 

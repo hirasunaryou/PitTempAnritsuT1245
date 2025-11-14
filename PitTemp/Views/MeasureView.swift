@@ -511,13 +511,7 @@ struct MeasureView: View {
         let hasZoneSummary = zoneValues.contains { $0.1 != "--" }
 
         return Button {
-            let (prevWheel, prevText) = speech.stopAndTakeText()
-            if let pw = prevWheel, !prevText.isEmpty {
-                let vmRef = vm
-                Task { @MainActor in vmRef.appendMemo(prevText, to: pw) }
-            }
-            selectedWheel = wheel
-            Haptics.impactLight()
+            handleWheelSelection(wheel)
         } label: {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
@@ -576,6 +570,20 @@ struct MeasureView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint("Double tap to select \(title(wheel))")
+    }
+
+    private func handleWheelSelection(_ wheel: WheelPos) {
+        let (prevWheel, prevText) = speech.stopAndTakeText()
+        if let pw = prevWheel, !prevText.isEmpty {
+            let vmRef = vm
+            Task { @MainActor in vmRef.appendMemo(prevText, to: pw) }
+        }
+
+        if selectedWheel != wheel {
+            selectedWheel = wheel
+        }
+
+        Haptics.impactLight()
     }
 
     @ViewBuilder
@@ -878,7 +886,9 @@ struct MeasureView: View {
                         .accessibilityLabel("Tyre position \(title(wheel))")
                 }
 
-                WheelQuadrantDiagram(selectedWheel: wheel)
+                WheelQuadrantDiagram(selectedWheel: wheel) { tappedWheel in
+                    handleWheelSelection(tappedWheel)
+                }
                     .frame(width: 88)
 
                 Spacer(minLength: 8)
@@ -1074,6 +1084,7 @@ struct MeasureView: View {
 
     private struct WheelQuadrantDiagram: View {
         let selectedWheel: WheelPos
+        let onSelect: (WheelPos) -> Void
 
         var body: some View {
             VStack(spacing: 6) {
@@ -1101,26 +1112,31 @@ struct MeasureView: View {
                         .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
                 )
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(diagramAccessibilityLabel)
-            .accessibilityHint("Highlights the selected wheel position")
         }
 
         @ViewBuilder
         private func quadrant(_ wheel: WheelPos) -> some View {
             let isSelected = wheel == selectedWheel
-            Text(shortLabel(for: wheel))
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(isSelected ? Color.white : Color.secondary)
-                .frame(width: 34, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: isSelected ? 2 : 1)
-                )
+
+            Button {
+                onSelect(wheel)
+            } label: {
+                Text(shortLabel(for: wheel))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                    .frame(width: 34, height: 26)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(isSelected ? Color.accentColor : Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.3), lineWidth: isSelected ? 2 : 1)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(accessibilityLabel(for: wheel))
+            .accessibilityValue(isSelected ? "Selected / 選択済み" : "Not selected / 未選択")
         }
 
         private func shortLabel(for wheel: WheelPos) -> String {
@@ -1132,8 +1148,8 @@ struct MeasureView: View {
             }
         }
 
-        private var diagramAccessibilityLabel: String {
-            "Wheel map / タイヤ位置 — \(fullTitle(for: selectedWheel)) selected (現在: \(fullTitleJP(for: selectedWheel)))"
+        private func accessibilityLabel(for wheel: WheelPos) -> String {
+            "\(fullTitle(for: wheel)) / \(fullTitleJP(for: wheel))"
         }
 
         private func fullTitle(for wheel: WheelPos) -> String {

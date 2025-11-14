@@ -150,6 +150,7 @@ struct HistorySummaryRow_Previews: PreviewProvider {
             driver: snapshot.meta.driver,
             tyre: snapshot.meta.tyre,
             lap: snapshot.meta.lap,
+            checker: snapshot.meta.checker,
             resultCount: snapshot.results.count,
             zonePeaks: zonePeaks,
             wheelPressures: snapshot.wheelPressures,

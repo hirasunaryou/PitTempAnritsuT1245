@@ -19,7 +19,7 @@ struct SessionReportView: View {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "h:mm a"
+        formatter.dateFormat = "a h:mm"
         formatter.amSymbol = "AM"
         formatter.pmSymbol = "PM"
         return formatter
@@ -79,6 +79,10 @@ struct SessionReportView: View {
 
     private var displayedTyre: String {
         summary.tyre.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
+    }
+
+    private var displayedChecker: String {
+        summary.checker.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
     }
 
     private var measurementStart: Date? {
@@ -234,13 +238,19 @@ struct SessionReportView: View {
             ])
             fieldRow(metrics: metrics, fields: [
                 .init(label: localized("Tyre", "タイヤ"), value: displayedTyre),
-                .init(label: localized("Session ID", "セッション ID"), value: snapshot.sessionID.uuidString, style: .monospaced)
+                .init(label: localized("Measured by", "計測者"), value: displayedChecker)
+            ])
+            fieldRow(metrics: metrics, fields: [
+                .init(label: localized("Session ID", "セッション ID"),
+                      value: snapshot.sessionID.uuidString,
+                      style: .monospaced,
+                      maxLines: 2)
             ])
         }
     }
 
     private func fieldRow(metrics: LayoutMetrics, fields: [Field]) -> some View {
-        HStack(spacing: metrics.formColumnSpacing) {
+        HStack(spacing: fields.count == 1 ? 0 : metrics.formColumnSpacing) {
             ForEach(fields) { field in
                 VStack(alignment: .leading, spacing: metrics.fieldSpacing) {
                     Text(field.label.uppercased())
@@ -260,9 +270,11 @@ struct SessionReportView: View {
                     }
                     .font(.system(size: metrics.fieldValueSize, weight: .semibold, design: .rounded))
                     .foregroundStyle(Color.black.opacity(0.85))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.3)
+                    .lineLimit(field.maxLines)
+                    .minimumScaleFactor(field.maxLines == 1 ? 0.3 : 0.85)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -431,11 +443,13 @@ struct SessionReportView: View {
         let label: String
         let value: String
         let style: Style
+        let maxLines: Int
 
-        init(label: String, value: String, style: Style = .standard) {
+        init(label: String, value: String, style: Style = .standard, maxLines: Int = 1) {
             self.label = label
             self.value = value
             self.style = style
+            self.maxLines = maxLines
         }
     }
 
@@ -494,7 +508,7 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 4
                 wheelLabelSize = 14
                 temperatureFontSize = 24
-                pressureValueFontSize = 20
+                pressureValueFontSize = 24
                 pressureUnitFontSize = 12
                 zoneLabelSize = 11
                 memoFontSize = 11
@@ -527,7 +541,7 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 6
                 wheelLabelSize = 16
                 temperatureFontSize = 28
-                pressureValueFontSize = 22
+                pressureValueFontSize = 28
                 pressureUnitFontSize = 13
                 zoneLabelSize = 12
                 memoFontSize = 12
@@ -560,7 +574,7 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 6
                 wheelLabelSize = 18
                 temperatureFontSize = 32
-                pressureValueFontSize = 24
+                pressureValueFontSize = 32
                 pressureUnitFontSize = 14
                 zoneLabelSize = 13
                 memoFontSize = 13

@@ -11,6 +11,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
     let driver: String
     let tyre: String
     let lap: String
+    let checker: String
     let resultCount: Int
     let zonePeaks: [WheelPos: [Zone: Double]]
     let wheelPressures: [WheelPos: Double]
@@ -81,6 +82,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
             date,
             car,
             driver,
+            checker,
             tyre,
             lap,
             sessionID.uuidString,
@@ -159,6 +161,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
             driver: snapshot.meta.driver,
             tyre: snapshot.meta.tyre,
             lap: snapshot.meta.lap,
+            checker: snapshot.meta.checker,
             resultCount: snapshot.results.count,
             zonePeaks: zonePeaks(from: snapshot.results),
             wheelPressures: snapshot.wheelPressures,
@@ -246,26 +249,28 @@ final class SessionHistoryStore: ObservableObject {
                 guard let snapshot = try? decoder.decode(SessionSnapshot.self, from: data) else { continue }
                 let trimmedDeviceID = snapshot.originDeviceID.trimmingCharacters(in: .whitespacesAndNewlines)
                 let isLocal = !trimmedDeviceID.isEmpty && !localDeviceID.isEmpty && trimmedDeviceID == localDeviceID
-            let summary = SessionHistorySummary(
-                fileURL: url,
-                createdAt: snapshot.createdAt,
-                sessionBeganAt: snapshot.sessionBeganAt,
-                sessionID: snapshot.sessionID,
-                track: snapshot.meta.track,
-                date: snapshot.meta.date,
-                car: snapshot.meta.car,
-                driver: snapshot.meta.driver,
-                tyre: snapshot.meta.tyre,
-                lap: snapshot.meta.lap,
-                resultCount: snapshot.results.count,
-                zonePeaks: SessionHistorySummary.zonePeaks(from: snapshot.results),
-                wheelPressures: snapshot.wheelPressures,
-                originDeviceID: snapshot.originDeviceID,
-                originDeviceName: snapshot.originDeviceName,
-                isFromCurrentDevice: isLocal
-            )
-            items.append(summary)
-        }
+
+                let summary = SessionHistorySummary(
+                    fileURL: url,
+                    createdAt: snapshot.createdAt,
+                    sessionBeganAt: snapshot.sessionBeganAt,
+                    sessionID: snapshot.sessionID,
+                    track: snapshot.meta.track,
+                    date: snapshot.meta.date,
+                    car: snapshot.meta.car,
+                    driver: snapshot.meta.driver,
+                    tyre: snapshot.meta.tyre,
+                    lap: snapshot.meta.lap,
+                    checker: snapshot.meta.checker,
+                    resultCount: snapshot.results.count,
+                    zonePeaks: SessionHistorySummary.zonePeaks(from: snapshot.results),
+                    wheelPressures: snapshot.wheelPressures,
+                    originDeviceID: snapshot.originDeviceID,
+                    originDeviceName: snapshot.originDeviceName,
+                    isFromCurrentDevice: isLocal
+                )
+                items.append(summary)
+            }
 
             items.sort { $0.createdAt > $1.createdAt }
 

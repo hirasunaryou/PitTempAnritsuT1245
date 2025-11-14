@@ -10,7 +10,7 @@ struct SessionReportView: View {
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+        formatter.timeStyle = .none
         return formatter
     }()
 
@@ -21,17 +21,60 @@ struct SessionReportView: View {
         return formatter
     }()
 
-    private var headlineDate: String {
-        if let began = snapshot.sessionBeganAt {
-            return Self.dateFormatter.string(from: began)
-        }
+    private static let temperatureFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
+        formatter.roundingMode = .halfUp
+        return formatter
+    }()
+
+    private static let pressureFormatter: NumberFormatter = {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 0
+        formatter.roundingMode = .halfUp
+        return formatter
+    }()
+
+    private var language: ReportLanguage { ReportLanguage(rawValue: languageRaw) ?? .english }
+
+    private var displayedDate: String {
+        let base = summary.date.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !base.isEmpty { return base }
         return Self.dateFormatter.string(from: summary.createdAt)
     }
 
-    private var recordedAtDescription: String {
-        if let began = snapshot.sessionBeganAt {
-            let end = Self.timeFormatter.string(from: summary.createdAt)
-            return "\(Self.timeFormatter.string(from: began)) → \(end)"
+    private var displayedTrack: String {
+        summary.track.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
+    }
+
+    private var displayedCar: String {
+        summary.car.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
+    }
+
+    private var displayedDriver: String {
+        summary.driver.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
+    }
+
+    private var displayedTyre: String {
+        summary.tyre.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
+    }
+
+    private var measurementStart: Date? {
+        if let earliest = snapshot.results.map(\.startedAt).min() {
+            return earliest
+        }
+        if let began = snapshot.sessionBeganAt { return began }
+        if let began = summary.sessionBeganAt { return began }
+        return nil
+    }
+
+    private var displayedTime: String {
+        if let start = measurementStart {
+            return Self.timeFormatter.string(from: start)
         }
         return Self.timeFormatter.string(from: summary.createdAt)
     }
@@ -44,411 +87,412 @@ struct SessionReportView: View {
         }
     }
 
-    private var memoAvailable: Bool { !memoItems.isEmpty }
-
-    private var language: ReportLanguage {
-        ReportLanguage(rawValue: languageRaw) ?? .english
-    }
-
     var body: some View {
         GeometryReader { proxy in
-            let isWide = proxy.size.width > proxy.size.height
-            let layout = Self.layoutProfile(for: proxy.size)
+            let metrics = LayoutMetrics(size: proxy.size)
             ZStack {
-                LinearGradient(
-                    colors: [Color(red: 0.05, green: 0.07, blue: 0.13), Color(red: 0.03, green: 0.03, blue: 0.05)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
+                Color(red: 0.92, green: 0.9, blue: 0.86)
+                    .ignoresSafeArea()
 
-                content(isWide: isWide, layout: layout)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(isWide ? layout.widePagePadding : layout.pagePadding)
+                VStack(spacing: metrics.canvasSpacing) {
+                    languagePicker(metrics: metrics)
+                        .frame(maxWidth: 220)
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+
+                    paperSheet(metrics: metrics)
+                        .padding(.horizontal, metrics.paperHorizontalPadding)
+                        .padding(.bottom, metrics.paperBottomPadding)
+                }
+                .padding(.top, metrics.paperTopPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
         }
-        .navigationTitle(localized("Session report", "セッションレポート"))
         .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(localized("Session report", "セッションレポート"))
     }
 
-    @ViewBuilder
-    private func content(isWide: Bool, layout: LayoutProfile) -> some View {
-        let headerStack = VStack(spacing: layout.headerSpacing) {
-            languagePicker(layout: layout)
-            headerCard(layout: layout)
-        }
-
-        if isWide {
-            HStack(alignment: .top, spacing: layout.sectionSpacing) {
-                tyreMatrix(layout: layout)
-                    .layoutPriority(1)
-
-                VStack(alignment: .leading, spacing: layout.sectionSpacing) {
-                    headerStack
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    metricsStack(layout: layout)
-                    if layout.showMemo, memoAvailable {
-                        memoStrip(layout: layout)
-                    }
-                }
-                .frame(maxWidth: layout.metricsColumnMaxWidth, alignment: .top)
-            }
-        } else {
-            VStack(alignment: .leading, spacing: layout.sectionSpacing) {
-                headerStack
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                tyreMatrix(layout: layout)
-                metricsStack(layout: layout)
-                if layout.showMemo, memoAvailable {
-                    memoStrip(layout: layout)
-                }
-                Spacer(minLength: 0)
+    private func paperSheet(metrics: LayoutMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
+            sheetHeader(metrics: metrics)
+            Divider().overlay(Color.black.opacity(0.25))
+            formSection(metrics: metrics)
+            Divider().overlay(Color.black.opacity(0.2))
+            wheelSection(metrics: metrics)
+            if !memoItems.isEmpty {
+                Divider().overlay(Color.black.opacity(0.2))
+                memoSection(metrics: metrics)
             }
         }
-    }
-
-    private func metricsStack(layout: LayoutProfile) -> some View {
-        ViewThatFits {
-            HStack(alignment: .top, spacing: layout.metricsSpacing) {
-                if summary.hasPressures {
-                    pressureCard(layout: layout)
-                }
-                sessionInfoCard(layout: layout)
-            }
-            .frame(maxWidth: .infinity, alignment: .top)
-
-            VStack(spacing: layout.metricsSpacing) {
-                if summary.hasPressures {
-                    pressureCard(layout: layout)
-                }
-                sessionInfoCard(layout: layout)
-            }
-            .frame(maxWidth: .infinity, alignment: .top)
-        }
-    }
-
-    private func headerCard(layout: LayoutProfile) -> some View {
-        VStack(alignment: .leading, spacing: layout.headerContentSpacing) {
-            HStack(alignment: .top, spacing: layout.headerContentSpacing) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(summary.displayTitle)
-                        .font(.system(size: layout.headerTitleSize, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                    Text(snapshot.sessionID.uuidString)
-                        .font(.system(size: layout.headerIDSize, weight: .regular, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.65))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(headlineDate)
-                        .font(.system(size: layout.headerDateSize, weight: .semibold))
-                        .foregroundStyle(.white)
-                    Text(recordedAtDescription)
-                        .font(.system(size: layout.headerTimeSize, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                        .multilineTextAlignment(.trailing)
-                }
-            }
-
-            Grid(horizontalSpacing: layout.metadataGridSpacing, verticalSpacing: layout.metadataGridSpacing) {
-                ForEach(Array(layout.metadataRows.enumerated()), id: \.offset) { _, row in
-                    GridRow {
-                        ForEach(row, id: \.self) { field in
-                            infoChip(for: field, layout: layout)
-                        }
-                    }
-                }
-            }
-
-            if !layout.showMemo, memoAvailable {
-                Rectangle()
-                    .fill(Color.white.opacity(0.12))
-                    .frame(height: 1)
-                    .padding(.top, 6)
-
-                HStack(spacing: 6) {
-                    Image(systemName: "note.text")
-                        .font(.system(size: layout.infoIconSize, weight: .semibold))
-                        .foregroundStyle(Color.white.opacity(0.7))
-                    Text(localized("Notes saved", "メモ登録あり"))
-                        .font(.system(size: layout.infoDetailSize, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.75))
-                }
-            }
-        }
-        .padding(layout.headerCardPadding)
-        .background(cardBackground(cornerRadius: layout.headerCardCornerRadius))
-    }
-
-    private func infoChip(for field: MetadataField, layout: LayoutProfile) -> some View {
-        let title: String
-        let value: String
-
-        switch field {
-        case .track:
-            title = localized("Track", "サーキット")
-            value = summary.track
-        case .car:
-            title = localized("Car", "車両")
-            value = summary.car
-        case .driver:
-            title = localized("Driver", "ドライバー")
-            value = summary.driver
-        case .tyre:
-            title = localized("Tyre", "タイヤ")
-            value = summary.tyre
-        }
-
-        return VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.system(size: layout.metadataTitleSize, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.5))
-            Text(value.ifEmpty("-"))
-                .font(.system(size: layout.metadataValueSize, weight: .medium, design: .default))
-                .foregroundStyle(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        }
-        .padding(.vertical, layout.metadataChipVerticalPadding)
-        .padding(.horizontal, layout.metadataChipHorizontalPadding)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(metrics.sheetPadding)
+        .frame(maxWidth: .infinity)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.05))
+            RoundedRectangle(cornerRadius: metrics.sheetCornerRadius, style: .continuous)
+                .fill(Color(red: 0.99, green: 0.98, blue: 0.94))
+                .overlay(
+                    RoundedRectangle(cornerRadius: metrics.sheetCornerRadius, style: .continuous)
+                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
+                )
+                .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
         )
     }
 
-    private func tyreMatrix(layout: LayoutProfile) -> some View {
-        VStack(alignment: .leading, spacing: layout.tyreMatrixHeaderSpacing) {
-            Text(localized("Tyre focus", "タイヤフォーカス"))
-                .font(.system(size: layout.tyreMatrixTitleSize, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.95))
-
-            Grid(alignment: .center, horizontalSpacing: layout.tyreMatrixSpacing, verticalSpacing: layout.tyreMatrixSpacing) {
-                GridRow {
-                    wheelCard(for: .FL, layout: layout)
-                    wheelCard(for: .FR, layout: layout)
-                }
-                GridRow {
-                    wheelCard(for: .RL, layout: layout)
-                    wheelCard(for: .RR, layout: layout)
-                }
+    private func languagePicker(metrics: LayoutMetrics) -> some View {
+        Picker("", selection: $languageRaw) {
+            ForEach(ReportLanguage.allCases) { language in
+                Text(language.displayName)
+                    .tag(language.rawValue)
             }
         }
-        .padding(layout.tyreMatrixPadding)
-        .background(cardBackground(cornerRadius: layout.tyreMatrixCornerRadius))
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .layoutPriority(3)
+        .pickerStyle(.segmented)
+        .font(.system(size: metrics.languagePickerFont, weight: .medium))
     }
 
-    private func wheelCard(for wheel: WheelPos, layout: LayoutProfile) -> some View {
-        SessionReportWheelCard(
-            wheel: wheel,
-            summary: summary,
-            snapshot: snapshot,
-            language: language,
-            layout: layout
-        )
+    private func sheetHeader(metrics: LayoutMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.headerSpacing) {
+            Text(localized("PIT TEMP SESSION REPORT", "PitTemp 計測レポート"))
+                .font(.system(size: metrics.headerTitleSize, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.black.opacity(0.85))
+                .padding(.bottom, 2)
+
+            HStack(alignment: .lastTextBaseline, spacing: 8) {
+                Text(localized("Track", "サーキット").uppercased())
+                    .font(.system(size: metrics.fieldLabelSize, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(0.55))
+                Rectangle()
+                    .frame(height: 1)
+                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(Color.black.opacity(0.25))
+                Text(displayedTrack)
+                    .font(.system(size: metrics.fieldValueSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.black.opacity(0.85))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+            }
+        }
     }
 
-    private func pressureCard(layout: LayoutProfile) -> some View {
-        VStack(alignment: .leading, spacing: layout.infoCardHeaderSpacing) {
-            Text(localized("Tyre pressures", "タイヤ内圧"))
-                .font(.system(size: layout.infoHeaderSize, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+    private func formSection(metrics: LayoutMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.formRowSpacing) {
+            fieldRow(metrics: metrics, fields: [
+                .init(label: localized("Date", "日付"), value: displayedDate),
+                .init(label: localized("Time", "時間"), value: displayedTime)
+            ])
+            fieldRow(metrics: metrics, fields: [
+                .init(label: localized("Car", "車両"), value: displayedCar),
+                .init(label: localized("Driver", "ドライバー"), value: displayedDriver)
+            ])
+            fieldRow(metrics: metrics, fields: [
+                .init(label: localized("Tyre", "タイヤ"), value: displayedTyre),
+                .init(label: localized("Session ID", "セッション ID"), value: String(snapshot.sessionID.uuidString.prefix(8)) + "…")
+            ])
+        }
+    }
 
-            Grid(horizontalSpacing: 10, verticalSpacing: 0) {
-                GridRow {
-                    ForEach(WheelPos.allCases) { wheel in
-                        VStack(spacing: 4) {
-                            Text(localizedWheelShort(for: wheel))
-                                .font(.system(size: layout.infoLabelSize, weight: .semibold))
-                                .foregroundStyle(.white.opacity(0.6))
-                                .multilineTextAlignment(.center)
-                            AdaptiveValueText(
-                                text: summary.formattedPressure(for: wheel),
-                                fonts: [
-                                    layout.pressureFontSize,
-                                    layout.pressureFallbackFontSize,
-                                    layout.pressureSecondaryFallbackFontSize
-                                ],
-                                weight: .bold,
-                                design: .rounded
-                            )
-                            .foregroundStyle(.white)
-                        }
+    private func fieldRow(metrics: LayoutMetrics, fields: [Field]) -> some View {
+        HStack(spacing: metrics.formColumnSpacing) {
+            ForEach(fields) { field in
+                VStack(alignment: .leading, spacing: metrics.fieldSpacing) {
+                    Text(field.label.uppercased())
+                        .font(.system(size: metrics.fieldLabelSize, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(0.55))
+                    Rectangle()
+                        .frame(height: 1)
                         .frame(maxWidth: .infinity)
-                    }
+                        .foregroundStyle(Color.black.opacity(0.15))
+                    Text(field.value.ifEmpty("-"))
+                        .font(.system(size: metrics.fieldValueSize, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.85))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
                 }
             }
         }
-        .padding(layout.infoCardPadding)
-        .background(cardBackground(cornerRadius: layout.infoCardCornerRadius))
     }
 
-    private func sessionInfoCard(layout: LayoutProfile) -> some View {
-        VStack(alignment: .leading, spacing: layout.infoCardHeaderSpacing) {
-            Text(localized("Timing & device", "計測タイミングと端末"))
-                .font(.system(size: layout.infoHeaderSize, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+    private func wheelSection(metrics: LayoutMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.wheelSectionSpacing) {
+            Text(localized("Tyre temps & pressure", "タイヤ温度・内圧"))
+                .font(.system(size: metrics.sectionLabelSize, weight: .bold))
+                .foregroundStyle(Color.black.opacity(0.65))
 
-            infoLine(icon: "calendar", title: localized("Captured", "記録"), detail: "\(headlineDate) · \(recordedAtDescription)", layout: layout)
-
-            if let began = snapshot.sessionBeganAt {
-                let beginText = Self.timeFormatter.string(from: began)
-                infoLine(icon: "timer", title: localized("Session start", "計測開始"), detail: beginText, layout: layout)
-            }
-
-            infoLine(icon: "square.grid.3x3.fill", title: localized("Measurements", "計測数"), detail: "\(summary.resultCount)", layout: layout)
-
-            let lapText = summary.lap.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !lapText.isEmpty, lapText != "-" {
-                infoLine(icon: "flag.checkered", title: localized("Lap", "ラップ"), detail: lapText, layout: layout)
-            }
-
-            let dateMemo = summary.date.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !dateMemo.isEmpty, dateMemo != "-" {
-                infoLine(icon: "calendar.badge.clock", title: localized("Date memo", "計測日メモ"), detail: dateMemo, layout: layout)
-            }
-
-            infoLine(
-                icon: "iphone.gen3",
-                title: localized("Device", "デバイス"),
-                detail: snapshot.originDeviceName.ifEmpty(summary.originDeviceDisplayName.ifEmpty("-")),
-                layout: layout
-            )
-
-            let deviceID = snapshot.originDeviceID.ifEmpty(summary.originDeviceID)
-            if !deviceID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                infoLine(icon: "barcode", title: localized("Device ID", "デバイスID"), detail: deviceID, layout: layout)
+            HStack(alignment: .top, spacing: metrics.wheelColumnSpacing) {
+                VStack(spacing: metrics.wheelColumnSpacing) {
+                    wheelCard(.FL, metrics: metrics)
+                    wheelCard(.RL, metrics: metrics)
+                }
+                VStack(spacing: metrics.wheelColumnSpacing) {
+                    wheelCard(.FR, metrics: metrics)
+                    wheelCard(.RR, metrics: metrics)
+                }
             }
         }
-        .padding(layout.infoCardPadding)
-        .background(cardBackground(cornerRadius: layout.infoCardCornerRadius))
     }
 
-    private func infoLine(icon: String, title: String, detail: String, layout: LayoutProfile) -> some View {
-        HStack(alignment: .top, spacing: layout.infoLineSpacing) {
-            Image(systemName: icon)
-                .font(.system(size: layout.infoIconSize, weight: .semibold))
-                .foregroundStyle(Color.white.opacity(0.55))
-                .frame(width: layout.infoIconSize + 2)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: layout.infoTitleSize, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.5))
-                Text(detail)
-                    .font(.system(size: layout.infoDetailSize))
-                    .foregroundStyle(.white.opacity(0.85))
+    private func wheelCard(_ wheel: WheelPos, metrics: LayoutMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.wheelInnerSpacing) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(localizedWheelTitle(for: wheel))
+                    .font(.system(size: metrics.wheelLabelSize, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.black.opacity(0.8))
+                Spacer()
+                if let pressure = pressureText(for: wheel) {
+                    Text(pressure)
+                        .font(.system(size: metrics.pressureFontSize, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Color.black.opacity(0.7))
+                }
+            }
+
+            Rectangle()
+                .frame(height: 1)
+                .foregroundStyle(Color.black.opacity(0.1))
+
+            HStack(alignment: .bottom, spacing: metrics.zoneSpacing) {
+                ForEach(zoneOrder, id: \.self) { zone in
+                    VStack(spacing: metrics.zoneInnerSpacing) {
+                        Text(localizedZoneTitle(for: zone))
+                            .font(.system(size: metrics.zoneLabelSize, weight: .semibold))
+                            .foregroundStyle(Color.black.opacity(0.5))
+                        Text(temperatureText(for: wheel, zone: zone))
+                            .font(.system(size: metrics.temperatureFontSize, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Color.black.opacity(0.9))
+                            .minimumScaleFactor(0.6)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+
+            if let memo = memoText(for: wheel) {
+                Text(memo)
+                    .font(.system(size: metrics.memoFontSize, weight: .regular))
+                    .foregroundStyle(Color.black.opacity(0.6))
                     .lineLimit(2)
-                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(metrics.wheelPadding)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: metrics.wheelCornerRadius, style: .continuous)
+                .stroke(Color.black.opacity(0.12), lineWidth: 1)
+                .background(
+                    RoundedRectangle(cornerRadius: metrics.wheelCornerRadius, style: .continuous)
+                        .fill(Color.white.opacity(0.9))
+                )
+        )
+    }
+
+    private func memoSection(metrics: LayoutMetrics) -> some View {
+        VStack(alignment: .leading, spacing: metrics.memoSpacing) {
+            Text(localized("Notes", "メモ"))
+                .font(.system(size: metrics.sectionLabelSize, weight: .bold))
+                .foregroundStyle(Color.black.opacity(0.65))
+            ForEach(memoItems, id: \.0) { wheel, memo in
+                HStack(alignment: .top, spacing: 8) {
+                    Text(localizedWheelShort(for: wheel))
+                        .font(.system(size: metrics.memoLabelSize, weight: .semibold))
+                        .foregroundStyle(Color.black.opacity(0.55))
+                        .frame(width: metrics.memoLabelWidth, alignment: .leading)
+                    Text(memo)
+                        .font(.system(size: metrics.memoFontSize))
+                        .foregroundStyle(Color.black.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
     }
 
-    private func memoStrip(layout: LayoutProfile) -> some View {
-        VStack(alignment: .leading, spacing: layout.memoHeaderSpacing) {
-            Text(localized("Notes", "メモ"))
-                .font(.system(size: layout.memoTitleSize, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.9))
+    private func temperatureText(for wheel: WheelPos, zone: Zone) -> String {
+        guard let value = summary.temperature(for: wheel, zone: zone), value.isFinite else { return "-" }
+        return Self.temperatureFormatter.string(from: NSNumber(value: value)) ?? "-"
+    }
 
-            let columns = [GridItem(.flexible(), spacing: layout.memoGridSpacing), GridItem(.flexible(), spacing: layout.memoGridSpacing)]
-            LazyVGrid(columns: columns, alignment: .leading, spacing: layout.memoGridSpacing) {
-                ForEach(memoItems, id: \.0) { wheel, memo in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(localizedWheelTitle(for: wheel))
-                            .font(.system(size: layout.infoLabelSize, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.6))
-                        Text(memo)
-                            .font(.system(size: layout.memoFontSize))
-                            .foregroundStyle(.white.opacity(0.9))
-                            .lineLimit(layout.memoLineLimit)
-                    }
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .fill(Color.white.opacity(0.08))
-                    )
-                }
-            }
+    private func pressureText(for wheel: WheelPos) -> String? {
+        guard let value = summary.wheelPressures[wheel], value.isFinite else { return nil }
+        let text = Self.pressureFormatter.string(from: NSNumber(value: value)) ?? ""
+        if text.isEmpty { return nil }
+        return text + " kPa"
+    }
+
+    private func memoText(for wheel: WheelPos) -> String? {
+        guard let memo = snapshot.wheelMemos[wheel]?.trimmingCharacters(in: .whitespacesAndNewlines), !memo.isEmpty else {
+            return nil
         }
-        .padding(layout.memoCardPadding)
-        .background(cardBackground(cornerRadius: layout.memoCardCornerRadius))
+        return memo
     }
 
     private func localizedWheelTitle(for wheel: WheelPos) -> String {
         switch wheel {
-        case .FL: return localized("Front left", "フロント左")
-        case .FR: return localized("Front right", "フロント右")
-        case .RL: return localized("Rear left", "リア左")
-        case .RR: return localized("Rear right", "リア右")
+        case .FL: return localized("Front Left", "フロント左")
+        case .FR: return localized("Front Right", "フロント右")
+        case .RL: return localized("Rear Left", "リア左")
+        case .RR: return localized("Rear Right", "リア右")
         }
     }
 
     private func localizedWheelShort(for wheel: WheelPos) -> String {
         switch wheel {
-        case .FL: return localized("Front L", "フロント左")
-        case .FR: return localized("Front R", "フロント右")
-        case .RL: return localized("Rear L", "リア左")
-        case .RR: return localized("Rear R", "リア右")
+        case .FL: return localized("FL", "FL")
+        case .FR: return localized("FR", "FR")
+        case .RL: return localized("RL", "RL")
+        case .RR: return localized("RR", "RR")
         }
     }
 
-    private func cardBackground(cornerRadius: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(Color.white.opacity(0.06))
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
-            )
+    private func localizedZoneTitle(for zone: Zone) -> String {
+        switch zone {
+        case .OUT: return localized("OUT", "外")
+        case .CL: return localized("MID", "中")
+        case .IN: return localized("IN", "内")
+        }
     }
 
     private func localized(_ english: String, _ japanese: String) -> String {
         language == .english ? english : japanese
     }
 
-    private struct AdaptiveValueText: View {
-        let text: String
-        let fonts: [CGFloat]
-        let weight: Font.Weight
-        let design: Font.Design
+    private var zoneOrder: [Zone] { [.OUT, .CL, .IN] }
 
-        var body: some View {
-            ViewThatFits {
-                if fonts.isEmpty {
-                    textView(for: 12)
-                } else {
-                    ForEach(Array(fonts.enumerated()), id: \.offset) { _, size in
-                        textView(for: size)
-                    }
-                    textView(for: 12)
-                }
-            }
-            .lineLimit(1)
-            .minimumScaleFactor(0.35)
-            .allowsTightening(true)
-            .monospacedDigit()
-        }
-
-        private func textView(for size: CGFloat) -> some View {
-            Text(text)
-                .font(.system(size: size, weight: weight, design: design))
-        }
+    private struct Field: Identifiable {
+        let id = UUID()
+        let label: String
+        let value: String
     }
 
-    private func languagePicker(layout: LayoutProfile) -> some View {
-        Picker(localized("Language", "言語"), selection: Binding(get: { languageRaw }, set: { languageRaw = $0 })) {
-            Text("EN").tag(ReportLanguage.english.rawValue)
-            Text("日本語").tag(ReportLanguage.japanese.rawValue)
+    private struct LayoutMetrics {
+        let sheetPadding: CGFloat
+        let sheetCornerRadius: CGFloat
+        let sectionSpacing: CGFloat
+        let headerSpacing: CGFloat
+        let fieldLabelSize: CGFloat
+        let fieldValueSize: CGFloat
+        let fieldSpacing: CGFloat
+        let formRowSpacing: CGFloat
+        let formColumnSpacing: CGFloat
+        let sectionLabelSize: CGFloat
+        let wheelSectionSpacing: CGFloat
+        let wheelColumnSpacing: CGFloat
+        let wheelInnerSpacing: CGFloat
+        let zoneSpacing: CGFloat
+        let zoneInnerSpacing: CGFloat
+        let wheelLabelSize: CGFloat
+        let temperatureFontSize: CGFloat
+        let pressureFontSize: CGFloat
+        let zoneLabelSize: CGFloat
+        let memoFontSize: CGFloat
+        let memoSpacing: CGFloat
+        let memoLabelSize: CGFloat
+        let memoLabelWidth: CGFloat
+        let wheelCornerRadius: CGFloat
+        let wheelPadding: CGFloat
+        let canvasSpacing: CGFloat
+        let languagePickerFont: CGFloat
+        let headerTitleSize: CGFloat
+        let paperHorizontalPadding: CGFloat
+        let paperTopPadding: CGFloat
+        let paperBottomPadding: CGFloat
+
+        init(size: CGSize) {
+            let shorter = min(size.width, size.height)
+
+            if shorter < 360 {
+                sheetPadding = 14
+                sheetCornerRadius = 18
+                sectionSpacing = 14
+                headerSpacing = 8
+                fieldLabelSize = 10
+                fieldValueSize = 15
+                fieldSpacing = 4
+                formRowSpacing = 10
+                formColumnSpacing = 12
+                sectionLabelSize = 12
+                wheelSectionSpacing = 12
+                wheelColumnSpacing = 12
+                wheelInnerSpacing = 10
+                zoneSpacing = 10
+                zoneInnerSpacing = 4
+                wheelLabelSize = 14
+                temperatureFontSize = 24
+                pressureFontSize = 13
+                zoneLabelSize = 11
+                memoFontSize = 11
+                memoSpacing = 6
+                memoLabelSize = 11
+                memoLabelWidth = 26
+                wheelCornerRadius = 14
+                wheelPadding = 10
+                canvasSpacing = 16
+                languagePickerFont = 12
+                headerTitleSize = 18
+                paperHorizontalPadding = 12
+                paperTopPadding = 12
+                paperBottomPadding = 12
+            } else if shorter < 420 {
+                sheetPadding = 18
+                sheetCornerRadius = 20
+                sectionSpacing = 18
+                headerSpacing = 10
+                fieldLabelSize = 11
+                fieldValueSize = 17
+                fieldSpacing = 4
+                formRowSpacing = 12
+                formColumnSpacing = 16
+                sectionLabelSize = 13
+                wheelSectionSpacing = 16
+                wheelColumnSpacing = 14
+                wheelInnerSpacing = 12
+                zoneSpacing = 12
+                zoneInnerSpacing = 6
+                wheelLabelSize = 16
+                temperatureFontSize = 28
+                pressureFontSize = 14
+                zoneLabelSize = 12
+                memoFontSize = 12
+                memoSpacing = 8
+                memoLabelSize = 12
+                memoLabelWidth = 30
+                wheelCornerRadius = 16
+                wheelPadding = 12
+                canvasSpacing = 18
+                languagePickerFont = 13
+                headerTitleSize = 20
+                paperHorizontalPadding = 16
+                paperTopPadding = 16
+                paperBottomPadding = 16
+            } else {
+                sheetPadding = 22
+                sheetCornerRadius = 22
+                sectionSpacing = 22
+                headerSpacing = 12
+                fieldLabelSize = 12
+                fieldValueSize = 19
+                fieldSpacing = 4
+                formRowSpacing = 14
+                formColumnSpacing = 20
+                sectionLabelSize = 14
+                wheelSectionSpacing = 18
+                wheelColumnSpacing = 16
+                wheelInnerSpacing = 14
+                zoneSpacing = 14
+                zoneInnerSpacing = 6
+                wheelLabelSize = 18
+                temperatureFontSize = 32
+                pressureFontSize = 15
+                zoneLabelSize = 13
+                memoFontSize = 13
+                memoSpacing = 10
+                memoLabelSize = 13
+                memoLabelWidth = 32
+                wheelCornerRadius = 18
+                wheelPadding = 14
+                canvasSpacing = 20
+                languagePickerFont = 14
+                headerTitleSize = 22
+                paperHorizontalPadding = 20
+                paperTopPadding = 20
+                paperBottomPadding = 20
+            }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(maxWidth: layout.languagePickerWidth, alignment: .leading)
     }
 
     private enum ReportLanguage: String, CaseIterable, Identifiable {
@@ -456,447 +500,12 @@ struct SessionReportView: View {
         case japanese
 
         var id: String { rawValue }
-    }
 
-    private struct LayoutProfile {
-        let pagePadding: CGFloat
-        let widePagePadding: CGFloat
-        let sectionSpacing: CGFloat
-        let headerSpacing: CGFloat
-        let headerContentSpacing: CGFloat
-        let headerTitleSize: CGFloat
-        let headerIDSize: CGFloat
-        let headerDateSize: CGFloat
-        let headerTimeSize: CGFloat
-        let headerCardPadding: CGFloat
-        let headerCardCornerRadius: CGFloat
-        let metadataGridSpacing: CGFloat
-        let metadataChipVerticalPadding: CGFloat
-        let metadataChipHorizontalPadding: CGFloat
-        let metadataTitleSize: CGFloat
-        let metadataValueSize: CGFloat
-        let tyreMatrixHeaderSpacing: CGFloat
-        let tyreMatrixTitleSize: CGFloat
-        let tyreMatrixSpacing: CGFloat
-        let tyreMatrixPadding: CGFloat
-        let tyreMatrixCornerRadius: CGFloat
-        let wheelCardPadding: CGFloat
-        let wheelCardCornerRadius: CGFloat
-        let wheelContentSpacing: CGFloat
-        let wheelZoneSpacing: CGFloat
-        let wheelTitleSize: CGFloat
-        let zoneTitleSize: CGFloat
-        let temperatureFontSize: CGFloat
-        let temperatureFallbackFontSize: CGFloat
-        let temperatureSecondaryFallbackFontSize: CGFloat
-        let pressureFontSize: CGFloat
-        let pressureFallbackFontSize: CGFloat
-        let pressureSecondaryFallbackFontSize: CGFloat
-        let wheelMemoFontSize: CGFloat
-        let wheelMemoLineLimit: Int
-        let wheelBadgeSpacing: CGFloat
-        let infoCardHeaderSpacing: CGFloat
-        let infoHeaderSize: CGFloat
-        let infoLabelSize: CGFloat
-        let infoCardPadding: CGFloat
-        let infoCardCornerRadius: CGFloat
-        let infoLineSpacing: CGFloat
-        let infoIconSize: CGFloat
-        let infoTitleSize: CGFloat
-        let infoDetailSize: CGFloat
-        let metricsSpacing: CGFloat
-        let metricsColumnMaxWidth: CGFloat
-        let languagePickerWidth: CGFloat
-        let memoHeaderSpacing: CGFloat
-        let memoTitleSize: CGFloat
-        let memoFontSize: CGFloat
-        let memoLineLimit: Int
-        let memoCardPadding: CGFloat
-        let memoCardCornerRadius: CGFloat
-        let memoGridSpacing: CGFloat
-        let showMemo: Bool
-        let metadataRows: [[MetadataField]]
-    }
-
-    private enum MetadataField: Hashable {
-        case track
-        case car
-        case driver
-        case tyre
-    }
-
-    private static func layoutProfile(for size: CGSize) -> LayoutProfile {
-        if size.width > size.height {
-            return landscapeLayout
-        }
-
-        let height = size.height
-        if height < 620 {
-            return compactLayout
-        } else if height < 740 {
-            return tightLayout
-        } else {
-            return regularLayout
-        }
-    }
-
-    private static let landscapeLayout = LayoutProfile(
-        pagePadding: 18,
-        widePagePadding: 22,
-        sectionSpacing: 18,
-        headerSpacing: 10,
-        headerContentSpacing: 8,
-        headerTitleSize: 18,
-        headerIDSize: 10,
-        headerDateSize: 16,
-        headerTimeSize: 14,
-        headerCardPadding: 14,
-        headerCardCornerRadius: 22,
-        metadataGridSpacing: 8,
-        metadataChipVerticalPadding: 4,
-        metadataChipHorizontalPadding: 8,
-        metadataTitleSize: 10,
-        metadataValueSize: 12,
-        tyreMatrixHeaderSpacing: 10,
-        tyreMatrixTitleSize: 22,
-        tyreMatrixSpacing: 20,
-        tyreMatrixPadding: 18,
-        tyreMatrixCornerRadius: 28,
-        wheelCardPadding: 14,
-        wheelCardCornerRadius: 24,
-        wheelContentSpacing: 12,
-        wheelZoneSpacing: 12,
-        wheelTitleSize: 19,
-        zoneTitleSize: 13,
-        temperatureFontSize: 56,
-        temperatureFallbackFontSize: 48,
-        temperatureSecondaryFallbackFontSize: 42,
-        pressureFontSize: 28,
-        pressureFallbackFontSize: 24,
-        pressureSecondaryFallbackFontSize: 20,
-        wheelMemoFontSize: 12,
-        wheelMemoLineLimit: 2,
-        wheelBadgeSpacing: 8,
-        infoCardHeaderSpacing: 10,
-        infoHeaderSize: 16,
-        infoLabelSize: 11,
-        infoCardPadding: 14,
-        infoCardCornerRadius: 22,
-        infoLineSpacing: 7,
-        infoIconSize: 13,
-        infoTitleSize: 11,
-        infoDetailSize: 13,
-        metricsSpacing: 14,
-        metricsColumnMaxWidth: 320,
-        languagePickerWidth: 200,
-        memoHeaderSpacing: 8,
-        memoTitleSize: 15,
-        memoFontSize: 12,
-        memoLineLimit: 2,
-        memoCardPadding: 14,
-        memoCardCornerRadius: 22,
-        memoGridSpacing: 10,
-        showMemo: false,
-        metadataRows: [[.track, .driver], [.car, .tyre]]
-    )
-
-    private static let regularLayout = LayoutProfile(
-        pagePadding: 20,
-        widePagePadding: 30,
-        sectionSpacing: 18,
-        headerSpacing: 12,
-        headerContentSpacing: 8,
-        headerTitleSize: 21,
-        headerIDSize: 11,
-        headerDateSize: 16,
-        headerTimeSize: 14,
-        headerCardPadding: 16,
-        headerCardCornerRadius: 22,
-        metadataGridSpacing: 8,
-        metadataChipVerticalPadding: 5,
-        metadataChipHorizontalPadding: 8,
-        metadataTitleSize: 11,
-        metadataValueSize: 13,
-        tyreMatrixHeaderSpacing: 12,
-        tyreMatrixTitleSize: 20,
-        tyreMatrixSpacing: 16,
-        tyreMatrixPadding: 18,
-        tyreMatrixCornerRadius: 26,
-        wheelCardPadding: 16,
-        wheelCardCornerRadius: 24,
-        wheelContentSpacing: 10,
-        wheelZoneSpacing: 10,
-        wheelTitleSize: 20,
-        zoneTitleSize: 12,
-        temperatureFontSize: 38,
-        temperatureFallbackFontSize: 32,
-        temperatureSecondaryFallbackFontSize: 28,
-        pressureFontSize: 24,
-        pressureFallbackFontSize: 20,
-        pressureSecondaryFallbackFontSize: 18,
-        wheelMemoFontSize: 12,
-        wheelMemoLineLimit: 2,
-        wheelBadgeSpacing: 6,
-        infoCardHeaderSpacing: 12,
-        infoHeaderSize: 16,
-        infoLabelSize: 11,
-        infoCardPadding: 14,
-        infoCardCornerRadius: 20,
-        infoLineSpacing: 8,
-        infoIconSize: 13,
-        infoTitleSize: 11,
-        infoDetailSize: 13,
-        metricsSpacing: 14,
-        metricsColumnMaxWidth: 300,
-        languagePickerWidth: 220,
-        memoHeaderSpacing: 10,
-        memoTitleSize: 16,
-        memoFontSize: 13,
-        memoLineLimit: 3,
-        memoCardPadding: 16,
-        memoCardCornerRadius: 22,
-        memoGridSpacing: 10,
-        showMemo: true,
-        metadataRows: [[.track, .car], [.driver, .tyre]]
-    )
-
-    private static let tightLayout = LayoutProfile(
-        pagePadding: 18,
-        widePagePadding: 26,
-        sectionSpacing: 16,
-        headerSpacing: 10,
-        headerContentSpacing: 7,
-        headerTitleSize: 20,
-        headerIDSize: 10,
-        headerDateSize: 15,
-        headerTimeSize: 13,
-        headerCardPadding: 14,
-        headerCardCornerRadius: 20,
-        metadataGridSpacing: 7,
-        metadataChipVerticalPadding: 4,
-        metadataChipHorizontalPadding: 7,
-        metadataTitleSize: 10,
-        metadataValueSize: 12,
-        tyreMatrixHeaderSpacing: 11,
-        tyreMatrixTitleSize: 19,
-        tyreMatrixSpacing: 14,
-        tyreMatrixPadding: 16,
-        tyreMatrixCornerRadius: 24,
-        wheelCardPadding: 14,
-        wheelCardCornerRadius: 22,
-        wheelContentSpacing: 9,
-        wheelZoneSpacing: 8,
-        wheelTitleSize: 18,
-        zoneTitleSize: 11,
-        temperatureFontSize: 34,
-        temperatureFallbackFontSize: 30,
-        temperatureSecondaryFallbackFontSize: 26,
-        pressureFontSize: 22,
-        pressureFallbackFontSize: 19,
-        pressureSecondaryFallbackFontSize: 17,
-        wheelMemoFontSize: 11.5,
-        wheelMemoLineLimit: 2,
-        wheelBadgeSpacing: 6,
-        infoCardHeaderSpacing: 11,
-        infoHeaderSize: 15,
-        infoLabelSize: 10,
-        infoCardPadding: 12,
-        infoCardCornerRadius: 18,
-        infoLineSpacing: 7,
-        infoIconSize: 12,
-        infoTitleSize: 10,
-        infoDetailSize: 12,
-        metricsSpacing: 12,
-        metricsColumnMaxWidth: 280,
-        languagePickerWidth: 200,
-        memoHeaderSpacing: 9,
-        memoTitleSize: 15,
-        memoFontSize: 12,
-        memoLineLimit: 2,
-        memoCardPadding: 14,
-        memoCardCornerRadius: 20,
-        memoGridSpacing: 10,
-        showMemo: true,
-        metadataRows: [[.track, .car], [.driver, .tyre]]
-    )
-
-    private static let compactLayout = LayoutProfile(
-        pagePadding: 16,
-        widePagePadding: 22,
-        sectionSpacing: 12,
-        headerSpacing: 8,
-        headerContentSpacing: 6,
-        headerTitleSize: 18,
-        headerIDSize: 9,
-        headerDateSize: 14,
-        headerTimeSize: 12,
-        headerCardPadding: 12,
-        headerCardCornerRadius: 18,
-        metadataGridSpacing: 6,
-        metadataChipVerticalPadding: 3,
-        metadataChipHorizontalPadding: 6,
-        metadataTitleSize: 9,
-        metadataValueSize: 11,
-        tyreMatrixHeaderSpacing: 10,
-        tyreMatrixTitleSize: 18,
-        tyreMatrixSpacing: 12,
-        tyreMatrixPadding: 12,
-        tyreMatrixCornerRadius: 20,
-        wheelCardPadding: 12,
-        wheelCardCornerRadius: 20,
-        wheelContentSpacing: 8,
-        wheelZoneSpacing: 7,
-        wheelTitleSize: 17,
-        zoneTitleSize: 10,
-        temperatureFontSize: 31,
-        temperatureFallbackFontSize: 27,
-        temperatureSecondaryFallbackFontSize: 23,
-        pressureFontSize: 19,
-        pressureFallbackFontSize: 17,
-        pressureSecondaryFallbackFontSize: 15,
-        wheelMemoFontSize: 11,
-        wheelMemoLineLimit: 1,
-        wheelBadgeSpacing: 5,
-        infoCardHeaderSpacing: 9,
-        infoHeaderSize: 14,
-        infoLabelSize: 9,
-        infoCardPadding: 10,
-        infoCardCornerRadius: 16,
-        infoLineSpacing: 6,
-        infoIconSize: 11,
-        infoTitleSize: 9,
-        infoDetailSize: 11,
-        metricsSpacing: 10,
-        metricsColumnMaxWidth: 250,
-        languagePickerWidth: 180,
-        memoHeaderSpacing: 8,
-        memoTitleSize: 14,
-        memoFontSize: 11,
-        memoLineLimit: 2,
-        memoCardPadding: 12,
-        memoCardCornerRadius: 18,
-        memoGridSpacing: 8,
-        showMemo: false,
-        metadataRows: [[.track, .car], [.driver, .tyre]]
-    )
-
-    private struct SessionReportWheelCard: View {
-        let wheel: WheelPos
-        let summary: SessionHistorySummary
-        let snapshot: SessionSnapshot
-        let language: ReportLanguage
-        let layout: LayoutProfile
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: layout.wheelContentSpacing) {
-                Text(localizedWheelTitle(for: wheel))
-                    .font(.system(size: layout.wheelTitleSize, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-
-                HStack(alignment: .bottom, spacing: layout.wheelZoneSpacing) {
-                    ForEach(Zone.allCases) { zone in
-                        VStack(spacing: 4) {
-                            Text(localizedZoneTitle(for: zone))
-                                .font(.system(size: layout.zoneTitleSize, weight: .medium))
-                                .foregroundStyle(.white.opacity(0.55))
-                            AdaptiveValueText(
-                                text: summary.formattedTemperature(for: wheel, zone: zone),
-                                fonts: [
-                                    layout.temperatureFontSize,
-                                    layout.temperatureFallbackFontSize,
-                                    layout.temperatureSecondaryFallbackFontSize
-                                ],
-                                weight: .heavy,
-                                design: .rounded
-                            )
-                                .foregroundStyle(.white)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                .fill(Color.white.opacity(0.12))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
-                                )
-                        )
-                    }
-                }
-
-                if let pressureText {
-                    HStack(spacing: layout.wheelBadgeSpacing) {
-                        Image(systemName: "gauge")
-                            .font(.system(size: layout.infoLabelSize, weight: .semibold))
-                            .foregroundStyle(Color.white.opacity(0.65))
-                        AdaptiveValueText(
-                            text: pressureText,
-                            fonts: [
-                                layout.pressureFontSize,
-                                layout.pressureFallbackFontSize,
-                                layout.pressureSecondaryFallbackFontSize
-                            ],
-                            weight: .semibold,
-                            design: .rounded
-                        )
-                        .foregroundStyle(.white)
-                    }
-                }
-
-                if let memo {
-                    Text(memo)
-                        .font(.system(size: layout.wheelMemoFontSize))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .lineLimit(layout.wheelMemoLineLimit)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        var displayName: String {
+            switch self {
+            case .english: return "English"
+            case .japanese: return "日本語"
             }
-            .padding(layout.wheelCardPadding)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: layout.wheelCardCornerRadius, style: .continuous)
-                    .fill(Color.white.opacity(0.1))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: layout.wheelCardCornerRadius, style: .continuous)
-                            .stroke(Color.white.opacity(0.16), lineWidth: 1)
-                    )
-            )
-            .layoutPriority(1)
-        }
-
-        private var pressureText: String? {
-            let text = summary.formattedPressure(for: wheel)
-            return text == "-" ? nil : text
-        }
-
-        private var memo: String? {
-            guard let raw = snapshot.wheelMemos[wheel]?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-                return nil
-            }
-            return raw
-        }
-
-        private func localizedWheelTitle(for wheel: WheelPos) -> String {
-            switch wheel {
-            case .FL: return localized("Front left", "フロント左")
-            case .FR: return localized("Front right", "フロント右")
-            case .RL: return localized("Rear left", "リア左")
-            case .RR: return localized("Rear right", "リア右")
-            }
-        }
-
-        private func localizedZoneTitle(for zone: Zone) -> String {
-            switch zone {
-            case .IN: return localized("Inner", "インナー")
-            case .CL: return localized("Center", "センター")
-            case .OUT: return localized("Outer", "アウター")
-            }
-        }
-
-        private func localized(_ english: String, _ japanese: String) -> String {
-            language == .english ? english : japanese
         }
     }
 }

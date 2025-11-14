@@ -94,26 +94,17 @@ struct SessionReportView: View {
                 .frame(maxWidth: layout.metricsColumnMaxWidth, alignment: .top)
             }
         } else {
-            rotatePrompt()
+            VStack(alignment: .leading, spacing: layout.sectionSpacing) {
+                headerStack
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                tyreMatrix(layout: layout)
+                metricsStack(layout: layout)
+                if layout.showMemo, memoAvailable {
+                    memoStrip(layout: layout)
+                }
+                Spacer(minLength: 0)
+            }
         }
-    }
-
-    private func rotatePrompt() -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "iphone.landscape")
-                .font(.system(size: 48))
-                .foregroundStyle(.white.opacity(0.75))
-            Text(localized("Rotate to landscape to view the full session report", "端末を横向きにしてレポート全体を表示してください"))
-                .font(.system(size: 18, weight: .semibold))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.85))
-            Text(localized("The report is optimized for a single landscape screen so the tyre temperatures and pressures stay legible.", "タイヤの温度と内圧を大きく見せるため、レポートは横向き1画面専用レイアウトです。"))
-                .font(.system(size: 14))
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.white.opacity(0.7))
-                .padding(.horizontal, 20)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func metricsStack(layout: LayoutProfile) -> some View {
@@ -210,12 +201,6 @@ struct SessionReportView: View {
         case .tyre:
             title = localized("Tyre", "タイヤ")
             value = summary.tyre
-        case .lap:
-            title = localized("Lap", "ラップ")
-            value = summary.lap.ifEmpty("-")
-        case .dateMemo:
-            title = localized("Date memo", "計測日メモ")
-            value = summary.date.ifEmpty("-")
         }
 
         return VStack(alignment: .leading, spacing: 3) {
@@ -256,6 +241,7 @@ struct SessionReportView: View {
         }
         .padding(layout.tyreMatrixPadding)
         .background(cardBackground(cornerRadius: layout.tyreMatrixCornerRadius))
+        .frame(maxWidth: .infinity, alignment: .leading)
         .layoutPriority(3)
     }
 
@@ -283,8 +269,8 @@ struct SessionReportView: View {
                                 .font(.system(size: layout.infoLabelSize, weight: .semibold))
                                 .foregroundStyle(.white.opacity(0.6))
                                 .multilineTextAlignment(.center)
-                            adaptiveValueText(
-                                summary.formattedPressure(for: wheel),
+                            AdaptiveValueText(
+                                text: summary.formattedPressure(for: wheel),
                                 fonts: [
                                     layout.pressureFontSize,
                                     layout.pressureFallbackFontSize,
@@ -318,6 +304,16 @@ struct SessionReportView: View {
             }
 
             infoLine(icon: "square.grid.3x3.fill", title: localized("Measurements", "計測数"), detail: "\(summary.resultCount)", layout: layout)
+
+            let lapText = summary.lap.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !lapText.isEmpty, lapText != "-" {
+                infoLine(icon: "flag.checkered", title: localized("Lap", "ラップ"), detail: lapText, layout: layout)
+            }
+
+            let dateMemo = summary.date.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !dateMemo.isEmpty, dateMemo != "-" {
+                infoLine(icon: "calendar.badge.clock", title: localized("Date memo", "計測日メモ"), detail: dateMemo, layout: layout)
+            }
 
             infoLine(
                 icon: "iphone.gen3",
@@ -416,38 +412,33 @@ struct SessionReportView: View {
         language == .english ? english : japanese
     }
 
-    @ViewBuilder
-    private func adaptiveValueText(
-        _ text: String,
-        fonts: [CGFloat],
-        weight: Font.Weight,
-        design: Font.Design
-    ) -> some View {
-        ViewThatFits {
-            if let first = fonts.first {
-                Text(text)
-                    .font(.system(size: first, weight: weight, design: design))
-            }
+    private struct AdaptiveValueText: View {
+        let text: String
+        let fonts: [CGFloat]
+        let weight: Font.Weight
+        let design: Font.Design
 
-            if fonts.count > 1 {
-                Text(text)
-                    .font(.system(size: fonts[1], weight: weight, design: design))
+        var body: some View {
+            ViewThatFits {
+                if fonts.isEmpty {
+                    textView(for: 12)
+                } else {
+                    ForEach(Array(fonts.enumerated()), id: \.offset) { _, size in
+                        textView(for: size)
+                    }
+                    textView(for: 12)
+                }
             }
-
-            if fonts.count > 2 {
-                Text(text)
-                    .font(.system(size: fonts[2], weight: weight, design: design))
-            }
-
-            if fonts.isEmpty {
-                Text(text)
-                    .font(.system(size: 12, weight: weight, design: design))
-            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.35)
+            .allowsTightening(true)
+            .monospacedDigit()
         }
-        .lineLimit(1)
-        .minimumScaleFactor(0.35)
-        .allowsTightening(true)
-        .monospacedDigit()
+
+        private func textView(for size: CGFloat) -> some View {
+            Text(text)
+                .font(.system(size: size, weight: weight, design: design))
+        }
     }
 
     private func languagePicker(layout: LayoutProfile) -> some View {
@@ -457,7 +448,7 @@ struct SessionReportView: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
-        .frame(maxWidth: layout.languagePickerWidth)
+        .frame(maxWidth: layout.languagePickerWidth, alignment: .leading)
     }
 
     private enum ReportLanguage: String, CaseIterable, Identifiable {
@@ -532,8 +523,6 @@ struct SessionReportView: View {
         case car
         case driver
         case tyre
-        case lap
-        case dateMemo
     }
 
     private static func layoutProfile(for size: CGSize) -> LayoutProfile {
@@ -668,7 +657,7 @@ struct SessionReportView: View {
         memoCardCornerRadius: 22,
         memoGridSpacing: 10,
         showMemo: true,
-        metadataRows: [[.track, .car], [.driver, .tyre], [.lap, .dateMemo]]
+        metadataRows: [[.track, .car], [.driver, .tyre]]
     )
 
     private static let tightLayout = LayoutProfile(
@@ -728,7 +717,7 @@ struct SessionReportView: View {
         memoCardCornerRadius: 20,
         memoGridSpacing: 10,
         showMemo: true,
-        metadataRows: [[.track, .car], [.driver, .tyre], [.lap, .dateMemo]]
+        metadataRows: [[.track, .car], [.driver, .tyre]]
     )
 
     private static let compactLayout = LayoutProfile(
@@ -812,8 +801,8 @@ struct SessionReportView: View {
                             Text(localizedZoneTitle(for: zone))
                                 .font(.system(size: layout.zoneTitleSize, weight: .medium))
                                 .foregroundStyle(.white.opacity(0.55))
-                            adaptiveValueText(
-                                summary.formattedTemperature(for: wheel, zone: zone),
+                            AdaptiveValueText(
+                                text: summary.formattedTemperature(for: wheel, zone: zone),
                                 fonts: [
                                     layout.temperatureFontSize,
                                     layout.temperatureFallbackFontSize,
@@ -822,7 +811,7 @@ struct SessionReportView: View {
                                 weight: .heavy,
                                 design: .rounded
                             )
-                            .foregroundStyle(.white)
+                                .foregroundStyle(.white)
                         }
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 6)
@@ -842,8 +831,8 @@ struct SessionReportView: View {
                         Image(systemName: "gauge")
                             .font(.system(size: layout.infoLabelSize, weight: .semibold))
                             .foregroundStyle(Color.white.opacity(0.65))
-                        adaptiveValueText(
-                            pressureText,
+                        AdaptiveValueText(
+                            text: pressureText,
                             fonts: [
                                 layout.pressureFontSize,
                                 layout.pressureFallbackFontSize,

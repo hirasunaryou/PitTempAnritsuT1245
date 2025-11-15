@@ -1020,7 +1020,6 @@ struct MeasureView: View {
                 if showPlaceholder {
                     Text("ex) \(Int(manualPressureDefault))kPa")
                         .foregroundStyle(Color.secondary.opacity(0.7))
-                        .italic()
                 } else {
                     Text("\(displayText) kPa")
                         .font(.title3.monospacedDigit())

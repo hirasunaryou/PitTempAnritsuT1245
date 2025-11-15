@@ -1,624 +1,670 @@
 import SwiftUI
 
 struct SessionReportView: View {
-    let summary: SessionHistorySummary
-    let snapshot: SessionSnapshot
+    @EnvironmentObject var vm: SessionViewModel
+    @Environment(\.dismiss) private var dismiss
 
-    @AppStorage("sessionReportLanguage")
-    private var languageRaw: String = ReportLanguage.english.rawValue
+    private let generatedAt = Date()
 
-    private static let dateFormatter: DateFormatter = {
+    private static let headerDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "yyyy/MM/dd"
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "yyyy.MM.dd (EEE)"
         return formatter
     }()
 
-    private static let timeFormatter: DateFormatter = {
+    private static let headerTimeFormatter: DateFormatter = {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "a h:mm"
-        formatter.amSymbol = "AM"
-        formatter.pmSymbol = "PM"
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "HH:mm"
         return formatter
     }()
 
-    private static let manualDateParser: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.dateFormat = "yyyy/MM/dd HH:mm"
+    private static let rangeFormatter: DateIntervalFormatter = {
+        let formatter = DateIntervalFormatter()
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
         return formatter
     }()
 
-    private static let temperatureFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 0
-        formatter.roundingMode = .halfUp
+    private static let durationFormatter: DateComponentsFormatter = {
+        let formatter = DateComponentsFormatter()
+        formatter.allowedUnits = [.hour, .minute]
+        formatter.unitsStyle = .abbreviated
         return formatter
     }()
-
-    private static let pressureFormatter: NumberFormatter = {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = 0
-        formatter.roundingMode = .halfUp
-        return formatter
-    }()
-
-    private var language: ReportLanguage { ReportLanguage(rawValue: languageRaw) ?? .english }
-
-    private var displayedDate: String {
-        if let start = measurementStart {
-            return Self.dateFormatter.string(from: start)
-        }
-
-        if let manual = sanitizedManualDate(from: summary.date) {
-            return manual
-        }
-
-        return Self.dateFormatter.string(from: summary.createdAt)
-    }
-
-    private var displayedTrack: String {
-        summary.track.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
-    }
-
-    private var displayedCar: String {
-        summary.car.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
-    }
-
-    private var displayedDriver: String {
-        summary.driver.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
-    }
-
-    private var displayedTyre: String {
-        summary.tyre.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
-    }
-
-    private var displayedChecker: String {
-        summary.checker.trimmingCharacters(in: .whitespacesAndNewlines).ifEmpty("-")
-    }
-
-    private var measurementStart: Date? {
-        if let earliest = snapshot.results.map(\.startedAt).min() {
-            return earliest
-        }
-        if let began = snapshot.sessionBeganAt { return began }
-        if let began = summary.sessionBeganAt { return began }
-        return nil
-    }
-
-    private var displayedTime: String {
-        let date = measurementStart ?? summary.createdAt
-        let time = Self.timeFormatter.string(from: date)
-        let zone = timeZoneAbbreviation(for: date)
-        return zone.isEmpty ? time : "\(time) \(zone)"
-    }
-
-    private func timeZoneAbbreviation(for date: Date) -> String {
-        TimeZone.current.abbreviation(for: date) ?? TimeZone.current.identifier
-    }
-
-    private var memoItems: [(WheelPos, String)] {
-        WheelPos.allCases.compactMap { wheel in
-            guard let memo = snapshot.wheelMemos[wheel]?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !memo.isEmpty else { return nil }
-            return (wheel, memo)
-        }
-    }
-
-    private func sanitizedManualDate(from raw: String) -> String? {
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
-        if let parsed = Self.manualDateParser.date(from: trimmed) {
-            return Self.dateFormatter.string(from: parsed)
-        }
-
-        var components = trimmed
-        if let range = components.range(of: "T") {
-            components = String(components[..<range.lowerBound])
-        }
-        if let range = components.range(of: " ") {
-            components = String(components[..<range.lowerBound])
-        }
-        if let range = components.range(of: ",") {
-            components = String(components[..<range.lowerBound])
-        }
-        if let range = components.range(of: "\n") {
-            components = String(components[..<range.lowerBound])
-        }
-        if let range = components.range(of: "\r") {
-            components = String(components[..<range.lowerBound])
-        }
-
-        let sanitized = components.trimmingCharacters(in: .whitespacesAndNewlines)
-        return sanitized.isEmpty ? nil : sanitized
-    }
 
     var body: some View {
-        GeometryReader { proxy in
-            let metrics = LayoutMetrics(size: proxy.size)
-            ZStack {
-                Color(red: 0.92, green: 0.9, blue: 0.86)
-                    .ignoresSafeArea()
+        NavigationStack {
+            GeometryReader { proxy in
+                let orientation: ReportOrientation = proxy.size.width >= proxy.size.height ? .landscape : .portrait
+                let metrics = layoutMetrics(for: orientation)
+                let scale = min(proxy.size.width / metrics.canvasSize.width,
+                                proxy.size.height / metrics.canvasSize.height)
 
-                VStack(spacing: metrics.canvasSpacing) {
-                    languagePicker(metrics: metrics)
-                        .frame(maxWidth: 220)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
+                ZStack {
+                    reportBackground
 
-                    paperSheet(metrics: metrics)
-                        .padding(.horizontal, metrics.paperHorizontalPadding)
-                        .padding(.bottom, metrics.paperBottomPadding)
+                    reportPage(for: orientation, metrics: metrics)
+                        .frame(width: metrics.canvasSize.width, height: metrics.canvasSize.height)
+                        .scaleEffect(scale, anchor: .center)
                 }
-                .padding(.top, metrics.paperTopPadding)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .frame(width: proxy.size.width, height: proxy.size.height)
+            }
+            .navigationTitle("Session report / セッションレポート")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Close / 閉じる") { dismiss() }
+                }
             }
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .navigationTitle(localized("Session report", "セッションレポート"))
+        .presentationDetents([.large])
     }
 
-    private func paperSheet(metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: metrics.sectionSpacing) {
-            sheetHeader(metrics: metrics)
-            Divider().overlay(Color.black.opacity(0.25))
-            formSection(metrics: metrics)
-            Divider().overlay(Color.black.opacity(0.2))
-            wheelSection(metrics: metrics)
-            if !memoItems.isEmpty {
-                Divider().overlay(Color.black.opacity(0.2))
-                memoSection(metrics: metrics)
+    private func reportPage(for orientation: ReportOrientation, metrics: ReportLayoutMetrics) -> some View {
+        VStack(spacing: metrics.sectionSpacing) {
+            topRow(isLandscape: orientation.isLandscape)
+            middleRow(isLandscape: orientation.isLandscape)
+            identityStrip(isLandscape: orientation.isLandscape)
+
+            if !condensedMemos.isEmpty {
+                memoStrip
+            }
+
+            footerStamp
+        }
+        .padding(metrics.pagePadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func topRow(isLandscape: Bool) -> some View {
+        if isLandscape {
+            HStack(alignment: .top, spacing: 24) {
+                timeBanner
+                keyMetricStack
+                    .frame(maxWidth: 320)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                timeBanner
+                keyMetricStack
             }
         }
-        .padding(metrics.sheetPadding)
-        .frame(maxWidth: .infinity)
+    }
+
+    private var timeBanner: some View {
+        let meta = vm.meta
+        let track = meta.track.ifEmpty("Track unknown / サーキット未設定")
+        let capture = captureRange
+        let captureDate = capture?.start ?? Date()
+        let dayText = Self.headerDateFormatter.string(from: captureDate)
+        let windowText = capture.map { Self.rangeFormatter.string(from: $0.start, to: $0.end) }
+            ?? Self.headerTimeFormatter.string(from: captureDate)
+        let durationText = capture.flatMap { range -> String? in
+            let seconds = max(0, range.end.timeIntervalSince(range.start))
+            guard let formatted = Self.durationFormatter.string(from: seconds), !formatted.isEmpty else { return nil }
+            return "Duration / 所要: \(formatted)"
+        }
+
+        return VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(track)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                Text(dayText)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Time window / 計測時間帯")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.65))
+                Text(windowText)
+                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                if let durationText {
+                    Text(durationText)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: metrics.sheetCornerRadius, style: .continuous)
-                .fill(Color(red: 0.99, green: 0.98, blue: 0.94))
-                .overlay(
-                    RoundedRectangle(cornerRadius: metrics.sheetCornerRadius, style: .continuous)
-                        .stroke(Color.black.opacity(0.1), lineWidth: 1)
-                )
-                .shadow(color: Color.black.opacity(0.08), radius: 12, x: 0, y: 6)
+            LinearGradient(colors: [Color(red: 0.07, green: 0.18, blue: 0.36),
+                                    Color(red: 0.18, green: 0.39, blue: 0.72)],
+                           startPoint: .topLeading,
+                           endPoint: .bottomTrailing)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.2), radius: 20, x: 0, y: 12)
+    }
+
+    private var keyMetricStack: some View {
+        VStack(spacing: 16) {
+            temperatureSummaryCard
+            pressureSummaryCard
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var temperatureSummaryCard: some View {
+        let hottest = hottestReading
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Temperature / 温度", systemImage: "flame.fill")
+                    .labelStyle(.titleAndIcon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.95, green: 0.52, blue: 0.17))
+                Spacer()
+            }
+
+            Text(formattedTemperature(maxTemperature))
+                .font(.system(size: 46, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            HStack(spacing: 12) {
+                StatCaption(title: "Average / 平均", value: formattedTemperature(averageTemperature))
+                if let hottest {
+                    StatCaption(title: "Peak zone / 最高ゾーン", value: "\(wheelName(for: hottest.wheel).code) · \(zoneLabel(hottest.zone))")
+                }
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.systemBackground).opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
         )
     }
 
-    private func languagePicker(metrics: LayoutMetrics) -> some View {
-        Picker("", selection: $languageRaw) {
-            ForEach(ReportLanguage.allCases) { language in
-                Text(language.displayName)
-                    .tag(language.rawValue)
+    private var pressureSummaryCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("Inner pressure / 内圧", systemImage: "gauge")
+                    .labelStyle(.titleAndIcon)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color(red: 0.24, green: 0.49, blue: 0.92))
+                Spacer()
+            }
+
+            Text(formattedPressure(pressureAverage))
+                .font(.system(size: 42, weight: .bold, design: .rounded))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+
+            HStack(spacing: 12) {
+                if let range = pressureRange {
+                    StatCaption(title: "Range / 幅", value: "\(formattedPressure(range.min)) – \(formattedPressure(range.max))")
+                }
+                if let leader = highestPressureWheel {
+                    StatCaption(title: "Highest wheel / 最高ホイール", value: wheelName(for: leader.wheel).code)
+                }
             }
         }
-        .pickerStyle(.segmented)
-        .font(.system(size: metrics.languagePickerFont, weight: .medium))
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.systemBackground).opacity(0.92))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
     }
 
-    private func sheetHeader(metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: metrics.headerSpacing) {
-            Text(localized("PIT TEMP SESSION REPORT", "PitTemp 計測レポート"))
-                .font(.system(size: metrics.headerTitleSize, weight: .heavy, design: .rounded))
-                .foregroundStyle(Color.black.opacity(0.85))
-                .padding(.bottom, 2)
-
-            HStack(alignment: .lastTextBaseline, spacing: 8) {
-                Text(localized("Track", "サーキット").uppercased())
-                    .font(.system(size: metrics.fieldLabelSize, weight: .semibold))
-                    .foregroundStyle(Color.black.opacity(0.55))
-                Rectangle()
-                    .frame(height: 1)
-                    .frame(maxWidth: .infinity)
-                    .foregroundStyle(Color.black.opacity(0.25))
-                Text(displayedTrack)
-                    .font(.system(size: metrics.fieldValueSize, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.85))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
+    @ViewBuilder
+    private func middleRow(isLandscape: Bool) -> some View {
+        if isLandscape {
+            HStack(alignment: .top, spacing: 24) {
+                wheelQuadrantMap
+                    .frame(maxWidth: 360)
+                temperatureDetailPanel
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 16) {
+                wheelQuadrantMap
+                temperatureDetailPanel
             }
         }
     }
 
-    private func formSection(metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: metrics.formRowSpacing) {
-            fieldRow(metrics: metrics, fields: [
-                .init(label: localized("Date", "日付"), value: displayedDate),
-                .init(label: localized("Time", "時間"), value: displayedTime)
-            ])
-            fieldRow(metrics: metrics, fields: [
-                .init(label: localized("Car", "車両"), value: displayedCar),
-                .init(label: localized("Driver", "ドライバー"), value: displayedDriver)
-            ])
-            fieldRow(metrics: metrics, fields: [
-                .init(label: localized("Tyre", "タイヤ"), value: displayedTyre),
-                .init(label: localized("Measured by", "計測者"), value: displayedChecker)
-            ])
-            fieldRow(metrics: metrics, fields: [
-                .init(label: localized("Session ID", "セッション ID"),
-                      value: snapshot.sessionID.uuidString,
-                      style: .monospaced,
-                      maxLines: 1,
-                      weight: .regular)
-            ])
-        }
-    }
+    private var wheelQuadrantMap: some View {
+        GeometryReader { geo in
+            let side = min(geo.size.width, geo.size.height)
+            let itemSize = side / 2 - 10
 
-    private func fieldRow(metrics: LayoutMetrics, fields: [Field]) -> some View {
-        HStack(spacing: fields.count == 1 ? 0 : metrics.formColumnSpacing) {
-            ForEach(fields) { field in
-                VStack(alignment: .leading, spacing: metrics.fieldSpacing) {
-                    Text(field.label.uppercased())
-                        .font(.system(size: metrics.fieldLabelSize, weight: .semibold))
-                        .foregroundStyle(Color.black.opacity(0.55))
-                    Rectangle()
-                        .frame(height: 1)
-                        .frame(maxWidth: .infinity)
-                        .foregroundStyle(Color.black.opacity(0.15))
-                    Group {
-                        if field.style == .monospaced {
-                            Text(field.value.ifEmpty("-"))
-                                .monospacedDigit()
-                        } else {
-                            Text(field.value.ifEmpty("-"))
-                        }
+            ZStack {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .fill(Color(.systemBackground).opacity(0.95))
+                    .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 6)
+
+                VStack(spacing: 10) {
+                    HStack(spacing: 10) {
+                        quadrantTile(for: .FL)
+                            .frame(width: itemSize, height: itemSize)
+                        quadrantTile(for: .FR)
+                            .frame(width: itemSize, height: itemSize)
                     }
-                    .font(.system(size: metrics.fieldValueSize, weight: field.weight, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.85))
-                    .lineLimit(field.maxLines)
-                    .minimumScaleFactor(field.maxLines == 1 ? 0.55 : 0.85)
-                    .fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 10) {
+                        quadrantTile(for: .RL)
+                            .frame(width: itemSize, height: itemSize)
+                        quadrantTile(for: .RR)
+                            .frame(width: itemSize, height: itemSize)
+                    }
+                }
+                .padding(20)
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+
+    private func quadrantTile(for wheel: WheelPos) -> some View {
+        let temperature = wheelTemperatureSummary[wheel]
+        let pressure = vm.wheelPressures[wheel]
+        let isActive = wheel == featuredWheel
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(wheelName(for: wheel).code)
+                    .font(.headline.weight(.bold))
+                Spacer()
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(formattedTemperature(temperature ?? .nan))
+                    .font(.title3.monospacedDigit())
+                    .foregroundStyle(.primary)
+                Text("Pressure \(formattedPressure(pressure))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .fill(isActive ? Color.accentColor.opacity(0.18) : Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(isActive ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: isActive ? 2 : 1)
+        )
+    }
+
+    private var temperatureDetailPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Zone temperatures / ゾーン温度")
+                .font(.headline)
+            Text("Latest per tyre / 最新値一覧")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            ForEach(Array(WheelPos.allCases.enumerated()), id: \.element) { index, wheel in
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(wheelName(for: wheel).title)
+                            .font(.subheadline.weight(.semibold))
+                        Text(wheelName(for: wheel).code)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    ForEach(zoneDisplayOrder, id: \.self) { zone in
+                        zoneChip(for: wheel, zone: zone)
+                    }
+                }
+                .padding(.vertical, 6)
+                if index < WheelPos.allCases.count - 1 {
+                    Divider()
+                }
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .fill(Color(.systemBackground).opacity(0.94))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 28, style: .continuous)
+                .stroke(Color.primary.opacity(0.07), lineWidth: 1)
+        )
+    }
+
+    private func zoneChip(for wheel: WheelPos, zone: Zone) -> some View {
+        let reading = latestTemperatures[wheel]?[zone]
+        let value = formattedTemperature(reading ?? .nan)
+
+        return VStack(spacing: 4) {
+            Text(zoneLabel(zone))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.footnote.monospacedDigit())
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(zoneBackground(for: reading))
+                )
+        }
+    }
+
+    private func identityStrip(isLandscape: Bool) -> some View {
+        let meta = vm.meta
+        let infoItems: [(title: String, value: String)] = [
+            ("Driver / ドライバー", meta.driver.ifEmpty("--")),
+            ("Car / 車両", meta.car.ifEmpty("--")),
+            ("Tyre / タイヤ", meta.tyre.ifEmpty("--")),
+            ("Lap / ラップ", meta.lap.ifEmpty("--")),
+        ]
+
+        let content = Group {
+            ForEach(infoItems.indices, id: \.self) { idx in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(infoItems[idx].title)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(infoItems[idx].value)
+                        .font(.callout)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-    }
 
-    private func wheelSection(metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: metrics.wheelSectionSpacing) {
-            Text(localized("Tyre temps & pressure", "タイヤ温度・内圧"))
-                .font(.system(size: metrics.sectionLabelSize, weight: .bold))
-                .foregroundStyle(Color.black.opacity(0.65))
-
-            HStack(alignment: .top, spacing: metrics.wheelColumnSpacing) {
-                VStack(spacing: metrics.wheelColumnSpacing) {
-                    wheelCard(.FL, metrics: metrics)
-                    wheelCard(.RL, metrics: metrics)
-                }
-                VStack(spacing: metrics.wheelColumnSpacing) {
-                    wheelCard(.FR, metrics: metrics)
-                    wheelCard(.RR, metrics: metrics)
-                }
+        return Group {
+            if isLandscape {
+                HStack(alignment: .top, spacing: 16) { content }
+            } else {
+                VStack(alignment: .leading, spacing: 8) { content }
             }
         }
-    }
-
-    private func wheelCard(_ wheel: WheelPos, metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: metrics.wheelInnerSpacing) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(localizedWheelTitle(for: wheel))
-                    .font(.system(size: metrics.wheelLabelSize, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.8))
-                Spacer()
-                if let pressure = pressureValue(for: wheel) {
-                    pressureDisplay(for: pressure, metrics: metrics)
-                }
-            }
-
-            Rectangle()
-                .frame(height: 1)
-                .foregroundStyle(Color.black.opacity(0.1))
-
-            HStack(alignment: .bottom, spacing: metrics.zoneSpacing) {
-                ForEach(zoneOrder, id: \.self) { zone in
-                    VStack(spacing: metrics.zoneInnerSpacing) {
-                        Text(localizedZoneTitle(for: zone))
-                            .font(.system(size: metrics.zoneLabelSize, weight: .semibold))
-                            .foregroundStyle(Color.black.opacity(0.5))
-                        Text(temperatureText(for: wheel, zone: zone))
-                            .font(.system(size: metrics.temperatureFontSize, weight: .heavy, design: .rounded))
-                            .foregroundStyle(Color.black.opacity(0.9))
-                            .monospacedDigit()
-                            .minimumScaleFactor(0.6)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
-
-            if let memo = memoText(for: wheel) {
-                Text(memo)
-                    .font(.system(size: metrics.memoFontSize, weight: .regular))
-                    .foregroundStyle(Color.black.opacity(0.6))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(metrics.wheelPadding)
-        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
         .background(
-            RoundedRectangle(cornerRadius: metrics.wheelCornerRadius, style: .continuous)
-                .stroke(Color.black.opacity(0.12), lineWidth: 1)
-                .background(
-                    RoundedRectangle(cornerRadius: metrics.wheelCornerRadius, style: .continuous)
-                        .fill(Color.white.opacity(0.9))
-                )
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(Color(.tertiarySystemBackground).opacity(0.9))
         )
     }
 
-    private func memoSection(metrics: LayoutMetrics) -> some View {
-        VStack(alignment: .leading, spacing: metrics.memoSpacing) {
-            Text(localized("Notes", "メモ"))
-                .font(.system(size: metrics.sectionLabelSize, weight: .bold))
-                .foregroundStyle(Color.black.opacity(0.65))
-            ForEach(memoItems, id: \.0) { wheel, memo in
-                HStack(alignment: .top, spacing: 8) {
-                    Text(localizedWheelShort(for: wheel))
-                        .font(.system(size: metrics.memoLabelSize, weight: .semibold))
-                        .foregroundStyle(Color.black.opacity(0.55))
-                        .frame(width: metrics.memoLabelWidth, alignment: .leading)
-                    Text(memo)
-                        .font(.system(size: metrics.memoFontSize))
-                        .foregroundStyle(Color.black.opacity(0.7))
-                        .fixedSize(horizontal: false, vertical: true)
+    private var memoStrip: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Notes / 備考")
+                .font(.headline)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                ForEach(condensedMemos, id: \.wheel) { memo in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(wheelName(for: memo.wheel).title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(memo.text)
+                            .font(.footnote)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(Color(.systemBackground).opacity(0.92))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(Color.primary.opacity(0.05), lineWidth: 1)
+                    )
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func temperatureText(for wheel: WheelPos, zone: Zone) -> String {
-        guard let value = summary.temperature(for: wheel, zone: zone), value.isFinite else { return "-" }
-        return Self.temperatureFormatter.string(from: NSNumber(value: value)) ?? "-"
-    }
+    private struct StatCaption: View {
+        let title: String
+        let value: String
 
-    private func pressureValue(for wheel: WheelPos) -> Double? {
-        guard let value = summary.wheelPressures[wheel], value.isFinite else { return nil }
-        return value
-    }
-
-    private func pressureDisplay(for value: Double, metrics: LayoutMetrics) -> some View {
-        let number = Self.pressureFormatter.string(from: NSNumber(value: value))?.ifEmpty("") ?? ""
-        return HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(number.ifEmpty("-"))
-                .font(.system(size: metrics.pressureValueFontSize, weight: .heavy, design: .rounded))
-                .foregroundStyle(Color.black.opacity(0.85))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(metrics.pressureValueMinimumScale)
-            Text("kPa")
-                .font(.system(size: metrics.pressureUnitFontSize, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.6))
-                .lineLimit(1)
-                .minimumScaleFactor(metrics.pressureUnitMinimumScale)
+        var body: some View {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.footnote)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
     }
 
-    private func memoText(for wheel: WheelPos) -> String? {
-        guard let memo = snapshot.wheelMemos[wheel]?.trimmingCharacters(in: .whitespacesAndNewlines), !memo.isEmpty else {
+    private var captureRange: (start: Date, end: Date)? {
+        guard let start = vm.results.map({ $0.startedAt }).min(),
+              let end = vm.results.map({ $0.endedAt }).max() else {
             return nil
         }
-        return memo
+        return (start, end)
     }
 
-    private func localizedWheelTitle(for wheel: WheelPos) -> String {
-        switch wheel {
-        case .FL: return language == .english ? "Fr-L" : "Fr-L"
-        case .FR: return language == .english ? "Fr-R" : "Fr-R"
-        case .RL: return language == .english ? "Re-L" : "Re-L"
-        case .RR: return language == .english ? "Re-R" : "Re-R"
-        }
-    }
-
-    private func localizedWheelShort(for wheel: WheelPos) -> String {
-        switch wheel {
-        case .FL: return language == .english ? "FL" : "Fr-L"
-        case .FR: return language == .english ? "FR" : "Fr-R"
-        case .RL: return language == .english ? "RL" : "Re-L"
-        case .RR: return language == .english ? "RR" : "Re-R"
-        }
-    }
-
-    private func localizedZoneTitle(for zone: Zone) -> String {
-        switch zone {
-        case .OUT: return localized("Out", "Out")
-        case .CL: return localized("CL", "CL")
-        case .IN: return localized("In", "In")
-        }
-    }
-
-    private func localized(_ english: String, _ japanese: String) -> String {
-        language == .english ? english : japanese
-    }
-
-    private var zoneOrder: [Zone] { [.OUT, .CL, .IN] }
-
-    private struct Field: Identifiable {
-        enum Style {
-            case standard
-            case monospaced
-        }
-
-        let id = UUID()
-        let label: String
-        let value: String
-        let style: Style
-        let maxLines: Int
-        let weight: Font.Weight
-
-        init(label: String, value: String, style: Style = .standard, maxLines: Int = 1, weight: Font.Weight = .semibold) {
-            self.label = label
-            self.value = value
-            self.style = style
-            self.maxLines = maxLines
-            self.weight = weight
-        }
-    }
-
-    private struct LayoutMetrics {
-        let sheetPadding: CGFloat
-        let sheetCornerRadius: CGFloat
-        let sectionSpacing: CGFloat
-        let headerSpacing: CGFloat
-        let fieldLabelSize: CGFloat
-        let fieldValueSize: CGFloat
-        let fieldSpacing: CGFloat
-        let formRowSpacing: CGFloat
-        let formColumnSpacing: CGFloat
-        let sectionLabelSize: CGFloat
-        let wheelSectionSpacing: CGFloat
-        let wheelColumnSpacing: CGFloat
-        let wheelInnerSpacing: CGFloat
-        let zoneSpacing: CGFloat
-        let zoneInnerSpacing: CGFloat
-        let wheelLabelSize: CGFloat
-        let temperatureFontSize: CGFloat
-        let pressureValueFontSize: CGFloat
-        let pressureUnitFontSize: CGFloat
-        let pressureValueMinimumScale: CGFloat
-        let pressureUnitMinimumScale: CGFloat
-        let zoneLabelSize: CGFloat
-        let memoFontSize: CGFloat
-        let memoSpacing: CGFloat
-        let memoLabelSize: CGFloat
-        let memoLabelWidth: CGFloat
-        let wheelCornerRadius: CGFloat
-        let wheelPadding: CGFloat
-        let canvasSpacing: CGFloat
-        let languagePickerFont: CGFloat
-        let headerTitleSize: CGFloat
-        let paperHorizontalPadding: CGFloat
-        let paperTopPadding: CGFloat
-        let paperBottomPadding: CGFloat
-
-        init(size: CGSize) {
-            let shorter = min(size.width, size.height)
-
-            if shorter < 360 {
-                sheetPadding = 14
-                sheetCornerRadius = 18
-                sectionSpacing = 14
-                headerSpacing = 8
-                fieldLabelSize = 10
-                fieldValueSize = 15
-                fieldSpacing = 4
-                formRowSpacing = 10
-                formColumnSpacing = 12
-                sectionLabelSize = 12
-                wheelSectionSpacing = 12
-                wheelColumnSpacing = 12
-                wheelInnerSpacing = 10
-                zoneSpacing = 10
-                zoneInnerSpacing = 4
-                wheelLabelSize = 14
-                temperatureFontSize = 24
-                pressureValueFontSize = 24
-                pressureUnitFontSize = 12
-                pressureValueMinimumScale = 0.82
-                pressureUnitMinimumScale = 0.82
-                zoneLabelSize = 11
-                memoFontSize = 11
-                memoSpacing = 6
-                memoLabelSize = 11
-                memoLabelWidth = 26
-                wheelCornerRadius = 14
-                wheelPadding = 10
-                canvasSpacing = 16
-                languagePickerFont = 12
-                headerTitleSize = 18
-                paperHorizontalPadding = 12
-                paperTopPadding = 12
-                paperBottomPadding = 12
-            } else if shorter < 420 {
-                sheetPadding = 18
-                sheetCornerRadius = 20
-                sectionSpacing = 18
-                headerSpacing = 10
-                fieldLabelSize = 11
-                fieldValueSize = 17
-                fieldSpacing = 4
-                formRowSpacing = 12
-                formColumnSpacing = 16
-                sectionLabelSize = 13
-                wheelSectionSpacing = 16
-                wheelColumnSpacing = 14
-                wheelInnerSpacing = 12
-                zoneSpacing = 12
-                zoneInnerSpacing = 6
-                wheelLabelSize = 16
-                temperatureFontSize = 28
-                pressureValueFontSize = 28
-                pressureUnitFontSize = 13
-                pressureValueMinimumScale = 0.85
-                pressureUnitMinimumScale = 0.85
-                zoneLabelSize = 12
-                memoFontSize = 12
-                memoSpacing = 8
-                memoLabelSize = 12
-                memoLabelWidth = 30
-                wheelCornerRadius = 16
-                wheelPadding = 12
-                canvasSpacing = 18
-                languagePickerFont = 13
-                headerTitleSize = 20
-                paperHorizontalPadding = 16
-                paperTopPadding = 16
-                paperBottomPadding = 16
+    private var hottestReading: (wheel: WheelPos, zone: Zone, value: Double)? {
+        var candidate: (WheelPos, Zone, Double, Date)? = nil
+        for result in vm.results {
+            guard result.peakC.isFinite else { continue }
+            let record = (result.wheel, result.zone, result.peakC, result.endedAt)
+            if let current = candidate {
+                if record.2 > current.2 || (record.2 == current.2 && record.3 > current.3) {
+                    candidate = record
+                }
             } else {
-                sheetPadding = 22
-                sheetCornerRadius = 22
-                sectionSpacing = 22
-                headerSpacing = 12
-                fieldLabelSize = 12
-                fieldValueSize = 19
-                fieldSpacing = 4
-                formRowSpacing = 14
-                formColumnSpacing = 20
-                sectionLabelSize = 14
-                wheelSectionSpacing = 18
-                wheelColumnSpacing = 16
-                wheelInnerSpacing = 14
-                zoneSpacing = 14
-                zoneInnerSpacing = 6
-                wheelLabelSize = 18
-                temperatureFontSize = 32
-                pressureValueFontSize = 32
-                pressureUnitFontSize = 14
-                pressureValueMinimumScale = 0.88
-                pressureUnitMinimumScale = 0.9
-                zoneLabelSize = 13
-                memoFontSize = 13
-                memoSpacing = 10
-                memoLabelSize = 13
-                memoLabelWidth = 32
-                wheelCornerRadius = 18
-                wheelPadding = 14
-                canvasSpacing = 20
-                languagePickerFont = 14
-                headerTitleSize = 22
-                paperHorizontalPadding = 20
-                paperTopPadding = 20
-                paperBottomPadding = 20
+                candidate = record
             }
+        }
+        guard let candidate else { return nil }
+        return (candidate.0, candidate.1, candidate.2)
+    }
+
+    private var featuredWheel: WheelPos? {
+        if let current = vm.currentWheel { return current }
+        if let hottest = hottestReading { return hottest.wheel }
+        if let latestResult = vm.results.sorted(by: { $0.endedAt < $1.endedAt }).last {
+            return latestResult.wheel
+        }
+        if let firstPressure = vm.wheelPressures.keys.sorted(by: { $0.rawValue < $1.rawValue }).first {
+            return firstPressure
+        }
+        return nil
+    }
+
+    private var latestTemperatures: [WheelPos: [Zone: Double]] {
+        var latest: [WheelPos: [Zone: (Date, Double)]] = [:]
+        for result in vm.results {
+            guard result.peakC.isFinite else { continue }
+            var wheelMap = latest[result.wheel, default: [:]]
+            if let existing = wheelMap[result.zone], existing.0 >= result.endedAt {
+                continue
+            }
+            wheelMap[result.zone] = (result.endedAt, result.peakC)
+            latest[result.wheel] = wheelMap
+        }
+
+        var output: [WheelPos: [Zone: Double]] = [:]
+        for (wheel, zoneMap) in latest {
+            var simplified: [Zone: Double] = [:]
+            for (zone, tuple) in zoneMap {
+                simplified[zone] = tuple.1
+            }
+            output[wheel] = simplified
+        }
+        return output
+    }
+
+    private var wheelTemperatureSummary: [WheelPos: Double] {
+        var summary: [WheelPos: Double] = [:]
+        for (wheel, map) in latestTemperatures {
+            summary[wheel] = map.values.max()
+        }
+        return summary
+    }
+
+    private var allTemperatures: [Double] {
+        latestTemperatures.values.flatMap { $0.values }
+    }
+
+    private var maxTemperature: Double {
+        allTemperatures.max() ?? .nan
+    }
+
+    private var averageTemperature: Double {
+        guard !allTemperatures.isEmpty else { return .nan }
+        let sum = allTemperatures.reduce(0, +)
+        return sum / Double(allTemperatures.count)
+    }
+
+    private var pressureValues: [Double] {
+        vm.wheelPressures.values.filter { $0.isFinite }
+    }
+
+    private var pressureAverage: Double? {
+        guard !pressureValues.isEmpty else { return nil }
+        let sum = pressureValues.reduce(0, +)
+        return sum / Double(pressureValues.count)
+    }
+
+    private var pressureRange: (min: Double, max: Double)? {
+        guard let min = pressureValues.min(), let max = pressureValues.max() else { return nil }
+        return (min, max)
+    }
+
+    private var highestPressureWheel: (wheel: WheelPos, value: Double)? {
+        vm.wheelPressures.max(by: { $0.value < $1.value }).map { ($0.key, $0.value) }
+    }
+
+    private func formattedTemperature(_ value: Double) -> String {
+        guard value.isFinite else { return "--" }
+        return String(format: "%.1f℃", value)
+    }
+
+    private func formattedPressure(_ value: Double?) -> String {
+        guard let value, value.isFinite else { return "--" }
+        return String(format: "%.0f kPa", value)
+    }
+
+    private func wheelName(for wheel: WheelPos) -> (title: String, code: String) {
+        switch wheel {
+        case .FL: return ("Front Left", "FL")
+        case .FR: return ("Front Right", "FR")
+        case .RL: return ("Rear Left", "RL")
+        case .RR: return ("Rear Right", "RR")
         }
     }
 
-    private enum ReportLanguage: String, CaseIterable, Identifiable {
-        case english
-        case japanese
-
-        var id: String { rawValue }
-
-        var displayName: String {
-            switch self {
-            case .english: return "English"
-            case .japanese: return "日本語"
-            }
+    private func zoneLabel(_ zone: Zone) -> String {
+        switch zone {
+        case .IN: return "Inside / イン側"
+        case .CL: return "Center / 中央"
+        case .OUT: return "Outside / アウト側"
         }
     }
+
+    private let zoneDisplayOrder: [Zone] = [.OUT, .CL, .IN]
+
+    private func zoneBackground(for reading: Double?) -> Color {
+        guard let reading else { return Color(.tertiarySystemFill).opacity(0.35) }
+        switch reading {
+        case ..<60:
+            return Color.blue.opacity(0.18)
+        case 60..<80:
+            return Color.mint.opacity(0.2)
+        case 80..<110:
+            return Color.orange.opacity(0.24)
+        default:
+            return Color.red.opacity(0.26)
+        }
+    }
+
+    private var condensedMemos: [(wheel: WheelPos, text: String)] {
+        WheelPos.allCases.compactMap { wheel in
+            guard let memo = vm.wheelMemos[wheel]?.trimmingCharacters(in: .whitespacesAndNewlines), !memo.isEmpty else {
+                return nil
+            }
+            return (wheel, memo)
+        }
+    }
+
+    private var reportBackground: some View {
+        LinearGradient(
+            colors: [Color(.systemGroupedBackground), Color(.secondarySystemBackground)],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+    }
+
+    private var footerStamp: some View {
+        VStack(spacing: 4) {
+            Text("Generated \(DateFormatter.localizedString(from: generatedAt, dateStyle: .medium, timeStyle: .short))")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text("Present this screen for capture / この画面を提示して記録できます")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 8)
+    }
+
+    private enum ReportOrientation {
+        case landscape
+        case portrait
+
+        var isLandscape: Bool { self == .landscape }
+    }
+
+    private struct ReportLayoutMetrics {
+        let canvasSize: CGSize
+        let sectionSpacing: CGFloat
+        let pagePadding: EdgeInsets
+    }
+
+    private func layoutMetrics(for orientation: ReportOrientation) -> ReportLayoutMetrics {
+        switch orientation {
+        case .landscape:
+            return ReportLayoutMetrics(
+                canvasSize: CGSize(width: 1060, height: 640),
+                sectionSpacing: 26,
+                pagePadding: EdgeInsets(top: 38, leading: 44, bottom: 34, trailing: 44)
+            )
+        case .portrait:
+            return ReportLayoutMetrics(
+                canvasSize: CGSize(width: 820, height: 1180),
+                sectionSpacing: 22,
+                pagePadding: EdgeInsets(top: 32, leading: 28, bottom: 32, trailing: 28)
+            )
+        }
+    }
+}
+
+#Preview {
+    SessionReportView()
+        .environmentObject(SessionViewModel())
 }

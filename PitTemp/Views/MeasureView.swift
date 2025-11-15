@@ -39,9 +39,7 @@ struct MeasureView: View {
     @State private var historyError: String? = nil
     @State private var historyEditingEnabled = false
     @State private var activePressureWheel: WheelPos? = nil
-    @State private var showReport = false
-    @State private var reportSummary: SessionHistorySummary? = nil
-    @State private var reportSnapshot: SessionSnapshot? = nil
+    @State private var showSessionReport = false
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
@@ -131,6 +129,13 @@ struct MeasureView: View {
                     }
                     Button("Edit") { showMetaEditor = true }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSessionReport = true
+                    } label: {
+                        Label("Report / レポート", systemImage: "doc.text.image")
+                    }
+                }
             }
             .sheet(isPresented: $showMetaEditor) {
                 MetaEditorView()
@@ -158,12 +163,9 @@ struct MeasureView: View {
                 )
                 .presentationDetents([.medium, .large])
             }
-            .sheet(isPresented: $showReport) {
-                if let reportSummary, let reportSnapshot {
-                    NavigationStack {
-                        SessionReportView(summary: reportSummary, snapshot: reportSnapshot)
-                    }
-                }
+            .sheet(isPresented: $showSessionReport) {
+                SessionReportView()
+                    .environmentObject(vm)
             }
         }
         .background(historyBackgroundColor.ignoresSafeArea())

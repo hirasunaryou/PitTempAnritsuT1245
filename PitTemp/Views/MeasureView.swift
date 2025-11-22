@@ -123,18 +123,11 @@ struct MeasureView: View {
 
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button {
-                        presentSessionReport()
-                    } label: {
-                        Label("Report", systemImage: "doc.richtext")
-                    }
-                    Button("Edit") { showMetaEditor = true }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
                         showSessionReport = true
                     } label: {
                         Label("Report / レポート", systemImage: "doc.text.image")
                     }
+                    Button("Edit") { showMetaEditor = true }
                 }
             }
             .sheet(isPresented: $showMetaEditor) {
@@ -1855,14 +1848,6 @@ struct MeasureView: View {
         let core = Self.captureTimeFormatter.string(from: date)
         let abbreviation = TimeZone.current.abbreviation() ?? ""
         return abbreviation.isEmpty ? core : core + " " + abbreviation
-    }
-
-    private func presentSessionReport() {
-        let snapshot = vm.makeLiveSnapshotForReport()
-        let summary = vm.makeLiveSummary(for: snapshot)
-        reportSnapshot = snapshot
-        reportSummary = summary
-        showReport = true
     }
 
     private func loadHistorySummary(_ summary: SessionHistorySummary) {

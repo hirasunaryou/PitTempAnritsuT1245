@@ -79,7 +79,7 @@ struct HistoryDetailView: View {
             }
         }
         .sheet(isPresented: $showReport) {
-            if let snapshot {
+            if snapshot != nil {
                 NavigationStack {
                     SessionReportView()
                         .environmentObject(reportVM)

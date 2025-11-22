@@ -301,11 +301,13 @@ struct SessionReportView: View {
 
     private func wheelCard(_ wheel: WheelPos, metrics: LayoutMetrics) -> some View {
         VStack(alignment: .leading, spacing: metrics.wheelInnerSpacing) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: metrics.wheelHeaderSpacing) {
                 Text(localizedWheelTitle(for: wheel))
                     .font(.system(size: metrics.wheelLabelSize, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.8))
-                Spacer()
+                    .foregroundStyle(Color.black.opacity(0.82))
+
+                Spacer(minLength: metrics.wheelHeaderSpacing)
+
                 if let pressure = pressureValue(for: wheel) {
                     pressureDisplay(for: pressure, metrics: metrics)
                 }
@@ -315,23 +317,7 @@ struct SessionReportView: View {
                 .frame(height: 1)
                 .foregroundStyle(Color.black.opacity(0.1))
 
-            HStack(alignment: .bottom, spacing: metrics.zoneSpacing) {
-                // 左右のタイヤで温度表示の向きを変えるため、ホイールごとにゾーンの並び順を決定する
-                ForEach(zoneOrder(for: wheel), id: \.self) { zone in
-                    VStack(spacing: metrics.zoneInnerSpacing) {
-                        Text(localizedZoneTitle(for: zone))
-                            .font(.system(size: metrics.zoneLabelSize, weight: .semibold))
-                            .foregroundStyle(Color.black.opacity(0.5))
-                        Text(temperatureText(for: wheel, zone: zone))
-                            .font(.system(size: metrics.temperatureFontSize, weight: .heavy, design: .rounded))
-                            .foregroundStyle(Color.black.opacity(0.9))
-                            .monospacedDigit()
-                            .minimumScaleFactor(0.6)
-                            .lineLimit(1)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-            }
+            temperatureGrid(for: wheel, metrics: metrics)
 
             if let memo = memoText(for: wheel) {
                 Text(memo)
@@ -385,19 +371,65 @@ struct SessionReportView: View {
 
     private func pressureDisplay(for value: Double, metrics: LayoutMetrics) -> some View {
         let number = Self.pressureFormatter.string(from: NSNumber(value: value))?.ifEmpty("") ?? ""
-        return HStack(alignment: .firstTextBaseline, spacing: 4) {
-            Text(number.ifEmpty("-"))
-                .font(.system(size: metrics.pressureValueFontSize, weight: .heavy, design: .rounded))
-                .foregroundStyle(Color.black.opacity(0.85))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(metrics.pressureValueMinimumScale)
-            Text("kPa")
-                .font(.system(size: metrics.pressureUnitFontSize, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.6))
-                .lineLimit(1)
-                .minimumScaleFactor(metrics.pressureUnitMinimumScale)
+        return HStack(alignment: .center, spacing: 6) {
+            Text(localized("Pressure", "内圧"))
+                .font(.system(size: metrics.pressureLabelSize, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.55))
+
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(number.ifEmpty("-"))
+                    .font(.system(size: metrics.pressureValueFontSize, weight: .semibold, design: .rounded))
+                    .foregroundStyle(Color.black.opacity(0.8))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(metrics.pressureValueMinimumScale)
+                Text("kPa")
+                    .font(.system(size: metrics.pressureUnitFontSize, weight: .semibold))
+                    .foregroundStyle(Color.black.opacity(0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(metrics.pressureUnitMinimumScale)
+            }
+            .padding(.horizontal, metrics.pressureBadgePadding)
+            .padding(.vertical, metrics.pressureBadgePadding * 0.55)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.black.opacity(0.05))
+            )
         }
+    }
+
+    private func temperatureGrid(for wheel: WheelPos, metrics: LayoutMetrics) -> some View {
+        HStack(alignment: .top, spacing: metrics.zoneSpacing) {
+            // 左右のタイヤで温度表示の向きを変えるため、ホイールごとにゾーンの並び順を決定する
+            ForEach(zoneOrder(for: wheel), id: \.self) { zone in
+                temperatureTile(for: wheel, zone: zone, metrics: metrics)
+            }
+        }
+    }
+
+    private func temperatureTile(for wheel: WheelPos, zone: Zone, metrics: LayoutMetrics) -> some View {
+        VStack(spacing: metrics.zoneInnerSpacing) {
+            Text(localizedZoneTitle(for: zone))
+                .font(.system(size: metrics.zoneLabelSize, weight: .semibold))
+                .foregroundStyle(Color.black.opacity(0.52))
+
+            // 数字が潰れて「1」だけ残るような視認性低下を防ぐため、十分な余白と最小縮小率を確保する
+            Text(temperatureText(for: wheel, zone: zone))
+                .font(.system(size: metrics.temperatureFontSize, weight: .heavy, design: .rounded))
+                .foregroundStyle(Color.black.opacity(0.92))
+                .monospacedDigit()
+                .minimumScaleFactor(metrics.temperatureMinimumScale)
+                .lineLimit(1)
+                .multilineTextAlignment(.center)
+        }
+        .padding(.vertical, metrics.temperatureTileVerticalPadding)
+        .padding(.horizontal, metrics.temperatureTileHorizontalPadding)
+        .frame(maxWidth: .infinity, minHeight: metrics.temperatureTileMinHeight)
+        .background(
+            RoundedRectangle(cornerRadius: metrics.temperatureTileCornerRadius, style: .continuous)
+                .fill(Color.white.opacity(0.9))
+                .shadow(color: Color.black.opacity(0.06), radius: 4, x: 0, y: 2)
+        )
     }
 
     private func memoText(for wheel: WheelPos) -> String? {
@@ -485,14 +517,22 @@ struct SessionReportView: View {
         let wheelSectionSpacing: CGFloat
         let wheelColumnSpacing: CGFloat
         let wheelInnerSpacing: CGFloat
+        let wheelHeaderSpacing: CGFloat
         let zoneSpacing: CGFloat
         let zoneInnerSpacing: CGFloat
         let wheelLabelSize: CGFloat
         let temperatureFontSize: CGFloat
+        let temperatureMinimumScale: CGFloat
+        let temperatureTileVerticalPadding: CGFloat
+        let temperatureTileHorizontalPadding: CGFloat
+        let temperatureTileMinHeight: CGFloat
+        let temperatureTileCornerRadius: CGFloat
         let pressureValueFontSize: CGFloat
         let pressureUnitFontSize: CGFloat
+        let pressureLabelSize: CGFloat
         let pressureValueMinimumScale: CGFloat
         let pressureUnitMinimumScale: CGFloat
+        let pressureBadgePadding: CGFloat
         let zoneLabelSize: CGFloat
         let memoFontSize: CGFloat
         let memoSpacing: CGFloat
@@ -524,14 +564,22 @@ struct SessionReportView: View {
                 wheelSectionSpacing = 12
                 wheelColumnSpacing = 12
                 wheelInnerSpacing = 10
+                wheelHeaderSpacing = 6
                 zoneSpacing = 10
                 zoneInnerSpacing = 4
                 wheelLabelSize = 14
-                temperatureFontSize = 24
-                pressureValueFontSize = 24
-                pressureUnitFontSize = 12
-                pressureValueMinimumScale = 0.82
-                pressureUnitMinimumScale = 0.82
+                temperatureFontSize = 26
+                temperatureMinimumScale = 0.88
+                temperatureTileVerticalPadding = 10
+                temperatureTileHorizontalPadding = 8
+                temperatureTileMinHeight = 78
+                temperatureTileCornerRadius = 12
+                pressureValueFontSize = 18
+                pressureUnitFontSize = 11
+                pressureLabelSize = 10
+                pressureValueMinimumScale = 0.9
+                pressureUnitMinimumScale = 0.9
+                pressureBadgePadding = 6
                 zoneLabelSize = 11
                 memoFontSize = 11
                 memoSpacing = 6
@@ -559,14 +607,22 @@ struct SessionReportView: View {
                 wheelSectionSpacing = 16
                 wheelColumnSpacing = 14
                 wheelInnerSpacing = 12
+                wheelHeaderSpacing = 8
                 zoneSpacing = 12
                 zoneInnerSpacing = 6
                 wheelLabelSize = 16
-                temperatureFontSize = 28
-                pressureValueFontSize = 28
-                pressureUnitFontSize = 13
-                pressureValueMinimumScale = 0.85
-                pressureUnitMinimumScale = 0.85
+                temperatureFontSize = 32
+                temperatureMinimumScale = 0.9
+                temperatureTileVerticalPadding = 12
+                temperatureTileHorizontalPadding = 10
+                temperatureTileMinHeight = 90
+                temperatureTileCornerRadius = 14
+                pressureValueFontSize = 20
+                pressureUnitFontSize = 12
+                pressureLabelSize = 11
+                pressureValueMinimumScale = 0.9
+                pressureUnitMinimumScale = 0.9
+                pressureBadgePadding = 7
                 zoneLabelSize = 12
                 memoFontSize = 12
                 memoSpacing = 8
@@ -594,14 +650,22 @@ struct SessionReportView: View {
                 wheelSectionSpacing = 18
                 wheelColumnSpacing = 16
                 wheelInnerSpacing = 14
+                wheelHeaderSpacing = 10
                 zoneSpacing = 14
                 zoneInnerSpacing = 6
                 wheelLabelSize = 18
-                temperatureFontSize = 32
-                pressureValueFontSize = 32
-                pressureUnitFontSize = 14
-                pressureValueMinimumScale = 0.88
+                temperatureFontSize = 36
+                temperatureMinimumScale = 0.92
+                temperatureTileVerticalPadding = 14
+                temperatureTileHorizontalPadding = 12
+                temperatureTileMinHeight = 102
+                temperatureTileCornerRadius = 16
+                pressureValueFontSize = 22
+                pressureUnitFontSize = 13
+                pressureLabelSize = 12
+                pressureValueMinimumScale = 0.9
                 pressureUnitMinimumScale = 0.9
+                pressureBadgePadding = 8
                 zoneLabelSize = 13
                 memoFontSize = 13
                 memoSpacing = 10

@@ -5,6 +5,8 @@ struct HistoryDetailView: View {
     @ObservedObject var history: SessionHistoryStore
     var onLoad: (SessionHistorySummary) -> Void
 
+    @StateObject private var reportVM = SessionViewModel()
+
     @State private var snapshot: SessionSnapshot? = nil
     @State private var loadError: String? = nil
     @State private var showReport = false
@@ -64,7 +66,7 @@ struct HistoryDetailView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if snapshot != nil {
                     Button {
-                        showReport = true
+                        openReport()
                     } label: {
                         Label("Report", systemImage: "doc.richtext")
                     }
@@ -79,10 +81,21 @@ struct HistoryDetailView: View {
         .sheet(isPresented: $showReport) {
             if let snapshot {
                 NavigationStack {
-                    SessionReportView(summary: summary, snapshot: snapshot)
+                    SessionReportView()
+                        .environmentObject(reportVM)
                 }
             }
         }
+    }
+
+    private func openReport() {
+        guard let snapshot else { return }
+
+        if reportVM.loadedHistorySummary?.id != summary.id {
+            reportVM.loadHistorySnapshot(snapshot, summary: summary)
+        }
+
+        showReport = true
     }
 
     private func loadSnapshot() async {
@@ -94,7 +107,10 @@ struct HistoryDetailView: View {
             }
         }
         if let loaded {
-            await MainActor.run { self.snapshot = loaded }
+            await MainActor.run {
+                self.snapshot = loaded
+                reportVM.loadHistorySnapshot(loaded, summary: summary)
+            }
         } else {
             await MainActor.run { self.loadError = "履歴データの読み込みに失敗しました" }
         }

@@ -316,7 +316,8 @@ struct SessionReportView: View {
                 .foregroundStyle(Color.black.opacity(0.1))
 
             HStack(alignment: .bottom, spacing: metrics.zoneSpacing) {
-                ForEach(zoneOrder, id: \.self) { zone in
+                // 左右のタイヤで温度表示の向きを変えるため、ホイールごとにゾーンの並び順を決定する
+                ForEach(zoneOrder(for: wheel), id: \.self) { zone in
                     VStack(spacing: metrics.zoneInnerSpacing) {
                         Text(localizedZoneTitle(for: zone))
                             .font(.system(size: metrics.zoneLabelSize, weight: .semibold))
@@ -407,20 +408,22 @@ struct SessionReportView: View {
     }
 
     private func localizedWheelTitle(for wheel: WheelPos) -> String {
+        // 左右表記をアルファベット2文字に統一することで、英日ともに記号化された表現で伝える
         switch wheel {
-        case .FL: return language == .english ? "Fr-L" : "Fr-L"
-        case .FR: return language == .english ? "Fr-R" : "Fr-R"
-        case .RL: return language == .english ? "Re-L" : "Re-L"
-        case .RR: return language == .english ? "Re-R" : "Re-R"
+        case .FL: return language == .english ? "FL" : "FL"
+        case .FR: return language == .english ? "FR" : "FR"
+        case .RL: return language == .english ? "RL" : "RL"
+        case .RR: return language == .english ? "RR" : "RR"
         }
     }
 
     private func localizedWheelShort(for wheel: WheelPos) -> String {
+        // メモ欄など短い表示でも同じ略称を使用して認識のずれを防ぐ
         switch wheel {
-        case .FL: return language == .english ? "FL" : "Fr-L"
-        case .FR: return language == .english ? "FR" : "Fr-R"
-        case .RL: return language == .english ? "RL" : "Re-L"
-        case .RR: return language == .english ? "RR" : "Re-R"
+        case .FL: return language == .english ? "FL" : "FL"
+        case .FR: return language == .english ? "FR" : "FR"
+        case .RL: return language == .english ? "RL" : "RL"
+        case .RR: return language == .english ? "RR" : "RR"
         }
     }
 
@@ -436,7 +439,15 @@ struct SessionReportView: View {
         language == .english ? english : japanese
     }
 
-    private var zoneOrder: [Zone] { [.OUT, .CL, .IN] }
+    private func zoneOrder(for wheel: WheelPos) -> [Zone] {
+        // 右側のタイヤは外側(Out)が画面右に来るよう並び順を反転する
+        switch wheel {
+        case .FR, .RR:
+            return [.IN, .CL, .OUT]
+        case .FL, .RL:
+            return [.OUT, .CL, .IN]
+        }
+    }
 
     private struct Field: Identifiable {
         enum Style {

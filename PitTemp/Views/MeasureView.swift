@@ -249,7 +249,12 @@ struct MeasureView: View {
             }
             // "item" バインディングなら、reportPayload が nil の間はシート自体が生成されない。
             // そのため「開いたが中身が空で真っ黒」という初回だけの不具合を防げる。
-            .sheet(item: $reportPayload) { payload in
+            //
+            // ⚠️ iPad mini (iPadOS 15 のような旧OS) では .presentationDetents が無視され、
+            //    page sheet が 7〜8 割の高さで止まってしまうことがある。
+            //    そこで iPad はフルスクリーン表示（fullScreenCover）を使い、
+            //    detent をサポートしない OS でもレポートを 1 画面で見切れるようにする。
+            .reportSheet(item: $reportPayload) { payload in
                 NavigationStack {
                     SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
                 }

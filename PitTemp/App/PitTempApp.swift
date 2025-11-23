@@ -5,7 +5,7 @@ import Combine
 struct PitTempApp: App {
     @StateObject private var settings: SettingsStore
     @StateObject private var vm: SessionViewModel
-    @StateObject private var folderBM = FolderBookmark()
+    @StateObject private var folderBM: FolderBookmark
     @StateObject private var driveService = GoogleDriveService()
     @AppStorage("onboarded") private var onboarded: Bool = false
     @StateObject private var recorder = SessionRecorder()
@@ -18,11 +18,16 @@ struct PitTempApp: App {
         let s = SettingsStore()
         let log = UILogStore()
         let autosave = SessionAutosaveStore(uiLogger: log)
+        let folder = FolderBookmark()
+        // CSV 書き出しから iCloud 共有フォルダ連携までを同じインスタンスで束ねる。
+        let coordinator = SessionFileCoordinator(exporter: CSVExporter(), uploader: folder)
         _settings = StateObject(wrappedValue: s)
         _uiLog = StateObject(wrappedValue: log)
+        _folderBM = StateObject(wrappedValue: folder)
         _vm = StateObject(wrappedValue: SessionViewModel(settings: s,
                                                          autosaveStore: autosave,
-                                                         uiLog: log))
+                                                         uiLog: log,
+                                                         fileCoordinator: coordinator))
     }
 
     // ここで画面ツリーをまとめて返す

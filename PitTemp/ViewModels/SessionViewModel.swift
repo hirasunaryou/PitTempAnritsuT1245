@@ -93,6 +93,7 @@ final class SessionViewModel: ObservableObject {
     private var advanceWithReturn: Bool { settings.advanceWithReturn }
     private var minAdvanceSec: Double { settings.minAdvanceSec }
     private var autofillDateTime: Bool { settings.autofillDateTime }
+    private var enableICloudUpload: Bool { settings.enableICloudUpload }
 
       
     // タイマ
@@ -273,7 +274,8 @@ final class SessionViewModel: ObservableObject {
         return lastCSV
     }
 
-    // 既定: wflat を保存（Library互換）
+    // 既定: wflat を保存（Library互換）。
+    // 1) DTO にまとめる → 2) ファサードへ渡す → 3) autosave と iCloud へ反映
     func exportCSV(deviceName: String? = nil) {
         let sessionStart = sessionBeganAt ?? Date()
 
@@ -282,6 +284,8 @@ final class SessionViewModel: ObservableObject {
         }
 
         do {
+            // ViewModel では「コンテキストを組み立てる」役割に専念し、
+            // 実際の I/O は SessionFileCoordinator に委譲する。
             let export = try fileCoordinator.exportWFlat(
                 context: SessionFileContext(
                     meta: meta,
@@ -297,6 +301,10 @@ final class SessionViewModel: ObservableObject {
             lastCSV = export.url
             lastCSVMetadata = export.metadata
             print("CSV saved (wflat):", export.url.lastPathComponent)
+            // 設定で許可されていれば、そのまま iCloud へブリッジする。
+            if enableICloudUpload {
+                fileCoordinator.uploadIfPossible(export)
+            }
             persistAutosaveNow()
             autosaveStore.archiveLatest()
         } catch {

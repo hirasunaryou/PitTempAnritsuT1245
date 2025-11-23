@@ -27,11 +27,14 @@ struct RootView: View {
 #Preview {
     let settings = SettingsStore()
     let log = UILogStore()
+    let folder = FolderBookmark()
+    let coordinator = SessionFileCoordinator(exporter: CSVExporter(), uploader: folder)
     let vm = SessionViewModel(settings: settings,
                               autosaveStore: SessionAutosaveStore(uiLogger: log),
-                              uiLog: log)
+                              uiLog: log,
+                              fileCoordinator: coordinator)
     return RootView()
-        .environmentObject(FolderBookmark())
+        .environmentObject(folder)
         .environmentObject(vm)
         .environmentObject(settings)
         .environmentObject(BluetoothService())

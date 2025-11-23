@@ -2048,10 +2048,6 @@ struct MeasureView: View {
                 if settings.enableGoogleDriveUpload, let metadata = vm.lastCSVMetadata, let url = vm.lastCSV {
                     Task { await driveService.upload(csvURL: url, metadata: metadata) }
                 }
-
-                if settings.enableICloudUpload, let fallbackURL = vm.lastLegacyCSV ?? vm.lastCSV {
-                    folderBM.upload(file: fallbackURL, metadata: vm.lastCSVMetadata)
-                }
             }
             .buttonStyle(.borderedProminent)
 

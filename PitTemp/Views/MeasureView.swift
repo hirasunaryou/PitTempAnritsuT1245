@@ -39,14 +39,24 @@ struct MeasureView: View {
     @State private var historyError: String? = nil
     @State private var historyEditingEnabled = false
     @State private var activePressureWheel: WheelPos? = nil
-    @State private var showReport = false
-    @State private var reportSummary: SessionHistorySummary? = nil
-    @State private var reportSnapshot: SessionSnapshot? = nil
+    // レポート表示用のデータを1つのまとまりとして保持する。
+    // 最初の表示で空シート（真っ黒な画面）になるのを防ぐため、
+    // シートのトリガーとデータの準備を同じ状態にまとめて扱う。"item" のバインディングは
+    // 値が非nilの時だけシートを生成するので、データが揃う前にシートが開く競合を避けられる。
+    @State private var reportPayload: ReportPayload? = nil
 
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
     private let manualPressureDefault: Double = 210
     private let zoneButtonHeight: CGFloat = 112
+
+    // シートに受け渡すレポート用のペイロード。
+    // Identifiable にしておくことで .sheet(item:) にそのまま渡せる。
+    private struct ReportPayload: Identifiable {
+        let id = UUID()
+        let summary: SessionHistorySummary
+        let snapshot: SessionSnapshot
+    }
 
     private var isHistoryMode: Bool { vm.loadedHistorySummary != nil }
     private var isManualInteractionActive: Bool {
@@ -158,11 +168,11 @@ struct MeasureView: View {
                 )
                 .presentationDetents([.medium, .large])
             }
-            .sheet(isPresented: $showReport) {
-                if let reportSummary, let reportSnapshot {
-                    NavigationStack {
-                        SessionReportView(summary: reportSummary, snapshot: reportSnapshot)
-                    }
+            // "item" バインディングなら、reportPayload が nil の間はシート自体が生成されない。
+            // そのため「開いたが中身が空で真っ黒」という初回だけの不具合を防げる。
+            .sheet(item: $reportPayload) { payload in
+                NavigationStack {
+                    SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
                 }
             }
         }
@@ -1857,11 +1867,12 @@ struct MeasureView: View {
     }
 
     private func presentSessionReport() {
+        // スナップショットとサマリを同時に作り、一つの構造体にまとめてから
+        // シートに渡す。これにより「シートが開いた瞬間にデータがまだ nil」という
+        // タイミングずれを根本的に排除する。
         let snapshot = vm.makeLiveSnapshotForReport()
         let summary = vm.makeLiveSummary(for: snapshot)
-        reportSnapshot = snapshot
-        reportSummary = summary
-        showReport = true
+        reportPayload = ReportPayload(summary: summary, snapshot: snapshot)
     }
 
     private func loadHistorySummary(_ summary: SessionHistorySummary) {

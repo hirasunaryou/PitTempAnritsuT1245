@@ -7,24 +7,9 @@
 //   - SwiftUIの画面からは「状態変更リクエスト」だけ投げる（MVVM）
 //   - HID(=キーボード)の“行確定”と“途中バッファ”の扱いを分離
 //
+import Combine
 import Foundation
 import SwiftUI
-import Combine
-
-struct DriveCSVMetadata: Codable, Equatable {
-    var sessionID: UUID
-    var driver: String
-    var track: String
-    var car: String
-    var deviceID: String
-    var deviceName: String
-    var exportedAt: Date
-    var sessionStartedAt: Date
-
-    var dayFolderName: String {
-        DateFormatter.cachedDayFormatter.string(from: sessionStartedAt)
-    }
-}
 
 @MainActor
 final class SessionViewModel: ObservableObject {
@@ -37,7 +22,7 @@ final class SessionViewModel: ObservableObject {
 
     // MARK: - 依存（DI）
     private let settings: SessionSettingsProviding
-    private let exporter: CSVExporting
+    private let fileCoordinator: SessionFileCoordinating
     private let autosaveStore: SessionAutosaveHandling
     private let uiLog: UILogPublishing?
     private let deviceIdentity: DeviceIdentity
@@ -48,11 +33,12 @@ final class SessionViewModel: ObservableObject {
     init(exporter: CSVExporting = CSVExporter(),
          settings: SessionSettingsProviding? = nil,
          autosaveStore: SessionAutosaveHandling = SessionAutosaveStore(),
-         uiLog: UILogPublishing? = nil) {
-        self.exporter = exporter
+         uiLog: UILogPublishing? = nil,
+         fileCoordinator: SessionFileCoordinating? = nil) {
         self.autosaveStore = autosaveStore
         self.uiLog = uiLog
         self.deviceIdentity = DeviceIdentity.current()
+        self.fileCoordinator = fileCoordinator ?? SessionFileCoordinator(exporter: exporter)
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
         if let settings {
             self.settings = settings
@@ -296,28 +282,21 @@ final class SessionViewModel: ObservableObject {
         }
 
         do {
-            let url = try exporter.exportWFlat(
-                meta: meta,
+            let export = try fileCoordinator.exportWFlat(
+                context: SessionFileContext(
+                    meta: meta,
+                    sessionID: currentSessionID,
+                    sessionBeganAt: sessionStart,
+                    deviceIdentity: deviceIdentity,
+                    deviceName: deviceName
+                ),
                 results: results,
                 wheelMemos: wheelMemos,
-                wheelPressures: wheelPressures,
-                sessionStart: sessionStart,
-                deviceName: deviceName,
-                sessionID: currentSessionID,
-                deviceIdentity: deviceIdentity
+                wheelPressures: wheelPressures
             )
-            lastCSV = url
-            lastCSVMetadata = DriveCSVMetadata(
-                sessionID: currentSessionID,
-                driver: meta.driver,
-                track: meta.track,
-                car: meta.car,
-                deviceID: deviceIdentity.id,
-                deviceName: deviceIdentity.name,
-                exportedAt: Date(),
-                sessionStartedAt: sessionStart
-            )
-            print("CSV saved (wflat):", url.lastPathComponent)
+            lastCSV = export.url
+            lastCSVMetadata = export.metadata
+            print("CSV saved (wflat):", export.url.lastPathComponent)
             persistAutosaveNow()
             autosaveStore.archiveLatest()
         } catch {

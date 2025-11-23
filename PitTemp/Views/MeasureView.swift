@@ -952,27 +952,46 @@ struct MeasureView: View {
         // ローカル定数へキャッシュする。条件式を毎回評価すると SwiftUI が同一フレーム内で別レイアウトを
         // 生成しようとしてクラッシュ（EXC_BAD_ACCESS）する場合があるため、View の構造を安定させる。
         let isLockedForHistory = isHistoryMode && !historyEditingEnabled
+
         // SwiftUI の差分アルゴリズムに「別物の View ツリーとして作り直してね」と伝えるためのID。
-        // 履歴閲覧 ↔ 編集モードの切り替えは isLockedForHistory の Bool 1つで判定しているが、
-        // diffing が中途半端に差分更新を試みると内部で参照ずれを起こし EXC_BAD_ACCESS に繋がる。
-        // .id(...) で明示的に破棄→再生成させ、安定したメモリアクセスにする。
+        // ここで重要なのは「ロック状態ごとに完全に別ツリーを返す」こと。
+        // 同じ VStack の中で overlay / disabled をトグルするより、locked / editable の分岐を分けて
+        // 差分更新を簡単にする方がメモリ安全。ID はツリーを強制的に作り直す合図となる。
         let pressureSectionID = isLockedForHistory ? "pressure-history-locked" : "pressure-editable"
 
-        return VStack(alignment: .leading, spacing: 10) {
-            ZStack(alignment: .topLeading) {
-                pressureEntryCard(for: wheel)
-
-                if isLockedForHistory {
-                    historyLockedOverlay(text: "Enable editing to adjust pressure / 編集モードで空気圧を修正")
-                }
-            }
-            .disabled(isLockedForHistory)
-
+        return Group {
             if isLockedForHistory {
-                historyLockedFootnote()
+                lockedPressureSection(for: wheel)
+            } else {
+                editablePressureSection(for: wheel)
             }
         }
         .id(pressureSectionID)
+    }
+
+    /// 編集禁止状態の空気圧カード。
+    /// 1) ロックされた View ツリーを丸ごと返すことで、差分アルゴリズムが中途半端に更新しないようにする。
+    /// 2) overlay / footnote も同じツリーに閉じ込め、参照が取り違えないようにする。
+    private func lockedPressureSection(for wheel: WheelPos) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ZStack(alignment: .topLeading) {
+                pressureEntryCard(for: wheel)
+
+                historyLockedOverlay(text: "Enable editing to adjust pressure / 編集モードで空気圧を修正")
+            }
+            // 編集不可の状態はここだけで閉じ、他の分岐と共有しない。
+            .disabled(true)
+
+            historyLockedFootnote()
+        }
+    }
+
+    /// 編集可能状態の空気圧カード。
+    /// ロック解除時には overlay も footnote も描画せず、差分更新のパスを単純化する。
+    private func editablePressureSection(for wheel: WheelPos) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            pressureEntryCard(for: wheel)
+        }
     }
 
     private func wheelExtrasSection(for wheel: WheelPos) -> some View {

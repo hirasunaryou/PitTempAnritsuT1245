@@ -4,6 +4,34 @@
 
 import Foundation
 
+/// ストレージの抽象化。
+/// - 目的: UserDefaults 固定だった保存先を差し替えられるようにし、
+///   単体テストや将来の Keychain/ファイル保存に備える。
+protocol DeviceRegistryStoring {
+    /// 保存済みのレコード一覧をロードする。
+    /// - 戻り値: 何も保存されていなければ空配列。
+    func loadRecords() -> [DeviceRecord]
+    /// レコード一覧を永続化する。
+    /// - 引数の配列を丸ごと保存することを想定。
+    func saveRecords(_ records: [DeviceRecord])
+}
+
+/// UserDefaults を使った既定の保存先。
+final class UserDefaultsDeviceRegistryStore: DeviceRegistryStoring {
+    private let storeKey = "ble.deviceRegistry.v1"
+
+    func loadRecords() -> [DeviceRecord] {
+        guard let data = UserDefaults.standard.data(forKey: storeKey) else { return [] }
+        return (try? JSONDecoder().decode([DeviceRecord].self, from: data)) ?? []
+    }
+
+    func saveRecords(_ records: [DeviceRecord]) {
+        if let data = try? JSONEncoder().encode(records) {
+            UserDefaults.standard.set(data, forKey: storeKey)
+        }
+    }
+}
+
 /// 端末の記録（近傍で見かけた・別名・自動再接続・RSSI・最終見かけ時刻）
 struct DeviceRecord: Identifiable, Codable, Equatable {
     let id: String               // peripheral.identifier.uuidString
@@ -14,13 +42,17 @@ struct DeviceRecord: Identifiable, Codable, Equatable {
     var lastRSSI: Int?           // 直近で見かけたRSSI（dBm）
 }
 
-/// 既知デバイスのレジストリ。UserDefaultsへJSON保存。
+/// 既知デバイスのレジストリ。UserDefaults 以外にも切り替え可能。
 final class DeviceRegistry: ObservableObject {
     @Published private(set) var known: [DeviceRecord] = []
 
-    private let storeKey = "ble.deviceRegistry.v1"
+    private let store: DeviceRegistryStoring
 
-    init() { load() }
+    /// - Parameter store: デフォルトは UserDefaults だが、テスト用にインメモリ保存などへ差し替えられる。
+    init(store: DeviceRegistryStoring = UserDefaultsDeviceRegistryStore()) {
+        self.store = store
+        load()
+    }
 
     // MARK: - Query
     func record(for id: String) -> DeviceRecord? {
@@ -83,15 +115,14 @@ final class DeviceRegistry: ObservableObject {
 
     // MARK: - Persistence
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: storeKey) else { return }
-        if let arr = try? JSONDecoder().decode([DeviceRecord].self, from: data) {
-            known = arr
+        // コンストラクタで一度だけ読み込む。UIスレッドで Published を更新するため main で実行。
+        DispatchQueue.main.async {
+            self.known = self.store.loadRecords()
         }
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(known) {
-            UserDefaults.standard.set(data, forKey: storeKey)
-        }
+        // 保存先はプロトコルに委ねることで、UserDefaults/ファイル/モックを容易に差し替え。
+        store.saveRecords(known)
     }
 }

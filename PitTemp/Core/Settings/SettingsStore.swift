@@ -21,6 +21,8 @@ protocol SessionSettingsProviding {
     var minAdvanceSec: Double { get }
     var zoneOrderSequence: [Zone] { get }
     var autofillDateTime: Bool { get }
+    /// iCloud への自動アップロードを VM から参照するためのフラグ（SettingsStore の AppStorage に橋渡し）。
+    var enableICloudUpload: Bool { get }
 }
 
 @MainActor

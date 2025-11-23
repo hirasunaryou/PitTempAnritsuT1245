@@ -3,17 +3,33 @@
 //  PitTemp
 //
 
-import Foundation
 import Combine
+import Foundation
 
-/// ストリームを受け取り、配列保持＋CSVへ追記する役。
-final class SessionRecorder: ObservableObject {
+protocol SessionRecording: AnyObject {
+    var samples: [TemperatureSample] { get }
+    func bind(to stream: AnyPublisher<TemperatureSample, Never>)
+    func reset()
+}
+
+protocol SessionSampleStore {
+    func append(_ sample: TemperatureSample)
+    func reset()
+}
+
+/// ストリームを受け取り、配列保持＋永続層へ委譲する役。
+final class SessionRecorder: ObservableObject, SessionRecording {
     @Published private(set) var samples: [TemperatureSample] = []
     private var cancellables = Set<AnyCancellable>()
-    private var exporter = CSVExporter()
+    private let store: SessionSampleStore
 
     // メモリ過大を防ぐための最大保持数（例：5分×5Hz=1500）
-    private let maxKeep = 3000
+    private let maxKeep: Int
+
+    init(store: SessionSampleStore = FileSessionStore(), maxKeep: Int = 3000) {
+        self.store = store
+        self.maxKeep = maxKeep
+    }
 
     func bind(to stream: AnyPublisher<TemperatureSample, Never>) {
         stream
@@ -22,14 +38,15 @@ final class SessionRecorder: ObservableObject {
                 guard let self else { return }
                 samples.append(s)
                 if samples.count > maxKeep { samples.removeFirst(samples.count - maxKeep) }
-                exporter.appendLive(sample: s)
+                store.append(s)
             }
             .store(in: &cancellables)
     }
 
     func reset() {
+        cancellables.removeAll()
         samples.removeAll()
-        exporter = CSVExporter() // 新規ファイルに切替（必要なら既存継続も選べる）
+        store.reset() // 新規ファイルに切替（必要なら既存継続も選べる）
     }
 }
 

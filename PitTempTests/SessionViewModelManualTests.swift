@@ -69,6 +69,7 @@ private struct StubSettings: SessionSettingsProviding {
     var minAdvanceSec: Double = 0.3
     var zoneOrderSequence: [Zone] = [.IN, .CL, .OUT]
     var autofillDateTime: Bool = false
+    var enableICloudUpload: Bool = false
 }
 
 private struct CSVExporterStub: CSVExporting {
@@ -78,7 +79,9 @@ private struct CSVExporterStub: CSVExporting {
         wheelMemos: [WheelPos : String],
         wheelPressures: [WheelPos : Double],
         sessionStart: Date,
-        deviceName: String?
+        deviceName: String?,
+        sessionID: UUID,
+        deviceIdentity: DeviceIdentity
     ) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

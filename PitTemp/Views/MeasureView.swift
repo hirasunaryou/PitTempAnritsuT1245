@@ -1023,7 +1023,6 @@ struct MeasureView: View {
                 PressureKeypad(
                     value: manualPressureBinding(for: wheel),
                     range: manualPressureRange,
-                    fontSize: pressureKeypadFontSize,
                     onCommit: {
                         commitManualPressure(for: wheel)
                         if manualPressureError(for: wheel) == nil {
@@ -1032,7 +1031,9 @@ struct MeasureView: View {
                     },
                     onClose: {
                         activePressureWheel = nil
-                    }
+                    },
+                    // フォントサイズは最後に渡し、`PressureKeypad` の引数順に揃えることで呼び出しミスを防ぐ。
+                    fontSize: pressureKeypadFontSize
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }

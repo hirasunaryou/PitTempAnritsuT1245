@@ -84,9 +84,7 @@ struct HistoryDetailView: View {
                 if newValue == nil { showReport = false }
             }
         )) { payload in
-            NavigationStack {
-                SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
-            }
+            SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
         }
     }
 

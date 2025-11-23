@@ -254,9 +254,7 @@ struct MeasureView: View {
             //    そこで iPad はフルスクリーン表示（fullScreenCover）を使い、
             //    detent をサポートしない OS でもレポートを 1 画面で見切れるようにする。
             .reportSheet(item: $reportPayload) { payload in
-                NavigationStack {
-                    SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
-                }
+                SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
             }
         }
         .background(historyBackgroundColor.ignoresSafeArea())

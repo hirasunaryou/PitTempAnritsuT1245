@@ -25,4 +25,17 @@ final class DeviceRegistryTests: XCTestCase {
         XCTAssertEqual(store.lastSavedRecords.first?.name, "Beacon")
         XCTAssertEqual(store.lastSavedRecords.first?.lastRSSI, -50)
     }
+
+    func testJSONStoreReadsAndWritesFile() async throws {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("registry.json")
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let record = DeviceRecord(id: "json", name: "JSON", alias: "Alias", autoConnect: true, lastSeenAt: Date(), lastRSSI: -42)
+        let store = JSONDeviceRegistryStore(url: tempURL)
+        store.saveRecords([record])
+
+        let loaded = store.loadRecords()
+        XCTAssertEqual(loaded.first?.id, record.id)
+        XCTAssertEqual(loaded.first?.alias, record.alias)
+    }
 }

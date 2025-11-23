@@ -9,8 +9,9 @@ struct PitTempApp: App {
     @StateObject private var driveService = GoogleDriveService()
     @AppStorage("onboarded") private var onboarded: Bool = false
     @StateObject private var recorder = SessionRecorder()
-    @StateObject private var ble = BluetoothService()
-    @StateObject private var registry = DeviceRegistry()
+    @StateObject private var ble: BluetoothService
+    @StateObject private var registry: DeviceRegistry
+    @StateObject private var bluetoothVM: BluetoothViewModel
     @StateObject private var uiLog: UILogStore
     @Environment(\.scenePhase) private var scenePhase
 
@@ -19,15 +20,24 @@ struct PitTempApp: App {
         let log = UILogStore()
         let autosave = SessionAutosaveStore(uiLogger: log)
         let folder = FolderBookmark()
+        let ble = BluetoothService()
+        let registry = DeviceRegistry()
         // CSV 書き出しから iCloud 共有フォルダ連携までを同じインスタンスで束ねる。
         let coordinator = SessionFileCoordinator(exporter: CSVExporter(), uploader: folder)
         _settings = StateObject(wrappedValue: s)
         _uiLog = StateObject(wrappedValue: log)
         _folderBM = StateObject(wrappedValue: folder)
-        _vm = StateObject(wrappedValue: SessionViewModel(settings: s,
-                                                         autosaveStore: autosave,
-                                                         uiLog: log,
-                                                         fileCoordinator: coordinator))
+        let vm = SessionViewModel(settings: s,
+                                  autosaveStore: autosave,
+                                  uiLog: log,
+                                  fileCoordinator: coordinator)
+        _vm = StateObject(wrappedValue: vm)
+        _ble = StateObject(wrappedValue: ble)
+        _registry = StateObject(wrappedValue: registry)
+        _bluetoothVM = StateObject(wrappedValue: BluetoothViewModel(service: ble, registry: registry))
+
+        // ViewModel 側で Combine のキャンセル管理を一元化する。
+        vm.bindBluetooth(service: ble)
     }
 
     // ここで画面ツリーをまとめて返す
@@ -39,7 +49,7 @@ struct PitTempApp: App {
                     .environmentObject(settings)
                     .environmentObject(folderBM)
                     .environmentObject(driveService)
-                    .environmentObject(ble)
+                    .environmentObject(bluetoothVM)
                     .environmentObject(registry)
                     .environmentObject(uiLog)
                     .onAppear { ble.registry = registry }

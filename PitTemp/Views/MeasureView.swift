@@ -9,8 +9,7 @@ struct MeasureView: View {
     @EnvironmentObject var vm: SessionViewModel
     @EnvironmentObject var folderBM: FolderBookmark
     @EnvironmentObject var settings: SettingsStore
-    @EnvironmentObject var ble: BluetoothService
-    @EnvironmentObject var registry: DeviceRegistry
+    @EnvironmentObject var bluetooth: BluetoothViewModel
     @EnvironmentObject var driveService: GoogleDriveService
 
     @StateObject private var speech = SpeechMemoManager()
@@ -229,8 +228,7 @@ struct MeasureView: View {
             }
             .sheet(isPresented: $showConnectSheet) {
                 ConnectView()
-                    .environmentObject(ble)
-                    .environmentObject(registry)
+                    .environmentObject(bluetooth)
             }
             .sheet(isPresented: Binding(
                 get: { shareURL != nil },
@@ -267,11 +265,9 @@ struct MeasureView: View {
                 speech.requestAuth()
                 pressureSpeech.requestAuth()
             }
-            ble.startScan()
-            ble.autoConnectOnDiscover = settings.bleAutoConnect
-            // registry の autoConnect=true だけを優先対象に
-            let preferred = Set(registry.known.filter { $0.autoConnect }.map { $0.id })
-            ble.setPreferredIDs(preferred)   // ← ここを関数呼び出しに
+            // 接続前の下準備を ViewModel に集約し、View は依存を持たない。
+            bluetooth.applyPreferencesFromRegistry(autoConnectEnabled: settings.bleAutoConnect)
+            bluetooth.startScan()
             if let current = vm.currentWheel {
                 selectedWheel = current
             }
@@ -283,11 +279,6 @@ struct MeasureView: View {
         .onDisappear {
             vm.stopAll()
             if pressureSpeech.isRecording { pressureSpeech.stop() }
-        }
-        .onReceive(ble.temperatureFrames.map { TemperatureSample(time: $0.time, value: $0.value) }) { sample in
-            if !isHistoryMode {
-                vm.ingestBLESample(sample)
-            }
         }
         .onReceive(vm.$currentWheel) { newWheel in
             if let newWheel { selectedWheel = newWheel }
@@ -545,7 +536,7 @@ struct MeasureView: View {
             ZStack {
                 MiniTempChart(data: vm.live)
 
-                if let v = ble.latestTemperature {
+                if let v = bluetooth.latestTemperature {
                     OverlayNow(value: v)
                         .allowsHitTesting(false)
                 }
@@ -2043,7 +2034,7 @@ struct MeasureView: View {
 
             Button("Export CSV") {
                 // 1) CSVを両フォーマットで生成（デバイス名を付与）
-                vm.exportCSV(deviceName: ble.deviceName)
+                vm.exportCSV(deviceName: bluetooth.deviceName)
 
                 if settings.enableGoogleDriveUpload, let metadata = vm.lastCSVMetadata, let url = vm.lastCSV {
                     Task { await driveService.upload(csvURL: url, metadata: metadata) }
@@ -2248,7 +2239,7 @@ struct MeasureView: View {
             Text("BLE: " + stateText())
                 .font(.subheadline)
 
-            if let name = ble.deviceName {
+            if let name = bluetooth.deviceName {
                 Text(name)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -2287,8 +2278,8 @@ struct MeasureView: View {
 
     private var notifyMetrics: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(String(format: "Hz: %.1f", ble.notifyHz))
-            Text("N: \(ble.notifyCountUI)")
+            Text(bluetooth.notifyHzText)
+            Text(bluetooth.notifyCountText)
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -2297,16 +2288,16 @@ struct MeasureView: View {
 
 
     private func stateText() -> String {
-        switch ble.connectionState {
+        switch bluetooth.connectionState {
         case .idle: "idle"; case .scanning: "scanning"; case .connecting: "connecting"
         case .ready: "ready"; case .failed(let m): "failed: \(m)"
         }
     }
     private func scanButtonTitle() -> String {
-        switch ble.connectionState { case .idle, .failed: "Scan"; default: "Disconnect" }
+        switch bluetooth.connectionState { case .idle, .failed: "Scan"; default: "Disconnect" }
     }
     private func scanOrDisconnect() {
-        switch ble.connectionState { case .idle, .failed: ble.startScan(); default: ble.disconnect() }
+        switch bluetooth.connectionState { case .idle, .failed: bluetooth.startScan(); default: bluetooth.disconnect() }
     }
     
     // MARK: - Overlay big "Now" on chart
@@ -2402,8 +2393,7 @@ struct MeasureView: View {
         .environmentObject(fixtures.folderBookmark)
         .environmentObject(fixtures.settings)
         .environmentObject(fixtures.driveService)
-        .environmentObject(fixtures.bluetooth)
-        .environmentObject(fixtures.registry)
+        .environmentObject(fixtures.bluetoothVM)
         .environmentObject(fixtures.logStore)
 }
 
@@ -2414,8 +2404,7 @@ struct MeasureView: View {
         .environmentObject(fixtures.folderBookmark)
         .environmentObject(fixtures.settings)
         .environmentObject(fixtures.driveService)
-        .environmentObject(fixtures.bluetooth)
-        .environmentObject(fixtures.registry)
+        .environmentObject(fixtures.bluetoothVM)
         .environmentObject(fixtures.logStore)
         .environment(\.dynamicTypeSize, .accessibility3)
         .preferredColorScheme(.dark)

@@ -48,7 +48,29 @@ struct MeasureView: View {
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
     private let manualPressureDefault: Double = 210
-    private let zoneButtonHeight: CGFloat = 112
+    // iPad mini を支給したシニア計測者向けに、視認性を高める拡大レイアウトを用意する。
+    // デバイスが iPad かつ設定が有効なときに true となり、以下のフォント・高さをスケールアップする。
+    private var seniorLayoutEnabled: Bool {
+        settings.enableSeniorLayout && UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    // ゾーンボタンの縦幅も視線誘導しやすいよう余裕を持たせる。
+    private var zoneButtonHeight: CGFloat { seniorLayoutEnabled ? 148 : 112 }
+
+    // ゾーン値のフォントは「桁を見間違えない」ことを重視し、大きさと太さを段階的に切り替える。
+    private var zoneValueFont: Font {
+        seniorLayoutEnabled
+            ? .system(size: 44, weight: .bold, design: .rounded)
+            : .system(size: 32, weight: .semibold, design: .rounded)
+    }
+
+    // 要約チップの値表示。小さい数字が並ぶ部分こそ拡大させ、集計の誤読を防ぐ。
+    private var chipValueFont: Font {
+        seniorLayoutEnabled ? .title3.monospacedDigit() : .body.monospacedDigit()
+    }
+
+    // ライブ温度バッジのフォントサイズ。瞬間値を一目で確認しやすくする。
+    private var liveTemperatureFontSize: CGFloat { seniorLayoutEnabled ? 56 : 40 }
 
     // シートに受け渡すレポート用のペイロード。
     // Identifiable にしておくことで .sheet(item:) にそのまま渡せる。
@@ -1636,7 +1658,8 @@ struct MeasureView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.body.monospacedDigit())
+                // ここは車両全体の結果表として使われ、数字が並ぶため読みやすさ重視で拡大可変に。
+                .font(chipValueFont)
                 .monospacedDigit()
         }
         .padding(.horizontal, 12)
@@ -1746,7 +1769,8 @@ struct MeasureView: View {
     private func zoneValueLabel(for zone: Zone, valueText: String, isLive: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(valueText)
-                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                // 大きな数字を視線の中心に置く。シニア向け設定ではさらに太く大きくする。
+                .font(zoneValueFont)
                 .monospacedDigit()
                 .foregroundStyle(valueText == "--" ? .tertiary : .primary)
                 .lineLimit(1)
@@ -2044,7 +2068,8 @@ struct MeasureView: View {
                 .foregroundStyle(.secondary)
 
             Text(valueText)
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+                // シニアレイアウト時はここを最も目立たせ、iPad mini を遠ざけても読める大きさにする。
+                .font(.system(size: liveTemperatureFontSize, weight: .bold, design: .rounded))
                 .monospacedDigit()
 
             Text("℃")

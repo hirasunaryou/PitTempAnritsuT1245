@@ -39,6 +39,8 @@ final class SettingsStore: ObservableObject {
     @AppStorage("pref.minAdvanceSec") var minAdvanceSec: Double = 0.3
     @AppStorage("ble.autoConnect") var bleAutoConnect: Bool = true
     @AppStorage("pref.enableWheelVoiceInput") var enableWheelVoiceInput: Bool = false
+    // 高齢の計測者向けに iPad mini を渡す運用があるため、大きな数字に切り替える設定を用意する。
+    @AppStorage("pref.enableSeniorLayout") var enableSeniorLayout: Bool = false
 
     // ← zone順序は “Raw値” を保存して UI では型安全enumで扱う
     @AppStorage("pref.zoneOrder") private var zoneOrderRaw: Int = 0   // 0: IN-CL-OUT, 1: OUT-CL-IN

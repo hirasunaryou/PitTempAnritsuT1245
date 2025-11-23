@@ -186,6 +186,14 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section("Accessibility") {
+                    Toggle("Senior layout (large digits for iPad mini)", isOn: $settings.enableSeniorLayout)
+                    Label("Increases key numbers and tap areas on iPad to help senior measurers avoid misreading.", systemImage: "textformat.size")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 
                 Section("Bluetooth") {
                     Toggle("Auto connect first seen device", isOn: $settings.bleAutoConnect)

@@ -947,26 +947,19 @@ struct MeasureView: View {
         }
     }
 
+    @ViewBuilder
     private func pressureEntrySection(for wheel: WheelPos) -> some View {
-        // ひとつのレンダリングサイクル内で isHistoryMode / historyEditingEnabled の評価が変わらないように
-        // ローカル定数へキャッシュする。条件式を毎回評価すると SwiftUI が同一フレーム内で別レイアウトを
-        // 生成しようとしてクラッシュ（EXC_BAD_ACCESS）する場合があるため、View の構造を安定させる。
+        // isLockedForHistory を一度だけ評価し、そのブール値に応じて枝分かれしたツリーを返す。
+        // Group + .id による強制再構築よりシンプルな分岐にすることで、差分計算時の参照崩れを避ける。
+        // 「各ブランチは完全に独立した View ツリー」という点を守れば、SwiftUI が古いノードを触って
+        // EXC_BAD_ACCESS を起こすリスクを減らせる。
         let isLockedForHistory = isHistoryMode && !historyEditingEnabled
 
-        // SwiftUI の差分アルゴリズムに「別物の View ツリーとして作り直してね」と伝えるためのID。
-        // ここで重要なのは「ロック状態ごとに完全に別ツリーを返す」こと。
-        // 同じ VStack の中で overlay / disabled をトグルするより、locked / editable の分岐を分けて
-        // 差分更新を簡単にする方がメモリ安全。ID はツリーを強制的に作り直す合図となる。
-        let pressureSectionID = isLockedForHistory ? "pressure-history-locked" : "pressure-editable"
-
-        return Group {
-            if isLockedForHistory {
-                lockedPressureSection(for: wheel)
-            } else {
-                editablePressureSection(for: wheel)
-            }
+        if isLockedForHistory {
+            lockedPressureSection(for: wheel)
+        } else {
+            editablePressureSection(for: wheel)
         }
-        .id(pressureSectionID)
     }
 
     /// 編集禁止状態の空気圧カード。

@@ -38,4 +38,30 @@ final class DeviceRegistryTests: XCTestCase {
         XCTAssertEqual(loaded.first?.id, record.id)
         XCTAssertEqual(loaded.first?.alias, record.alias)
     }
+
+    /// UserDefaults を用いた既定ストアが round-trip 保存/復元できることを確認する。
+    /// - Note: 標準の key を直接使うため、試験終了後に掃除しておく。
+    func testUserDefaultsStorePersistsAndLoads() async throws {
+        let defaults = UserDefaults.standard
+        let key = "ble.deviceRegistry.v1"
+        defaults.removeObject(forKey: key)
+
+        // 事前に JSON を投入し、初期ロードが @Published known へ反映されるか検証。
+        let seeded = [DeviceRecord(id: "seed", name: "Seed", alias: "Pilot", autoConnect: false, lastSeenAt: nil, lastRSSI: nil)]
+        defaults.set(try JSONEncoder().encode(seeded), forKey: key)
+
+        let registry = DeviceRegistry() // 既定の UserDefaultsDeviceRegistryStore を利用
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(registry.record(for: "seed")?.alias, "Pilot")
+
+        // 別名を変更 → UserDefaults 内部の JSON が更新されることを確認。
+        registry.setAlias("Driver", for: "seed")
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let data = try XCTUnwrap(defaults.data(forKey: key))
+        let decoded = try JSONDecoder().decode([DeviceRecord].self, from: data)
+        XCTAssertEqual(decoded.first?.alias, "Driver")
+
+        defaults.removeObject(forKey: key)
+    }
 }

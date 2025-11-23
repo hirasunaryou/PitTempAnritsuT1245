@@ -5,31 +5,22 @@ import Foundation
 import CoreBluetooth
 import Combine
 
-/// スキャンで拾った近傍デバイスの軽量ビュー
-struct ScannedDevice: Identifiable, Equatable {
-    let id: String            // peripheral.identifier.uuidString
-    var name: String          // 広告名
-    var rssi: Int             // dBm
-    var lastSeenAt: Date
-}
-
-/// BLEから温度を受け取り、DoubleとしてPublishするサービス。
-final class BluetoothService: NSObject, ObservableObject {
-    enum ConnectionState: Equatable {
-        case idle, scanning, connecting, ready, failed(String)
-    }
-
+/// BLEから温度を受け取り、TemperatureFrameとしてPublishするサービス。
+final class BluetoothService: NSObject, TemperatureSensorClient {
     // 公開状態（UIは Main で触る）
     @Published var connectionState: ConnectionState = .idle
     @Published var latestTemperature: Double?
     @Published var deviceName: String?
-    let temperatureStream = PassthroughSubject<TemperatureSample, Never>()
-
-    // スキャン結果公開（将来のデバイスピッカー用）
     @Published var scanned: [ScannedDevice] = []
 
+    // ストリーム（TemperatureFrame で統一）
+    private let temperatureFramesSubject = PassthroughSubject<TemperatureFrame, Never>()
+    var temperatureFrames: AnyPublisher<TemperatureFrame, Never> { temperatureFramesSubject.eraseToAnyPublisher() }
+
     // 外部レジストリ（App から注入）
-    weak var registry: DeviceRegistry?
+    weak var registry: DeviceRegistry? {
+        didSet { scanner.registry = registry }
+    }
 
     // UUID（安立様仕様）
     private let serviceUUID   = CBUUID(string: "ada98080-888b-4e9f-9a7f-07ddc240f3ce")
@@ -51,49 +42,28 @@ final class BluetoothService: NSObject, ObservableObject {
     // Parser
     private let parser = TemperaturePacketParser()
 
-    // 追加
-    private var autoPollOnReady = false
-    private var wroteNotReadyCount = 0
-    private var hasWrite: Bool { writeChar != nil }
-
-    // ポーリングをRunLoopではなくGCDで
-    private var pollSrc: DispatchSourceTimer?
-    
-    // 自動ポーリングをするか否か
-    private let pollingEnabled = false // 以降の互換のため置いておくが、デフォルト停止
-    
-    // 観測用カウンタ
+    // その他
     @Published var writeCount: Int = 0
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
-    private var notifyCountBG: Int = 0     // 実カウンタ（BGキュー）
-    private var lastNotifyAt: Date?
-
-    // 実測レート可視化
     @Published var notifyHz: Double = 0
-    private var prevNotifyAt: Date?
-    private var emaInterval: Double?
-    private let emaAlpha = 0.25
-
-    // 自動チューニング
-    private var autoTuneSrc: DispatchSourceTimer?
-    private var lastCountForAuto: Int = 0
-    private var streamModeUntil: Date?
-    private var fastTicks = 0
-    private var slowTicks = 0
 
     // Auto-connect の実装
     @Published var autoConnectOnDiscover: Bool = false
     private(set) var preferredIDs: Set<String> = []  // ← registry から設定（空なら「最初に見つけた1台」）
 
-    // UI から設定するためのセッターを用意
-    func setPreferredIDs(_ ids: Set<String>) {
-        // UIスレッドから来るのでそのまま代入でOK
-        preferredIDs = ids
+    // コンポーネント
+    private lazy var scanner = DeviceScanner(allowedNamePrefixes: allowedNamePrefixes, registry: registry)
+    private lazy var connectionManager = ConnectionManager(serviceUUID: serviceUUID, readCharUUID: readCharUUID, writeCharUUID: writeCharUUID)
+    private lazy var notifyController = NotifyController(parser: parser) { [weak self] frame in
+        guard let self else { return }
+        DispatchQueue.main.async { self.latestTemperature = frame.value }
+        self.temperatureFramesSubject.send(frame)
     }
-    
+
     override init() {
         super.init()
         central = CBCentralManager(delegate: self, queue: bleQueue)
+        setupCallbacks()
     }
 
     // MARK: - Public API
@@ -104,18 +74,14 @@ final class BluetoothService: NSObject, ObservableObject {
             self.connectionState = .scanning
             self.scanned.removeAll()
         }
-        // 全探索（広告にサービスを出さない端末も拾う）
-        central.scanForPeripherals(withServices: nil,
-                                   options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
+        scanner.start(using: central)
     }
 
-    func stopScan() { central.stopScan() }
+    func stopScan() { scanner.stop(using: central) }
 
     func disconnect() {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil; readChar = nil; writeChar = nil
-        stopPolling()
-        stopAutoTune()
         DispatchQueue.main.async { self.connectionState = .idle }
     }
 
@@ -152,74 +118,59 @@ final class BluetoothService: NSObject, ObservableObject {
         p.writeValue(cmd, for: w, type: .withResponse)
     }
 
-    // ポーリング開始/停止
-    func startPolling(hz: Double = 5.0) {
-        // no-op
-//        if hasWrite == false {
-//            autoPollOnReady = true
-//            print("[BLE] poll requested; will start when writeChar is ready")
-//            return
-//        }
-//        if pollSrc != nil { return }
-//
-//        let interval = DispatchTimeInterval.milliseconds(Int(1000.0 / hz))
-//        let src = DispatchSource.makeTimerSource(queue: bleQueue)
-//        src.setEventHandler { [weak self] in
-//            guard let self else { return }
-//            self.requestOnce()
-//            if let t = self.lastNotifyAt, Date().timeIntervalSince(t) > 1.5 {
-//                print("[BLE] watchdog: no notify > 1.5s")
-//            }
-//        }
-//        src.schedule(deadline: .now() + .milliseconds(200), repeating: interval, leeway: .milliseconds(20))
-//        pollSrc = src
-//        src.activate()
-//        print("[BLE] start polling GCD \(hz)Hz")
+    // UI から設定するためのセッターを用意
+    func setPreferredIDs(_ ids: Set<String>) {
+        // UIスレッドから来るのでそのまま代入でOK
+        preferredIDs = ids
     }
+}
 
-    func stopPolling() {
-        // no-op
-        //        pollSrc?.cancel()
-        // pollSrc = nil
-    }
+// MARK: - Private
+private extension BluetoothService {
+    func setupCallbacks() {
+        scanner.onDiscovered = { [weak self] entry, peripheral in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                if let idx = self.scanned.firstIndex(where: { $0.id == entry.id }) {
+                    self.scanned[idx] = entry
+                } else {
+                    self.scanned.append(entry)
+                }
+            }
 
-    private func startAutoTune() {
-        // no-op
-//        stopAutoTune()
-//        let src = DispatchSource.makeTimerSource(queue: bleQueue)
-//        src.setEventHandler { [weak self] in
-//            guard let self else { return }
-//            let delta = self.notifyCountBG - self.lastCountForAuto
-//            self.lastCountForAuto = self.notifyCountBG
-//            let hz = max(0, delta)
-//            DispatchQueue.main.async { self.notifyHz = Double(hz) }
-//
-//            if hz >= 3 { self.fastTicks += 1; self.slowTicks = 0 }
-//            else if hz < 2 { self.slowTicks += 1; self.fastTicks = 0 }
-//            else { self.fastTicks = 0; self.slowTicks = 0 }
-//
-//            if self.fastTicks >= 2 {
-//                self.fastTicks = 0
-//                self.stopPolling()
-//                self.streamModeUntil = Date().addingTimeInterval(3.0)
-//            }
-//            if let until = self.streamModeUntil, Date() < until { return }
-//            if self.slowTicks >= 2 && self.pollSrc == nil && self.hasWrite {
-//                self.slowTicks = 0
-//                self.startPolling(hz: 5)
-//            }
-//        }
-//        src.schedule(deadline: .now() + .seconds(1), repeating: .seconds(1), leeway: .milliseconds(50))
-//        autoTuneSrc = src
-//        src.activate()
-    }
+            if self.autoConnectOnDiscover, self.peripheral == nil, self.connectionState == .scanning {
+                let pid = peripheral.identifier.uuidString
+                if self.preferredIDs.isEmpty || self.preferredIDs.contains(pid) {
+                    self.stopScan()
+                    self.peripheral = peripheral
+                    DispatchQueue.main.async {
+                        self.deviceName = entry.name
+                        self.connectionState = .connecting
+                    }
+                    print("[BLE] found \(entry.name), auto-connecting…")
+                    self.central.connect(peripheral, options: nil)
+                }
+            }
+        }
 
-    private func stopAutoTune() {
-        // no-op
-    }
+        connectionManager.onCharacteristicsReady = { [weak self] peripheral, read, write in
+            guard let self else { return }
+            self.readChar = read
+            self.writeChar = write
+            DispatchQueue.main.async { self.connectionState = .ready }
+            // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
+            self.setDeviceTime()
+        }
+        connectionManager.onFailed = { [weak self] message in
+            DispatchQueue.main.async { self?.connectionState = .failed(message) }
+        }
 
-    private func hex(_ data: Data) -> String {
-        data.map { String(format: "%02X", $0) }.joined(separator: " ")
+        notifyController.onCountUpdate = { [weak self] count in
+            self?.notifyCountUI = count
+        }
+        notifyController.onHzUpdate = { [weak self] hz in
+            self?.notifyHz = hz
+        }
     }
 }
 
@@ -239,49 +190,13 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                         didDiscover p: CBPeripheral,
                         advertisementData: [String : Any],
                         rssi RSSI: NSNumber) {
-        let name = (advertisementData[CBAdvertisementDataLocalNameKey] as? String)
-                   ?? p.name ?? "Unknown"
-        guard allowedNamePrefixes.contains(where: { name.hasPrefix($0) }) else { return }
-
-        // 1) レジストリ更新（別スレッドから来るのでOK。内部でMain適用に直します）
-        registry?.upsertSeen(id: p.identifier.uuidString, name: name, rssi: RSSI.intValue)
-
-        // 2) 公開スキャン結果
-        let entry = ScannedDevice(id: p.identifier.uuidString, name: name, rssi: RSSI.intValue, lastSeenAt: Date())
-        DispatchQueue.main.async {
-            if let idx = self.scanned.firstIndex(where: { $0.id == entry.id }) {
-                self.scanned[idx] = entry
-            } else {
-                self.scanned.append(entry)
-            }
-        }
-
-        // 3) Auto-connect（preferredIDs を優先。空なら「最初に見つけた1台」）
-        if autoConnectOnDiscover, peripheral == nil, connectionState == .scanning {
-            let pid = p.identifier.uuidString
-            if preferredIDs.isEmpty || preferredIDs.contains(pid) {
-                stopScan()
-                peripheral = p
-                DispatchQueue.main.async {
-                    self.deviceName = name
-                    self.connectionState = .connecting
-                }
-                print("[BLE] found \(name), auto-connecting…")
-                central.connect(p, options: nil)
-                return
-            }
-        }
-
-        // （手動接続のためのスキャン継続はこのまま）
-    
-
+        scanner.handleDiscovery(peripheral: p, advertisementData: advertisementData, rssi: RSSI)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {
         print("[BLE] connected to \(p.name ?? "?")")
-//        startAutoTune() // 自動チューニングの開始
         p.delegate = self
-        p.discoverServices(nil)
+        connectionManager.didConnect(p)
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -293,37 +208,13 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        if let e = error {
-            DispatchQueue.main.async { self.connectionState = .failed("Service discovery: \(e.localizedDescription)") }
-            return
-        }
-        let services = peripheral.services ?? []
-        print("[BLE] services:", services.map { $0.uuid.uuidString })
-
-        guard let svc = services.first(where: { $0.uuid == serviceUUID }) else {
-            print("[BLE] target service not found yet")
-            return
-        }
-        peripheral.discoverCharacteristics([readCharUUID, writeCharUUID], for: svc)
+        connectionManager.didDiscoverServices(peripheral: peripheral, error: error)
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didDiscoverCharacteristicsFor service: CBService,
                     error: Error?) {
-        if let e = error {
-            DispatchQueue.main.async { self.connectionState = .failed("Char discovery: \(e.localizedDescription)") }
-            return
-        }
-        service.characteristics?.forEach { ch in
-            if ch.uuid == readCharUUID { readChar = ch; peripheral.setNotifyValue(true, for: ch) }
-            if ch.uuid == writeCharUUID { writeChar = ch }
-        }
-        wroteNotReadyCount = 0
-        if readChar != nil {
-            DispatchQueue.main.async { self.connectionState = .ready }
-        }
-        // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
-        setDeviceTime()
+        connectionManager.didDiscoverCharacteristics(for: service, error: error)
     }
 
     func peripheral(_ peripheral: CBPeripheral,
@@ -339,35 +230,6 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
-
-        DispatchQueue.main.async { self.notifyCountUI &+= 1 }
-        notifyCountBG &+= 1
-        lastNotifyAt = Date()
-
-        let now = Date()
-        if let prev = prevNotifyAt {
-            let dt = now.timeIntervalSince(prev)
-            if dt > 0 {
-                if let ema = emaInterval {
-                    emaInterval = ema * (1 - emaAlpha) + dt * emaAlpha
-                } else {
-                    emaInterval = dt
-                }
-                if let iv = emaInterval, iv > 0 {
-                    let hz = 1.0 / iv
-                    DispatchQueue.main.async { self.notifyHz = hz }
-                }
-            }
-        }
-        prevNotifyAt = now
-
-        let frames = parser.parseFrames(data)
-        guard !frames.isEmpty else { return }
-        DispatchQueue.main.async {
-            for f in frames {
-                self.latestTemperature = f.value
-                self.temperatureStream.send(TemperatureSample(time: f.time, value: f.value))
-            }
-        }
+        notifyController.handleNotification(data)
     }
 }

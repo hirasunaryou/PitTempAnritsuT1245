@@ -3,6 +3,7 @@
 // ライブグラフ、接続ボタン群、BLESampleの購読(onReceive) を含む。
 import SwiftUI
 import UIKit
+import Combine
 
 struct MeasureView: View {
     @EnvironmentObject var vm: SessionViewModel
@@ -283,7 +284,7 @@ struct MeasureView: View {
             vm.stopAll()
             if pressureSpeech.isRecording { pressureSpeech.stop() }
         }
-        .onReceive(ble.temperatureStream) { sample in
+        .onReceive(ble.temperatureFrames.map { TemperatureSample(time: $0.time, value: $0.value) }) { sample in
             if !isHistoryMode {
                 vm.ingestBLESample(sample)
             }

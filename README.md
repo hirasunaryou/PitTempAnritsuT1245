@@ -108,8 +108,8 @@ AnritsuM (BLE)
    └─(Notify/Write)→ BluetoothService
         ├─ parseFrames() → TemperatureFrame(value ℃, time, deviceID?, status?)
         ├─ publish latestTemperature / notifyHz / counters
-        └─ temperatureStream.send(TemperatureSample)
-               └─ SessionViewModel.ingestBLESample()
+        └─ temperatureFrames.send(TemperatureFrame)
+               └─ map to SessionViewModel.ingestBLESample()
                       ├─ live配列更新（グラフ）
                       └─ peak/結果反映（UIセル）
 ```
@@ -154,7 +154,7 @@ AnritsuM (BLE)
   * すべて**Mainスレッド**で `@Published` を更新
 * `SessionViewModel`
 
-  * `temperatureStream` を受け取り **liveデータ**（グラフ）・**ゾーン結果**を更新
+  * 温度ストリーム（`TemperatureFrame`）を受け取り **liveデータ**（グラフ）・**ゾーン結果**を更新
 * `MetaEditorView / MetaVoiceEditorView`
 
   * 項目別の音声入力、まとめ取り→抽出→反映（正規表現ベース）

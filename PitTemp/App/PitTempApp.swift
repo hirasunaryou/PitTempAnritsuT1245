@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 @main
 struct PitTempApp: App {
@@ -40,7 +41,10 @@ struct PitTempApp: App {
         }
         // 起動時に一度だけBLE→Recorderを結線
         .onAppear {
-            recorder.bind(to: ble.temperatureStream.eraseToAnyPublisher())
+            let samples = ble.temperatureFrames
+                .map { TemperatureSample(time: $0.time, value: $0.value) }
+                .eraseToAnyPublisher()
+            recorder.bind(to: samples)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {

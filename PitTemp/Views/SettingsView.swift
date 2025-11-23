@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 struct SettingsView: View {
     @EnvironmentObject var vm: SessionViewModel
@@ -155,6 +156,22 @@ struct SettingsView: View {
 
                     NavigationLink("Voice Keywords") {
                         MetaVoiceKeywordSettingsView()
+                    }
+                }
+
+                // iPadの大きな画面を活かして、文字と数字を強調表示した専用レイアウトを選択できるようにする。
+                if UIDevice.current.userInterfaceIdiom == .pad {
+                    Section("iPad Display") {
+                        Toggle(
+                            "Senior-friendly layout (iPad)",
+                            isOn: $settings.enableSeniorIPadLayout
+                        )
+                        .tint(.orange)
+
+                        Text("温度や内圧などの数値を大きく表示するiPad専用ビューを有効にします。測定前にiPad mini / iPad を準備したときだけONにしてください。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
 

@@ -94,6 +94,19 @@ struct MeasureView: View {
 
 
     var body: some View {
+        // iPad の場合だけ大きなUIに切り替える。どちらのレイアウトでも同じロジック（通信・データ更新）を共有する。
+        withSharedLifecycle(
+            useSeniorIPadLayout ? seniorFriendlyNavigation : standardNavigation
+        )
+    }
+
+    /// iPad + シニア向け設定がONの場合に true になる。デバイス判定で iPhone には影響を与えない。
+    private var useSeniorIPadLayout: Bool {
+        settings.enableSeniorIPadLayout && UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    /// 既存のタブに出ていた標準レイアウト。見た目はそのまま保持する。
+    private var standardNavigation: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 12) {
@@ -176,166 +189,382 @@ struct MeasureView: View {
                 }
             }
         }
-        .background(historyBackgroundColor.ignoresSafeArea())
-        .onAppear {
-            if settings.enableWheelVoiceInput {
-                speech.requestAuth()
-                pressureSpeech.requestAuth()
-            }
-            ble.startScan()
-            ble.autoConnectOnDiscover = settings.bleAutoConnect
-            // registry の autoConnect=true だけを優先対象に
-            let preferred = Set(registry.known.filter { $0.autoConnect }.map { $0.id })
-            ble.setPreferredIDs(preferred)   // ← ここを関数呼び出しに
-            if let current = vm.currentWheel {
-                selectedWheel = current
-            }
-            syncManualPressureDefaults(for: selectedWheel)
-            history.refresh()
-            print("[UI] MeasureView appear")
-        }
+    }
 
-        .onDisappear {
-            vm.stopAll()
-            if pressureSpeech.isRecording { pressureSpeech.stop() }
-        }
-        .onReceive(ble.temperatureStream) { sample in
-            if !isHistoryMode {
-                vm.ingestBLESample(sample)
+    /// iPad の広い画面を活かし、数字を大きく読めるレイアウト。色や配置で入力箇所を強調する。
+    private var seniorFriendlyNavigation: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    // 接続やスキャンの状態は既存のカードをそのまま流用。
+                    sectionCard { connectBar }
+
+                    historyStatusCard
+
+                    sectionCard { seniorWheelSelector }
+
+                    sectionCard { seniorZoneReadout }
+
+                    sectionCard { seniorPressureReadout }
+
+                    sectionCard { seniorMetaSummary }
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 14)
+            }
+            .background(historyBackgroundColor)
+            .safeAreaInset(edge: .bottom) { bottomBar }
+            .navigationTitle("Large Display")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) { appTitleHeader }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button {
+                        presentSessionReport()
+                    } label: {
+                        Label("Report", systemImage: "doc.richtext")
+                    }
+                    Button("Edit") { showMetaEditor = true }
+                }
+            }
+            // 既存のモーダルをそのまま利用し、操作方法を変えない。
+            .sheet(isPresented: $showMetaEditor) {
+                MetaEditorView()
+                    .environmentObject(vm)
+                    .presentationDetents([.medium, .large])
+            }
+            .sheet(isPresented: $showConnectSheet) {
+                ConnectView()
+                    .environmentObject(ble)
+                    .environmentObject(registry)
+            }
+            .sheet(isPresented: Binding(
+                get: { shareURL != nil },
+                set: { if !$0 { shareURL = nil } }
+            )) {
+                if let url = shareURL {
+                    ActivityView(items: [url])
+                }
+            }
+            .sheet(isPresented: $showHistorySheet) {
+                HistoryListView(
+                    history: history,
+                    onSelect: { summary in loadHistorySummary(summary) },
+                    onClose: { showHistorySheet = false }
+                )
+                .presentationDetents([.medium, .large])
+            }
+            .sheet(item: $reportPayload) { payload in
+                NavigationStack {
+                    SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
+                }
             }
         }
-        .onReceive(vm.$currentWheel) { newWheel in
-            if let newWheel { selectedWheel = newWheel }
-        }
-        .onChange(of: isManualMode) { _, newValue in
-            guard !isHistoryMode else { return }
-            if newValue {
-                clearManualFeedback(for: selectedWheel)
-                syncManualDefaults(for: selectedWheel)
+    }
+
+    /// ネットワーク接続や音声入力など、元の MeasureView が持っていた副作用をまとめて適用する。
+    private func withSharedLifecycle<Content: View>(_ content: Content) -> some View {
+        content
+            .background(historyBackgroundColor.ignoresSafeArea())
+            .onAppear {
+                if settings.enableWheelVoiceInput {
+                    speech.requestAuth()
+                    pressureSpeech.requestAuth()
+                }
+                ble.startScan()
+                ble.autoConnectOnDiscover = settings.bleAutoConnect
+                // registry の autoConnect=true だけを優先対象に
+                let preferred = Set(registry.known.filter { $0.autoConnect }.map { $0.id })
+                ble.setPreferredIDs(preferred)   // ← ここを関数呼び出しに
+                if let current = vm.currentWheel {
+                    selectedWheel = current
+                }
                 syncManualPressureDefaults(for: selectedWheel)
-                showWheelDetails = true
-            } else {
-                clearManualFeedback()
+                history.refresh()
+                print("[UI] MeasureView appear")
+            }
+
+            .onDisappear {
+                vm.stopAll()
                 if pressureSpeech.isRecording { pressureSpeech.stop() }
             }
-            activePressureWheel = nil
-        }
-        .onChange(of: selectedWheel) { _, newWheel in
-            syncManualPressureDefaults(for: newWheel)
-            activePressureWheel = nil
-            if isManualInteractionActive {
-                clearManualFeedback(for: newWheel)
-                syncManualDefaults(for: newWheel)
+            .onReceive(ble.temperatureStream) { sample in
+                if !isHistoryMode {
+                    vm.ingestBLESample(sample)
+                }
             }
-            showWheelDetails = false
-        }
-        .onChange(of: settings.enableWheelVoiceInput) { _, newValue in
-            if newValue {
-                speech.requestAuth()
-                pressureSpeech.requestAuth()
-            } else {
-                if speech.isRecording { speech.stop() }
-                if pressureSpeech.isRecording { pressureSpeech.stop() }
+            .onReceive(vm.$currentWheel) { newWheel in
+                if let newWheel { selectedWheel = newWheel }
             }
-        }
-        .onReceive(vm.$results) { _ in
-            if isManualInteractionActive { syncManualDefaults(for: selectedWheel) }
-        }
-        .onReceive(vm.$wheelMemos) { _ in
-            if isManualInteractionActive { syncManualMemo(for: selectedWheel) }
-        }
-        .onReceive(vm.$wheelPressures) { _ in
-            syncManualPressureDefaults(for: selectedWheel)
-        }
-        .onChange(of: historyEditingEnabled) { _, enabled in
-            if enabled {
-                clearManualFeedback(for: selectedWheel)
-                syncManualDefaults(for: selectedWheel)
-                syncManualMemo(for: selectedWheel)
-                syncManualPressureDefaults(for: selectedWheel)
-            } else {
+            .onChange(of: isManualMode) { _, newValue in
+                guard !isHistoryMode else { return }
+                if newValue {
+                    clearManualFeedback(for: selectedWheel)
+                    syncManualDefaults(for: selectedWheel)
+                    syncManualPressureDefaults(for: selectedWheel)
+                    showWheelDetails = true
+                } else {
+                    clearManualFeedback()
+                    if pressureSpeech.isRecording { pressureSpeech.stop() }
+                }
                 activePressureWheel = nil
             }
+            .onChange(of: selectedWheel) { _, newWheel in
+                syncManualPressureDefaults(for: newWheel)
+                activePressureWheel = nil
+                if isManualInteractionActive {
+                    clearManualFeedback(for: newWheel)
+                    syncManualDefaults(for: newWheel)
+                }
+                showWheelDetails = false
+            }
+            .onChange(of: settings.enableWheelVoiceInput) { _, newValue in
+                if newValue {
+                    speech.requestAuth()
+                    pressureSpeech.requestAuth()
+                } else {
+                    if speech.isRecording { speech.stop() }
+                    if pressureSpeech.isRecording { pressureSpeech.stop() }
+                }
+            }
+            .onReceive(vm.$results) { _ in
+                if isManualInteractionActive { syncManualDefaults(for: selectedWheel) }
+            }
+            .onReceive(vm.$wheelMemos) { _ in
+                if isManualInteractionActive { syncManualMemo(for: selectedWheel) }
+            }
+            .onReceive(vm.$wheelPressures) { _ in
+                syncManualPressureDefaults(for: selectedWheel)
+            }
+            .onChange(of: historyEditingEnabled) { _, enabled in
+                if enabled {
+                    clearManualFeedback(for: selectedWheel)
+                    syncManualDefaults(for: selectedWheel)
+                    syncManualMemo(for: selectedWheel)
+                    syncManualPressureDefaults(for: selectedWheel)
+                } else {
+                    activePressureWheel = nil
+                }
+            }
+            .onChange(of: vm.loadedHistorySummary) { _, summary in
+                deactivateHistoryEditing()
+                if summary != nil {
+                    isManualMode = false
+                }
+            }
+            .onChange(of: showHistorySheet) { _, presenting in
+                if presenting { history.refresh() }
+            }
+            .onReceive(vm.$sessionResetID) { _ in
+                selectedWheel = .FL
+                manualValues.removeAll()
+                manualMemos.removeAll()
+                manualPressureValues.removeAll()
+                clearManualFeedback()
+                showWheelDetails = false
+                if isManualMode {
+                    syncManualDefaults(for: .FL)
+                    syncManualMemo(for: .FL)
+                }
+                syncManualPressureDefaults(for: .FL)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
+                if let url = note.userInfo?["url"] as? URL {
+                    let comps = url.pathComponents.suffix(2).joined(separator: "/")
+                    uploadMessage = "Saved to: \(comps)"
+                    showUploadAlert = true
+                }
+            }
+            .onChange(of: folderBM.statusLabel) { _, newVal in
+                if case .done = newVal, let p = folderBM.lastUploadedDestination {
+                    let hint = p.deletingLastPathComponent().lastPathComponent
+                    uploadMessage = "Uploaded to: \(hint)"
+                    showUploadAlert = true
+                }
+            }
+            // アラートはこれ1つに
+            .alert("Upload complete", isPresented: $showUploadAlert) {
+                Button("OK", role: .cancel) { }
+            } message: { Text(uploadMessage) }
+            .alert(
+                "History error / 履歴エラー",
+                isPresented: Binding(
+                    get: { historyError != nil },
+                    set: { if !$0 { historyError = nil } }
+                )
+            ) {
+                Button("OK") { historyError = nil }
+            } message: {
+                Text(historyError ?? "")
+            }
+            .onChange(of: folderBM.statusLabel) { _, newVal in
+                if case .done = newVal {
+                    let p = folderBM.lastUploadedDestination
+                    // 例: "iCloud/YourFolder/2025-10-13"
+                    let parent = p?.deletingLastPathComponent()
+                    let hint = parent?.lastPathComponent ?? ""
+                    uploadMessage = "Uploaded to: \(hint)"
+                    showUploadAlert = true
+                }
+            }
+            .confirmationDialog(
+                "次の測定の準備 / Prepare next measurement",
+                isPresented: $showNextSessionDialog,
+                titleVisibility: .visible
+            ) {
+                Button("結果のみクリア / Clear results") {
+                    handleNextSessionChoice(.keepAllMeta)
+                }
+                Button("車両Noのみ保持 / Keep car number") {
+                    handleNextSessionChoice(.keepCarIdentity)
+                }
+                Button("すべて初期化 / Reset everything", role: .destructive) {
+                    handleNextSessionChoice(.resetEverything)
+                }
+                Button("キャンセル / Cancel", role: .cancel) { }
+            } message: {
+                Text("次の車両に移る際のリセット方法を選択してください。\nChoose how to reset before the next vehicle arrives.")
+            }
+    }
+
+    // MARK: - Senior friendly iPad views
+
+    @ViewBuilder
+    private var seniorWheelSelector: some View {
+        let wheels: [WheelPos] = [.FL, .FR, .RL, .RR]
+        let columns = [GridItem(.flexible(), spacing: 16), GridItem(.flexible(), spacing: 16)]
+
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Tyre position / タイヤ選択")
+                .font(.title3.bold())
+                .foregroundStyle(.primary)
+
+            LazyVGrid(columns: columns, spacing: 14) {
+                ForEach(wheels, id: \.self) { wheel in
+                    // 既存のボタンをそのまま使い、Dynamic Type を拡大することで見やすさを向上させる。
+                    wheelTile(for: wheel)
+                        .environment(\.dynamicTypeSize, .accessibility3)
+                        .padding(4)
+                }
+            }
+
+            Text("ボタンは感覚で選びやすいように配置をそのまま残し、文字だけを大きくします。選択中のタイヤは色で強調されます。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .onChange(of: vm.loadedHistorySummary) { _, summary in
-            deactivateHistoryEditing()
-            if summary != nil {
-                isManualMode = false
+    }
+
+    private var seniorZoneReadout: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Surface temperature / 路面温度")
+                .font(.title3.bold())
+                .foregroundStyle(.primary)
+
+            HStack(spacing: 16) {
+                ForEach(zoneOrder(for: selectedWheel), id: \.self) { zone in
+                    seniorZoneTile(for: zone)
+                }
             }
         }
-        .onChange(of: showHistorySheet) { _, presenting in
-            if presenting { history.refresh() }
-        }
-        .onReceive(vm.$sessionResetID) { _ in
-            selectedWheel = .FL
-            manualValues.removeAll()
-            manualMemos.removeAll()
-            manualPressureValues.removeAll()
-            clearManualFeedback()
-            showWheelDetails = false
-            if isManualMode {
-                syncManualDefaults(for: .FL)
-                syncManualMemo(for: .FL)
-            }
-            syncManualPressureDefaults(for: .FL)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
-            if let url = note.userInfo?["url"] as? URL {
-                let comps = url.pathComponents.suffix(2).joined(separator: "/")
-                uploadMessage = "Saved to: \(comps)"
-                showUploadAlert = true
-            }
-        }
-        .onChange(of: folderBM.statusLabel) { _, newVal in
-            if case .done = newVal, let p = folderBM.lastUploadedDestination {
-                let hint = p.deletingLastPathComponent().lastPathComponent
-                uploadMessage = "Uploaded to: \(hint)"
-                showUploadAlert = true
+    }
+
+    private func seniorZoneTile(for zone: Zone) -> some View {
+        let value = displayValue(w: selectedWheel, z: zone)
+        let stamp = captureTimestamp(for: selectedWheel, zone: zone)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(zoneDisplayName(zone))
+                .font(.headline)
+                .foregroundStyle(.secondary)
+
+            // 数字を特に大きく。monospacedDigit で揃え、瞬時に確認できるようにする。
+            Text(value)
+                .font(.system(size: 48, weight: .heavy, design: .rounded))
+                .monospacedDigit()
+                .minimumScaleFactor(0.7)
+
+            if let stamp {
+                Text("\(stamp.date)  \(stamp.time)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("まだ値がありません / No reading yet")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
-        // アラートはこれ1つに
-        .alert("Upload complete", isPresented: $showUploadAlert) {
-            Button("OK", role: .cancel) { }
-        } message: { Text(uploadMessage) }
-        .alert(
-            "History error / 履歴エラー",
-            isPresented: Binding(
-                get: { historyError != nil },
-                set: { if !$0 { historyError = nil } }
-            )
-        ) {
-            Button("OK") { historyError = nil }
-        } message: {
-            Text(historyError ?? "")
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private var seniorPressureReadout: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pressure / 内圧")
+                .font(.title3.bold())
+
+            HStack(alignment: .firstTextBaseline) {
+                let display = pressureDetailDisplay(for: selectedWheel) ?? "-- kPa"
+                Text(display)
+                    .font(.system(size: 42, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                Button {
+                    // 既存の詳細入力をそのまま開く。大画面でも動作は同じ。
+                    showWheelDetails = true
+                    activePressureWheel = selectedWheel
+                } label: {
+                    Label("Edit", systemImage: "square.and.pencil")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Text("測定値は数字を太字で表示し、編集ボタンで既存の入力シートを呼び出せます。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
-        .onChange(of: folderBM.statusLabel) { _, newVal in
-            if case .done = newVal {
-                let p = folderBM.lastUploadedDestination
-                // 例: "iCloud/YourFolder/2025-10-13"
-                let parent = p?.deletingLastPathComponent()
-                let hint = parent?.lastPathComponent ?? ""
-                uploadMessage = "Uploaded to: \(hint)"
-                showUploadAlert = true
-            }
+    }
+
+    private var seniorMetaSummary: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Meta / 入力値の確認")
+                .font(.title3.bold())
+
+            seniorMetaRow(title: "TRACK", value: vm.meta.track)
+            seniorMetaRow(title: "DATE", value: vm.meta.date)
+            seniorMetaRow(title: "CAR", value: vm.meta.car)
+            seniorMetaRow(title: "DRIVER", value: vm.meta.driver)
+            seniorMetaRow(title: "TYRE", value: vm.meta.tyre)
+            seniorMetaRow(title: "TIME", value: vm.meta.time)
+            seniorMetaRow(title: "LAP", value: vm.meta.lap)
+            seniorMetaRow(title: "CHECKER", value: vm.meta.checker)
+
+            Text("iPhone と同じ入力値を読み込んでいるため、数字のチェックだけをiPadで行う運用でも混乱しません。")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
-        .confirmationDialog(
-            "次の測定の準備 / Prepare next measurement",
-            isPresented: $showNextSessionDialog,
-            titleVisibility: .visible
-        ) {
-            Button("結果のみクリア / Clear results") {
-                handleNextSessionChoice(.keepAllMeta)
-            }
-            Button("車両Noのみ保持 / Keep car number") {
-                handleNextSessionChoice(.keepCarIdentity)
-            }
-            Button("すべて初期化 / Reset everything", role: .destructive) {
-                handleNextSessionChoice(.resetEverything)
-            }
-            Button("キャンセル / Cancel", role: .cancel) { }
-        } message: {
-            Text("次の車両に移る際のリセット方法を選択してください。\nChoose how to reset before the next vehicle arrives.")
+    }
+
+    private func seniorMetaRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Text(title)
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .frame(width: 120, alignment: .leading)
+
+            Text(value.isEmpty ? "-" : value)
+                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, 4)
     }
 
     private var topStatusRow: some View { connectBar }

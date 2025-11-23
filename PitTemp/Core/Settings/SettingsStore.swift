@@ -2,10 +2,7 @@
 //  SettingsStore.swift
 //  Core/Settings
 //
-//  目的: 画面やVMに散らばった @AppStorage を一元管理して、型安全＆拡張しやすくする。
-//  ポイント:
-//   - 既存キー名をそのまま使用（互換性維持）
-//   - 必要に応じてバリデーションや enum ラッパーをここで行う
+//  目的: 画面やVMに散らばった設定保存を一元管理し、保存先を切り替えやすくする。
 //
 
 import Foundation
@@ -21,48 +18,132 @@ protocol SessionSettingsProviding {
     var minAdvanceSec: Double { get }
     var zoneOrderSequence: [Zone] { get }
     var autofillDateTime: Bool { get }
-    /// iCloud への自動アップロードを VM から参照するためのフラグ（SettingsStore の AppStorage に橋渡し）。
+    /// iCloud への自動アップロードを VM から参照するためのフラグ
     var enableICloudUpload: Bool { get }
+}
+
+protocol SettingsStoreBacking {
+    func value<T>(forKey key: String, default defaultValue: T) -> T
+    func set<T>(_ value: T, forKey key: String)
+}
+
+struct UserDefaultsSettingsStore: SettingsStoreBacking {
+    var defaults: UserDefaults = .standard
+
+    func value<T>(forKey key: String, default defaultValue: T) -> T {
+        if let existing = defaults.object(forKey: key) as? T {
+            return existing
+        }
+        return defaultValue
+    }
+
+    func set<T>(_ value: T, forKey key: String) {
+        defaults.set(value, forKey: key)
+    }
 }
 
 @MainActor
 final class SettingsStore: ObservableObject {
-
-    init() {
-        migrateMetaVoiceKeywordsIfNeeded()
+    private enum Keys {
+        static let autoStopLimitSec = "pref.durationSec"
+        static let chartWindowSec = "pref.chartWindowSec"
+        static let advanceWithGreater = "pref.advanceWithGreater"
+        static let advanceWithRightArrow = "pref.advanceWithRightArrow"
+        static let advanceWithReturn = "pref.advanceWithReturn"
+        static let minAdvanceSec = "pref.minAdvanceSec"
+        static let bleAutoConnect = "ble.autoConnect"
+        static let enableWheelVoiceInput = "pref.enableWheelVoiceInput"
+        static let enableSeniorLayout = "pref.enableSeniorLayout"
+        static let seniorZoneFontScale = "pref.senior.zoneFontScale"
+        static let seniorChipFontScale = "pref.senior.chipFontScale"
+        static let seniorLiveFontScale = "pref.senior.liveFontScale"
+        static let seniorMetaFontScale = "pref.senior.metaFontScale"
+        static let seniorTileFontScale = "pref.senior.tileFontScale"
+        static let seniorPressureFontScale = "pref.senior.pressureFontScale"
+        static let zoneOrder = "pref.zoneOrder"
+        static let autofillDateTime = "pref.autofillDateTime"
+        static let hr2500ID = "hr2500.id"
+        static let enableICloudUpload = "cloud.enableICloudUpload"
+        static let enableGoogleDriveUpload = "cloud.enableDriveUpload"
+        static let metaInputMode = "pref.metaInputMode"
+        static let metaKeywordTrack = "pref.metaKeyword.track"
+        static let metaKeywordDate = "pref.metaKeyword.date"
+        static let metaKeywordTime = "pref.metaKeyword.time"
+        static let metaKeywordCar = "pref.metaKeyword.car"
+        static let metaKeywordDriver = "pref.metaKeyword.driver"
+        static let metaKeywordTyre = "pref.metaKeyword.tyre"
+        static let metaKeywordLap = "pref.metaKeyword.lap"
+        static let metaKeywordChecker = "pref.metaKeyword.checker"
     }
 
-    // 既存キー（互換維持）
-    @AppStorage("pref.durationSec") var autoStopLimitSec: Int = 20
-    @AppStorage("pref.chartWindowSec") var chartWindowSec: Double = 6
-    @AppStorage("pref.advanceWithGreater") var advanceWithGreater: Bool = false
-    @AppStorage("pref.advanceWithRightArrow") var advanceWithRightArrow: Bool = false
-    @AppStorage("pref.advanceWithReturn") var advanceWithReturn: Bool = true
-    @AppStorage("pref.minAdvanceSec") var minAdvanceSec: Double = 0.3
-    @AppStorage("ble.autoConnect") var bleAutoConnect: Bool = true
-    @AppStorage("pref.enableWheelVoiceInput") var enableWheelVoiceInput: Bool = false
-    // 高齢の計測者向けに iPad mini を渡す運用があるため、大きな数字に切り替える設定を用意する。
-    @AppStorage("pref.enableSeniorLayout") var enableSeniorLayout: Bool = false
-    // シニアレイアウト時に「さらに大きく/少しだけ大きく」など、利用者が好みで調整できるスケール係数。
-    // Double で保存しつつ getter でクランプすることで、不正値が入っても UI 崩れを防ぐ。
-    @AppStorage("pref.senior.zoneFontScale") private var seniorZoneFontScaleRaw: Double = 1.0
-    @AppStorage("pref.senior.chipFontScale") private var seniorChipFontScaleRaw: Double = 1.0
-    @AppStorage("pref.senior.liveFontScale") private var seniorLiveFontScaleRaw: Double = 1.0
-    // メタデータ表示やサマリー部の数字、内圧入力まわりも個別に調整できるようにする。
-    @AppStorage("pref.senior.metaFontScale") private var seniorMetaFontScaleRaw: Double = 1.0
-    @AppStorage("pref.senior.tileFontScale") private var seniorTileFontScaleRaw: Double = 1.0
-    @AppStorage("pref.senior.pressureFontScale") private var seniorPressureFontScaleRaw: Double = 1.0
+    private let store: SettingsStoreBacking
 
-    // ← zone順序は “Raw値” を保存して UI では型安全enumで扱う
-    @AppStorage("pref.zoneOrder") private var zoneOrderRaw: Int = 0   // 0: IN-CL-OUT, 1: OUT-CL-IN
+    @Published var autoStopLimitSec: Int { didSet { save(autoStopLimitSec, key: Keys.autoStopLimitSec) } }
+    @Published var chartWindowSec: Double { didSet { save(chartWindowSec, key: Keys.chartWindowSec) } }
+    @Published var advanceWithGreater: Bool { didSet { save(advanceWithGreater, key: Keys.advanceWithGreater) } }
+    @Published var advanceWithRightArrow: Bool { didSet { save(advanceWithRightArrow, key: Keys.advanceWithRightArrow) } }
+    @Published var advanceWithReturn: Bool { didSet { save(advanceWithReturn, key: Keys.advanceWithReturn) } }
+    @Published var minAdvanceSec: Double { didSet { save(minAdvanceSec, key: Keys.minAdvanceSec) } }
+    @Published var bleAutoConnect: Bool { didSet { save(bleAutoConnect, key: Keys.bleAutoConnect) } }
+    @Published var enableWheelVoiceInput: Bool { didSet { save(enableWheelVoiceInput, key: Keys.enableWheelVoiceInput) } }
+    @Published var enableSeniorLayout: Bool { didSet { save(enableSeniorLayout, key: Keys.enableSeniorLayout) } }
+    @Published private var seniorZoneFontScaleRaw: Double { didSet { save(seniorZoneFontScaleRaw, key: Keys.seniorZoneFontScale) } }
+    @Published private var seniorChipFontScaleRaw: Double { didSet { save(seniorChipFontScaleRaw, key: Keys.seniorChipFontScale) } }
+    @Published private var seniorLiveFontScaleRaw: Double { didSet { save(seniorLiveFontScaleRaw, key: Keys.seniorLiveFontScale) } }
+    @Published private var seniorMetaFontScaleRaw: Double { didSet { save(seniorMetaFontScaleRaw, key: Keys.seniorMetaFontScale) } }
+    @Published private var seniorTileFontScaleRaw: Double { didSet { save(seniorTileFontScaleRaw, key: Keys.seniorTileFontScale) } }
+    @Published private var seniorPressureFontScaleRaw: Double { didSet { save(seniorPressureFontScaleRaw, key: Keys.seniorPressureFontScale) } }
+    @Published private var zoneOrderRaw: Int { didSet { save(zoneOrderRaw, key: Keys.zoneOrder) } }
+    @Published var autofillDateTime: Bool { didSet { save(autofillDateTime, key: Keys.autofillDateTime) } }
+    @Published var hr2500ID: String { didSet { save(hr2500ID, key: Keys.hr2500ID) } }
+    @Published var enableICloudUpload: Bool { didSet { save(enableICloudUpload, key: Keys.enableICloudUpload) } }
+    @Published var enableGoogleDriveUpload: Bool { didSet { save(enableGoogleDriveUpload, key: Keys.enableGoogleDriveUpload) } }
+    @Published private var metaInputModeRaw: Int { didSet { save(metaInputModeRaw, key: Keys.metaInputMode) } }
+    @Published private var metaKeywordTrackRaw: String { didSet { save(metaKeywordTrackRaw, key: Keys.metaKeywordTrack) } }
+    @Published private var metaKeywordDateRaw: String { didSet { save(metaKeywordDateRaw, key: Keys.metaKeywordDate) } }
+    @Published private var metaKeywordTimeRaw: String { didSet { save(metaKeywordTimeRaw, key: Keys.metaKeywordTime) } }
+    @Published private var metaKeywordCarRaw: String { didSet { save(metaKeywordCarRaw, key: Keys.metaKeywordCar) } }
+    @Published private var metaKeywordDriverRaw: String { didSet { save(metaKeywordDriverRaw, key: Keys.metaKeywordDriver) } }
+    @Published private var metaKeywordTyreRaw: String { didSet { save(metaKeywordTyreRaw, key: Keys.metaKeywordTyre) } }
+    @Published private var metaKeywordLapRaw: String { didSet { save(metaKeywordLapRaw, key: Keys.metaKeywordLap) } }
+    @Published private var metaKeywordCheckerRaw: String { didSet { save(metaKeywordCheckerRaw, key: Keys.metaKeywordChecker) } }
 
-    // 自動補完や識別情報
-    @AppStorage("pref.autofillDateTime") var autofillDateTime: Bool = true
-    @AppStorage("hr2500.id") var hr2500ID: String = ""
+    init(store: SettingsStoreBacking = UserDefaultsSettingsStore()) {
+        self.store = store
 
-    // クラウド連携の有効/無効
-    @AppStorage("cloud.enableICloudUpload") var enableICloudUpload: Bool = true
-    @AppStorage("cloud.enableDriveUpload") var enableGoogleDriveUpload: Bool = false
+        autoStopLimitSec = store.value(forKey: Keys.autoStopLimitSec, default: 20)
+        chartWindowSec = store.value(forKey: Keys.chartWindowSec, default: 6)
+        advanceWithGreater = store.value(forKey: Keys.advanceWithGreater, default: false)
+        advanceWithRightArrow = store.value(forKey: Keys.advanceWithRightArrow, default: false)
+        advanceWithReturn = store.value(forKey: Keys.advanceWithReturn, default: true)
+        minAdvanceSec = store.value(forKey: Keys.minAdvanceSec, default: 0.3)
+        bleAutoConnect = store.value(forKey: Keys.bleAutoConnect, default: true)
+        enableWheelVoiceInput = store.value(forKey: Keys.enableWheelVoiceInput, default: false)
+        enableSeniorLayout = store.value(forKey: Keys.enableSeniorLayout, default: false)
+        seniorZoneFontScaleRaw = store.value(forKey: Keys.seniorZoneFontScale, default: 1.0)
+        seniorChipFontScaleRaw = store.value(forKey: Keys.seniorChipFontScale, default: 1.0)
+        seniorLiveFontScaleRaw = store.value(forKey: Keys.seniorLiveFontScale, default: 1.0)
+        seniorMetaFontScaleRaw = store.value(forKey: Keys.seniorMetaFontScale, default: 1.0)
+        seniorTileFontScaleRaw = store.value(forKey: Keys.seniorTileFontScale, default: 1.0)
+        seniorPressureFontScaleRaw = store.value(forKey: Keys.seniorPressureFontScale, default: 1.0)
+        zoneOrderRaw = store.value(forKey: Keys.zoneOrder, default: 0)
+        autofillDateTime = store.value(forKey: Keys.autofillDateTime, default: true)
+        hr2500ID = store.value(forKey: Keys.hr2500ID, default: "")
+        enableICloudUpload = store.value(forKey: Keys.enableICloudUpload, default: true)
+        enableGoogleDriveUpload = store.value(forKey: Keys.enableGoogleDriveUpload, default: false)
+        metaInputModeRaw = store.value(forKey: Keys.metaInputMode, default: 0)
+
+        metaKeywordTrackRaw = store.value(forKey: Keys.metaKeywordTrack, default: Self.defaultMetaVoiceKeywords[.track]!.joined(separator: ", "))
+        metaKeywordDateRaw = store.value(forKey: Keys.metaKeywordDate, default: Self.defaultMetaVoiceKeywords[.date]!.joined(separator: ", "))
+        metaKeywordTimeRaw = store.value(forKey: Keys.metaKeywordTime, default: Self.defaultMetaVoiceKeywords[.time]!.joined(separator: ", "))
+        metaKeywordCarRaw = store.value(forKey: Keys.metaKeywordCar, default: Self.defaultMetaVoiceKeywords[.car]!.joined(separator: ", "))
+        metaKeywordDriverRaw = store.value(forKey: Keys.metaKeywordDriver, default: Self.defaultMetaVoiceKeywords[.driver]!.joined(separator: ", "))
+        metaKeywordTyreRaw = store.value(forKey: Keys.metaKeywordTyre, default: Self.defaultMetaVoiceKeywords[.tyre]!.joined(separator: ", "))
+        metaKeywordLapRaw = store.value(forKey: Keys.metaKeywordLap, default: Self.defaultMetaVoiceKeywords[.lap]!.joined(separator: ", "))
+        metaKeywordCheckerRaw = store.value(forKey: Keys.metaKeywordChecker, default: Self.defaultMetaVoiceKeywords[.checker]!.joined(separator: ", "))
+
+        migrateMetaVoiceKeywordsIfNeeded()
+    }
 
     enum MetaVoiceField: String, CaseIterable, Identifiable {
         case track, date, time, car, driver, tyre, lap, checker
@@ -81,7 +162,8 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    private static let legacyCarKeywords = ["car", "カー", "車", "クルマ", "車両", "ゼッケン", "ゼッケン番号", "エントリー番号", "ナンバー", "番号"]
+    private static let legacyCarKeywords = ["car", "カー", "車", "クルマ", "車両", "ゼッケン", "ゼッケン番号", "エントリー番号",
+                                            "ナンバー", "番号"]
     private static let legacyDriverKeywords = ["driver", "ドライバー", "レーサー", "ライダー", "運転手"]
 
     static let defaultMetaVoiceKeywords: [MetaVoiceField: [String]] = [
@@ -95,16 +177,6 @@ final class SettingsStore: ObservableObject {
         .checker: ["checker", "チェッカー", "担当", "記録者", "計測者", "測定者", "確認者"]
     ]
 
-    @AppStorage("pref.metaKeyword.track") private var metaKeywordTrackRaw: String = defaultMetaVoiceKeywords[.track]!.joined(separator: ", ")
-    @AppStorage("pref.metaKeyword.date") private var metaKeywordDateRaw: String = defaultMetaVoiceKeywords[.date]!.joined(separator: ", ")
-    @AppStorage("pref.metaKeyword.time") private var metaKeywordTimeRaw: String = defaultMetaVoiceKeywords[.time]!.joined(separator: ", ")
-    @AppStorage("pref.metaKeyword.car") private var metaKeywordCarRaw: String = defaultMetaVoiceKeywords[.car]!.joined(separator: ", ")
-    @AppStorage("pref.metaKeyword.driver") private var metaKeywordDriverRaw: String = defaultMetaVoiceKeywords[.driver]!.joined(separator: ", ")
-    @AppStorage("pref.metaKeyword.tyre") private var metaKeywordTyreRaw: String = defaultMetaVoiceKeywords[.tyre]!.joined(separator: ", ")
-    @AppStorage("pref.metaKeyword.lap") private var metaKeywordLapRaw: String = defaultMetaVoiceKeywords[.lap]!.joined(separator: ", ")
-    @AppStorage("pref.metaKeyword.checker") private var metaKeywordCheckerRaw: String = defaultMetaVoiceKeywords[.checker]!.joined(separator: ", ")
-
-    // 型安全enum（1つだけ定義）
     enum ZoneOrder: Int, CaseIterable, Identifiable {
         case in_cl_out = 0
         case out_cl_in = 1
@@ -123,17 +195,13 @@ final class SettingsStore: ObservableObject {
         }
     }
 
-    /// UI用：enumで get/set（AppStorageのRaw値にブリッジ）
     var zoneOrderEnum: ZoneOrder {
         get { ZoneOrder(rawValue: zoneOrderRaw) ?? .in_cl_out }
         set { zoneOrderRaw = newValue.rawValue }
     }
 
-    // 例：範囲バリデーション
     var validatedAutoStopLimitSec: Int { max(1, min(autoStopLimitSec, 120)) }
-    
-    // --- 追加: メタ入力モード ---
-    @AppStorage("pref.metaInputMode") private var metaInputModeRaw: Int = 0
+
     enum MetaInputMode: Int, CaseIterable, Identifiable {
         case keyboard = 0
         case voice = 1
@@ -146,38 +214,31 @@ final class SettingsStore: ObservableObject {
     }
 
     // MARK: - シニアレイアウトのカスタム倍率（クランプ付き）
-
-    /// ゾーン値の拡大倍率。0.8〜2.0 の範囲で丸めることで「小さく戻しすぎ」「大きくしすぎ」を防ぐ。
     var seniorZoneFontScale: Double {
         get { clampedScale(seniorZoneFontScaleRaw) }
         set { seniorZoneFontScaleRaw = clampedScale(newValue) }
     }
 
-    /// 要約チップ値の拡大倍率。同様にクランプして UI の破綻を防ぐ。
     var seniorChipFontScale: Double {
         get { clampedScale(seniorChipFontScaleRaw) }
         set { seniorChipFontScaleRaw = clampedScale(newValue) }
     }
 
-    /// ライブ温度バッジの拡大倍率。瞬間値をどこまで強調するかを利用者が決められる。
     var seniorLiveFontScale: Double {
         get { clampedScale(seniorLiveFontScaleRaw) }
         set { seniorLiveFontScaleRaw = clampedScale(newValue) }
     }
 
-    /// メタデータ（TRACK/DATE など）の拡大倍率。読み間違い防止のため値とラベルを同時に伸縮させる。
     var seniorMetaFontScale: Double {
         get { clampedScale(seniorMetaFontScaleRaw) }
         set { seniorMetaFontScaleRaw = clampedScale(newValue) }
     }
 
-    /// タイヤ位置ボタン内のゾーン数字（IN/CL/OUT）の倍率。押し間違いを防ぐために調整幅を確保する。
     var seniorTileFontScale: Double {
         get { clampedScale(seniorTileFontScaleRaw) }
         set { seniorTileFontScaleRaw = clampedScale(newValue) }
     }
 
-    /// 内圧入力カードの数字やラベルの倍率。キーパッド含め視認性を高めるためのスライダー。
     var seniorPressureFontScale: Double {
         get { clampedScale(seniorPressureFontScaleRaw) }
         set { seniorPressureFontScaleRaw = clampedScale(newValue) }
@@ -249,8 +310,6 @@ final class SettingsStore: ObservableObject {
     }
 
     private func clampedScale(_ value: Double) -> Double {
-        // 0.8〜2.0 に丸める。シニアの方が「もう少し小さくしたい」「もっと大きくしたい」と調整しても、
-        // 画面崩れにならない安全幅に収めるためのガード。
         min(2.0, max(0.8, value))
     }
 
@@ -268,6 +327,9 @@ final class SettingsStore: ObservableObject {
         }
     }
 
+    private func save<T>(_ value: T, key: String) {
+        store.set(value, forKey: key)
+    }
 }
 
 extension SettingsStore: SessionSettingsProviding {

@@ -5,9 +5,8 @@
 import Foundation
 
 /// ストレージの抽象化。
-/// - 目的: UserDefaults 固定だった保存先を差し替えられるようにし、
-///   単体テストや将来の Keychain/ファイル保存に備える。
-protocol DeviceRegistryStoring {
+/// - 目的: 保存先を差し替えられるようにし、単体テストや将来の Keychain/ファイル保存に備える。
+protocol DeviceRegistryStore {
     /// 保存済みのレコード一覧をロードする。
     /// - 戻り値: 何も保存されていなければ空配列。
     func loadRecords() -> [DeviceRecord]
@@ -17,7 +16,7 @@ protocol DeviceRegistryStoring {
 }
 
 /// UserDefaults を使った既定の保存先。
-final class UserDefaultsDeviceRegistryStore: DeviceRegistryStoring {
+final class UserDefaultsDeviceRegistryStore: DeviceRegistryStore {
     private let storeKey = "ble.deviceRegistry.v1"
 
     func loadRecords() -> [DeviceRecord] {
@@ -29,6 +28,25 @@ final class UserDefaultsDeviceRegistryStore: DeviceRegistryStoring {
         if let data = try? JSONEncoder().encode(records) {
             UserDefaults.standard.set(data, forKey: storeKey)
         }
+    }
+}
+
+/// JSON ファイルへの保存を行うストア。UserDefaults を使えない環境での永続化用。
+final class JSONDeviceRegistryStore: DeviceRegistryStore {
+    private let url: URL
+
+    init(url: URL) {
+        self.url = url
+    }
+
+    func loadRecords() -> [DeviceRecord] {
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return (try? JSONDecoder().decode([DeviceRecord].self, from: data)) ?? []
+    }
+
+    func saveRecords(_ records: [DeviceRecord]) {
+        guard let data = try? JSONEncoder().encode(records) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 }
 
@@ -46,10 +64,10 @@ struct DeviceRecord: Identifiable, Codable, Equatable {
 final class DeviceRegistry: ObservableObject {
     @Published private(set) var known: [DeviceRecord] = []
 
-    private let store: DeviceRegistryStoring
+    private let store: DeviceRegistryStore
 
     /// - Parameter store: デフォルトは UserDefaults だが、テスト用にインメモリ保存などへ差し替えられる。
-    init(store: DeviceRegistryStoring = UserDefaultsDeviceRegistryStore()) {
+    init(store: DeviceRegistryStore = UserDefaultsDeviceRegistryStore()) {
         self.store = store
         load()
     }

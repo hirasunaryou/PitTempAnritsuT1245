@@ -8,7 +8,7 @@
 import Foundation
 
 /// インメモリ実装。テストで保存内容を追跡しやすいよう、最後に保存された配列も公開する。
-final class InMemoryDeviceRegistryStore: DeviceRegistryStoring {
+final class InMemoryDeviceRegistryStore: DeviceRegistryStore {
     private(set) var lastSavedRecords: [DeviceRecord] = []
     private var seed: [DeviceRecord]
 

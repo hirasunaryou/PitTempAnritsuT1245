@@ -76,17 +76,25 @@ struct HistoryDetailView: View {
                 }
             }
         }
-        .sheet(isPresented: $showReport) {
-            if let snapshot {
-                NavigationStack {
-                    SessionReportView(summary: summary, snapshot: snapshot)
-                }
-                // iPad 版の sheet は "large" detent でも 100% まで伸びず、履歴レポート下部が隠れることがある。
-                // fraction(1.0) でフルハイトを強制し、ドラッグしても高さが縮まらないようにして 1 画面で全行を見せる。
-                .presentationDetents([.fraction(1.0)])
-                .presentationDragIndicator(.visible)
+        .reportSheet(item: Binding(
+            get: { showReport ? snapshot.map { ReportPayload(summary: summary, snapshot: $0) } : nil },
+            set: { newValue in
+                // fullScreenCover でも sheet でも閉じるときに nil が渡ってくるので、
+                // それをトリガーにフラグを落とす。
+                if newValue == nil { showReport = false }
+            }
+        )) { payload in
+            NavigationStack {
+                SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
             }
         }
+    }
+
+    // sheet と fullScreenCover の両対応に必要な Identifiable コンテナ。
+    private struct ReportPayload: Identifiable {
+        let id = UUID()
+        let summary: SessionHistorySummary
+        let snapshot: SessionSnapshot
     }
 
     private func loadSnapshot() async {

@@ -58,6 +58,9 @@ struct MeasureView: View {
     private var zoneFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorZoneFontScale) : 1 }
     private var chipFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorChipFontScale) : 1 }
     private var liveFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorLiveFontScale) : 1 }
+    private var metaFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorMetaFontScale) : 1 }
+    private var tileFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorTileFontScale) : 1 }
+    private var pressureFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorPressureFontScale) : 1 }
 
     // ゾーンボタンの縦幅も視線誘導しやすいよう余裕を持たせる。フォントを大きくしたときに窮屈にならないよう、高さも連動でアップ。
     private var zoneButtonHeight: CGFloat {
@@ -86,6 +89,44 @@ struct MeasureView: View {
     private var liveTemperatureFontSize: CGFloat {
         let base: CGFloat = seniorLayoutEnabled ? 60 : 40
         return base * liveFontScale
+    }
+
+    // メタデータ行（TRACK/DATE など）も読みやすさを優先し、ラベルと値を同じ倍率で拡大する。
+    private var metaLabelFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 14 : 12
+        return .system(size: base * metaFontScale, weight: seniorLayoutEnabled ? .semibold : .regular)
+    }
+
+    private var metaValueFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 20 : 17
+        return .system(size: base * metaFontScale, weight: .semibold, design: .rounded)
+    }
+
+    // タイヤ位置タイル内の IN/CL/OUT 値を大きくして押し間違いを防ぐ。
+    private var tileZoneLabelFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 13 : 11
+        return .system(size: base * tileFontScale, weight: .regular, design: .rounded)
+    }
+
+    private var tileZoneValueFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 16 : 12
+        return .system(size: base * tileFontScale, weight: .semibold, design: .rounded).monospacedDigit()
+    }
+
+    // 内圧入力カードの文字。数字とラベルをまとめてスケールし、キーパッドも同じ倍率を共有する。
+    private var pressureLabelFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 24 : 20
+        return .system(size: base * pressureFontScale, weight: .semibold, design: .rounded)
+    }
+
+    private var pressureValueFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 26 : 22
+        return .system(size: base * pressureFontScale, weight: .semibold, design: .rounded).monospacedDigit()
+    }
+
+    private var pressureKeypadFontSize: CGFloat {
+        let base: CGFloat = seniorLayoutEnabled ? 24 : 20
+        return base * pressureFontScale
     }
 
     // シートに受け渡すレポート用のペイロード。
@@ -535,11 +576,12 @@ struct MeasureView: View {
     private func MetaRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .font(.caption)
+                // ラベルも値も同じ倍率で伸縮させ、目線の移動量を減らす。
+                .font(metaLabelFont)
                 .foregroundStyle(.secondary)
             Spacer()
             Text(value.isEmpty ? "-" : value)
-                .font(.headline)
+                .font(metaValueFont)
         }
         .padding(.vertical, 2)
     }
@@ -608,10 +650,10 @@ struct MeasureView: View {
                         ForEach(zoneValues, id: \.0) { zone, value in
                             VStack(spacing: 2) {
                                 Text(zoneShortName(zone))
-                                    .font(.caption2)
+                                    .font(tileZoneLabelFont)
                                     .foregroundStyle(.secondary)
                                 Text(value)
-                                    .font(.caption.monospacedDigit())
+                                    .font(tileZoneValueFont)
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity)
@@ -947,7 +989,8 @@ struct MeasureView: View {
 
             HStack(alignment: .center, spacing: 12) {
                 Text("I.P.")
-                    .font(.title3.weight(.semibold))
+                    // ラベルも数字と同じ倍率で拡大し、左右のバランスを保つ。
+                    .font(pressureLabelFont)
 
                 pressureValueButton(for: wheel, displayText: displayText, showPlaceholder: showPlaceholder)
 
@@ -980,6 +1023,7 @@ struct MeasureView: View {
                 PressureKeypad(
                     value: manualPressureBinding(for: wheel),
                     range: manualPressureRange,
+                    fontSize: pressureKeypadFontSize,
                     onCommit: {
                         commitManualPressure(for: wheel)
                         if manualPressureError(for: wheel) == nil {
@@ -1065,11 +1109,12 @@ struct MeasureView: View {
             HStack {
                 if showPlaceholder {
                     Text("ex) \(Int(manualPressureDefault))kPa")
+                        .font(pressureValueFont)
                         .foregroundStyle(Color.secondary.opacity(0.7))
                         .italic()
                 } else {
                     Text("\(displayText) kPa")
-                        .font(.title3.monospacedDigit())
+                        .font(pressureValueFont)
                 }
                 Spacer()
                 Image(systemName: "keyboard")
@@ -1109,7 +1154,8 @@ struct MeasureView: View {
             adjustManualPressure(for: wheel, delta: delta)
         }
         .buttonStyle(.bordered)
-        .font(.callout.weight(.semibold))
+        // ボタンの文字も内圧入力倍率に追従させ、押し間違いを防止。
+        .font(.system(size: 16 * pressureFontScale, weight: .semibold, design: .rounded))
         .frame(minWidth: 48)
         .disabled(!canEditPressure)
     }
@@ -1159,6 +1205,8 @@ struct MeasureView: View {
         let range: ClosedRange<Double>
         var onCommit: () -> Void
         var onClose: () -> Void
+        // シニア倍率を受け取り、キーやアイコンのサイズを一括で拡大する。
+        let fontSize: CGFloat
 
         private let digitColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
         private let digits: [String] = ["7", "8", "9", "4", "5", "6", "1", "2", "3"]
@@ -1219,12 +1267,12 @@ struct MeasureView: View {
             Button(action: action) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.title3)
+                        .font(.system(size: fontSize, weight: .semibold, design: .rounded))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.vertical, 8)
                 } else {
                     Text(title)
-                        .font(.title3.monospacedDigit())
+                        .font(.system(size: fontSize, weight: .semibold, design: .rounded).monospacedDigit())
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.vertical, 8)
                 }
@@ -1237,6 +1285,7 @@ struct MeasureView: View {
                 adjust(by: delta)
             }
             .buttonStyle(.bordered)
+            .font(.system(size: fontSize * 0.9, weight: .semibold, design: .rounded))
         }
 
         private func append(_ symbol: String) {

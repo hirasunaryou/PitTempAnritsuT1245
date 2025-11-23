@@ -46,6 +46,10 @@ final class SettingsStore: ObservableObject {
     @AppStorage("pref.senior.zoneFontScale") private var seniorZoneFontScaleRaw: Double = 1.0
     @AppStorage("pref.senior.chipFontScale") private var seniorChipFontScaleRaw: Double = 1.0
     @AppStorage("pref.senior.liveFontScale") private var seniorLiveFontScaleRaw: Double = 1.0
+    // メタデータ表示やサマリー部の数字、内圧入力まわりも個別に調整できるようにする。
+    @AppStorage("pref.senior.metaFontScale") private var seniorMetaFontScaleRaw: Double = 1.0
+    @AppStorage("pref.senior.tileFontScale") private var seniorTileFontScaleRaw: Double = 1.0
+    @AppStorage("pref.senior.pressureFontScale") private var seniorPressureFontScaleRaw: Double = 1.0
 
     // ← zone順序は “Raw値” を保存して UI では型安全enumで扱う
     @AppStorage("pref.zoneOrder") private var zoneOrderRaw: Int = 0   // 0: IN-CL-OUT, 1: OUT-CL-IN
@@ -157,6 +161,24 @@ final class SettingsStore: ObservableObject {
     var seniorLiveFontScale: Double {
         get { clampedScale(seniorLiveFontScaleRaw) }
         set { seniorLiveFontScaleRaw = clampedScale(newValue) }
+    }
+
+    /// メタデータ（TRACK/DATE など）の拡大倍率。読み間違い防止のため値とラベルを同時に伸縮させる。
+    var seniorMetaFontScale: Double {
+        get { clampedScale(seniorMetaFontScaleRaw) }
+        set { seniorMetaFontScaleRaw = clampedScale(newValue) }
+    }
+
+    /// タイヤ位置ボタン内のゾーン数字（IN/CL/OUT）の倍率。押し間違いを防ぐために調整幅を確保する。
+    var seniorTileFontScale: Double {
+        get { clampedScale(seniorTileFontScaleRaw) }
+        set { seniorTileFontScaleRaw = clampedScale(newValue) }
+    }
+
+    /// 内圧入力カードの数字やラベルの倍率。キーパッド含め視認性を高めるためのスライダー。
+    var seniorPressureFontScale: Double {
+        get { clampedScale(seniorPressureFontScaleRaw) }
+        set { seniorPressureFontScaleRaw = clampedScale(newValue) }
     }
 
     func metaVoiceKeywords(for field: MetaVoiceField) -> [String] {

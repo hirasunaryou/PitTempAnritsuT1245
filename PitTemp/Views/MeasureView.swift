@@ -952,6 +952,11 @@ struct MeasureView: View {
         // ローカル定数へキャッシュする。条件式を毎回評価すると SwiftUI が同一フレーム内で別レイアウトを
         // 生成しようとしてクラッシュ（EXC_BAD_ACCESS）する場合があるため、View の構造を安定させる。
         let isLockedForHistory = isHistoryMode && !historyEditingEnabled
+        // SwiftUI の差分アルゴリズムに「別物の View ツリーとして作り直してね」と伝えるためのID。
+        // 履歴閲覧 ↔ 編集モードの切り替えは isLockedForHistory の Bool 1つで判定しているが、
+        // diffing が中途半端に差分更新を試みると内部で参照ずれを起こし EXC_BAD_ACCESS に繋がる。
+        // .id(...) で明示的に破棄→再生成させ、安定したメモリアクセスにする。
+        let pressureSectionID = isLockedForHistory ? "pressure-history-locked" : "pressure-editable"
 
         return VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .topLeading) {
@@ -967,6 +972,7 @@ struct MeasureView: View {
                 historyLockedFootnote()
             }
         }
+        .id(pressureSectionID)
     }
 
     private func wheelExtrasSection(for wheel: WheelPos) -> some View {

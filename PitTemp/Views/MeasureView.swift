@@ -48,7 +48,86 @@ struct MeasureView: View {
     private let manualTemperatureRange: ClosedRange<Double> = -50...200
     private let manualPressureRange: ClosedRange<Double> = 0...400
     private let manualPressureDefault: Double = 210
-    private let zoneButtonHeight: CGFloat = 112
+    // iPad mini を支給したシニア計測者向けに、視認性を高める拡大レイアウトを用意する。
+    // デバイスが iPad かつ設定が有効なときに true となり、以下のフォント・高さをスケールアップする。
+    private var seniorLayoutEnabled: Bool {
+        settings.enableSeniorLayout && UIDevice.current.userInterfaceIdiom == .pad
+    }
+
+    // 各フォントのスケール倍率は Settings で好みに合わせて調整できる（シニアレイアウトが ON のときだけ反映）。
+    private var zoneFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorZoneFontScale) : 1 }
+    private var chipFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorChipFontScale) : 1 }
+    private var liveFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorLiveFontScale) : 1 }
+    private var metaFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorMetaFontScale) : 1 }
+    private var tileFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorTileFontScale) : 1 }
+    private var pressureFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorPressureFontScale) : 1 }
+
+    // ゾーンボタンの縦幅も視線誘導しやすいよう余裕を持たせる。フォントを大きくしたときに窮屈にならないよう、高さも連動でアップ。
+    private var zoneButtonHeight: CGFloat {
+        // CGFloat のまま倍率を掛けられるよう、基準値も CGFloat にして型変換のエラーを防ぐ。
+        let base = CGFloat(seniorLayoutEnabled ? 156 : 112)
+        return base * zoneFontScale
+    }
+
+    // ゾーン値のフォントは「桁を見間違えない」ことを重視し、大きさと太さを段階的に切り替える。
+    private var zoneValueFont: Font {
+        // シニアレイアウト + スライダーの倍率でサイズを決定。iPad mini での読みやすさを優先して太字にする。
+        let baseSize: CGFloat = seniorLayoutEnabled ? 48 : 32
+        let weight: Font.Weight = seniorLayoutEnabled ? .bold : .semibold
+        return .system(size: baseSize * zoneFontScale, weight: weight, design: .rounded)
+    }
+
+    // 要約チップの値表示。小さい数字が並ぶ部分こそ拡大させ、集計の誤読を防ぐ。
+    private var chipValueFont: Font {
+        let baseSize: CGFloat = seniorLayoutEnabled ? 22 : 17
+        // monospacedDigit で桁ずれを防ぎつつ、スライダー倍率でお好み調整。
+        return .system(size: baseSize * chipFontScale, weight: seniorLayoutEnabled ? .semibold : .regular, design: .rounded)
+            .monospacedDigit()
+    }
+
+    // ライブ温度バッジのフォントサイズ。瞬間値を一目で確認しやすくする。
+    private var liveTemperatureFontSize: CGFloat {
+        let base: CGFloat = seniorLayoutEnabled ? 60 : 40
+        return base * liveFontScale
+    }
+
+    // メタデータ行（TRACK/DATE など）も読みやすさを優先し、ラベルと値を同じ倍率で拡大する。
+    private var metaLabelFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 14 : 12
+        return .system(size: base * metaFontScale, weight: seniorLayoutEnabled ? .semibold : .regular)
+    }
+
+    private var metaValueFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 20 : 17
+        return .system(size: base * metaFontScale, weight: .semibold, design: .rounded)
+    }
+
+    // タイヤ位置タイル内の IN/CL/OUT 値を大きくして押し間違いを防ぐ。
+    private var tileZoneLabelFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 13 : 11
+        return .system(size: base * tileFontScale, weight: .regular, design: .rounded)
+    }
+
+    private var tileZoneValueFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 16 : 12
+        return .system(size: base * tileFontScale, weight: .semibold, design: .rounded).monospacedDigit()
+    }
+
+    // 内圧入力カードの文字。数字とラベルをまとめてスケールし、キーパッドも同じ倍率を共有する。
+    private var pressureLabelFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 24 : 20
+        return .system(size: base * pressureFontScale, weight: .semibold, design: .rounded)
+    }
+
+    private var pressureValueFont: Font {
+        let base: CGFloat = seniorLayoutEnabled ? 26 : 22
+        return .system(size: base * pressureFontScale, weight: .semibold, design: .rounded).monospacedDigit()
+    }
+
+    private var pressureKeypadFontSize: CGFloat {
+        let base: CGFloat = seniorLayoutEnabled ? 24 : 20
+        return base * pressureFontScale
+    }
 
     // シートに受け渡すレポート用のペイロード。
     // Identifiable にしておくことで .sheet(item:) にそのまま渡せる。
@@ -497,11 +576,12 @@ struct MeasureView: View {
     private func MetaRow(label: String, value: String) -> some View {
         HStack {
             Text(label)
-                .font(.caption)
+                // ラベルも値も同じ倍率で伸縮させ、目線の移動量を減らす。
+                .font(metaLabelFont)
                 .foregroundStyle(.secondary)
             Spacer()
             Text(value.isEmpty ? "-" : value)
-                .font(.headline)
+                .font(metaValueFont)
         }
         .padding(.vertical, 2)
     }
@@ -570,10 +650,10 @@ struct MeasureView: View {
                         ForEach(zoneValues, id: \.0) { zone, value in
                             VStack(spacing: 2) {
                                 Text(zoneShortName(zone))
-                                    .font(.caption2)
+                                    .font(tileZoneLabelFont)
                                     .foregroundStyle(.secondary)
                                 Text(value)
-                                    .font(.caption.monospacedDigit())
+                                    .font(tileZoneValueFont)
                                     .foregroundStyle(.secondary)
                             }
                             .frame(maxWidth: .infinity)
@@ -909,7 +989,8 @@ struct MeasureView: View {
 
             HStack(alignment: .center, spacing: 12) {
                 Text("I.P.")
-                    .font(.title3.weight(.semibold))
+                    // ラベルも数字と同じ倍率で拡大し、左右のバランスを保つ。
+                    .font(pressureLabelFont)
 
                 pressureValueButton(for: wheel, displayText: displayText, showPlaceholder: showPlaceholder)
 
@@ -950,7 +1031,9 @@ struct MeasureView: View {
                     },
                     onClose: {
                         activePressureWheel = nil
-                    }
+                    },
+                    // フォントサイズは最後に渡し、`PressureKeypad` の引数順に揃えることで呼び出しミスを防ぐ。
+                    fontSize: pressureKeypadFontSize
                 )
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -1027,11 +1110,12 @@ struct MeasureView: View {
             HStack {
                 if showPlaceholder {
                     Text("ex) \(Int(manualPressureDefault))kPa")
+                        .font(pressureValueFont)
                         .foregroundStyle(Color.secondary.opacity(0.7))
                         .italic()
                 } else {
                     Text("\(displayText) kPa")
-                        .font(.title3.monospacedDigit())
+                        .font(pressureValueFont)
                 }
                 Spacer()
                 Image(systemName: "keyboard")
@@ -1071,7 +1155,8 @@ struct MeasureView: View {
             adjustManualPressure(for: wheel, delta: delta)
         }
         .buttonStyle(.bordered)
-        .font(.callout.weight(.semibold))
+        // ボタンの文字も内圧入力倍率に追従させ、押し間違いを防止。
+        .font(.system(size: 16 * pressureFontScale, weight: .semibold, design: .rounded))
         .frame(minWidth: 48)
         .disabled(!canEditPressure)
     }
@@ -1121,6 +1206,8 @@ struct MeasureView: View {
         let range: ClosedRange<Double>
         var onCommit: () -> Void
         var onClose: () -> Void
+        // シニア倍率を受け取り、キーやアイコンのサイズを一括で拡大する。
+        let fontSize: CGFloat
 
         private let digitColumns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
         private let digits: [String] = ["7", "8", "9", "4", "5", "6", "1", "2", "3"]
@@ -1181,12 +1268,12 @@ struct MeasureView: View {
             Button(action: action) {
                 if let systemImage {
                     Image(systemName: systemImage)
-                        .font(.title3)
+                        .font(.system(size: fontSize, weight: .semibold, design: .rounded))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.vertical, 8)
                 } else {
                     Text(title)
-                        .font(.title3.monospacedDigit())
+                        .font(.system(size: fontSize, weight: .semibold, design: .rounded).monospacedDigit())
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.vertical, 8)
                 }
@@ -1199,6 +1286,7 @@ struct MeasureView: View {
                 adjust(by: delta)
             }
             .buttonStyle(.bordered)
+            .font(.system(size: fontSize * 0.9, weight: .semibold, design: .rounded))
         }
 
         private func append(_ symbol: String) {
@@ -1636,7 +1724,8 @@ struct MeasureView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.body.monospacedDigit())
+                // ここは車両全体の結果表として使われ、数字が並ぶため読みやすさ重視で拡大可変に。
+                .font(chipValueFont)
                 .monospacedDigit()
         }
         .padding(.horizontal, 12)
@@ -1746,7 +1835,8 @@ struct MeasureView: View {
     private func zoneValueLabel(for zone: Zone, valueText: String, isLive: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(valueText)
-                .font(.system(size: 32, weight: .semibold, design: .rounded))
+                // 大きな数字を視線の中心に置く。シニア向け設定ではさらに太く大きくする。
+                .font(zoneValueFont)
                 .monospacedDigit()
                 .foregroundStyle(valueText == "--" ? .tertiary : .primary)
                 .lineLimit(1)
@@ -2044,7 +2134,8 @@ struct MeasureView: View {
                 .foregroundStyle(.secondary)
 
             Text(valueText)
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+                // シニアレイアウト時はここを最も目立たせ、iPad mini を遠ざけても読める大きさにする。
+                .font(.system(size: liveTemperatureFontSize, weight: .bold, design: .rounded))
                 .monospacedDigit()
 
             Text("℃")

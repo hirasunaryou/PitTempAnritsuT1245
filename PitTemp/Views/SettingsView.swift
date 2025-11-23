@@ -186,6 +186,158 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section("Accessibility") {
+                    Toggle("Senior layout (large digits for iPad mini)", isOn: $settings.enableSeniorLayout)
+                    Label("Increases key numbers and tap areas on iPad to help senior measurers avoid misreading.", systemImage: "textformat.size")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    if UIDevice.current.userInterfaceIdiom == .pad {
+                        if settings.enableSeniorLayout {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Fine-tune which numbers get larger.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                Text("Each slider below targets a specific area: measurement buttons, wheel tiles, summary chips, live badge, metadata rows, and the inner-pressure keypad.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.tertiary)
+
+                                // 個別にフォント倍率を調整。"x1.3" など倍率を明示することで、利用者が安心して操作できるようにする。
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorZoneFontScale },
+                                        set: { settings.seniorZoneFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Zone digits (IN/CL/OUT)")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Affects the big IN/CL/OUT buttons in Measure view.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Current: x\(settings.seniorZoneFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorTileFontScale },
+                                        set: { settings.seniorTileFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Tyre tile summaries")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Enlarges the IN/CL/OUT numbers shown inside each tyre position card.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Current: x\(settings.seniorTileFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorChipFontScale },
+                                        set: { settings.seniorChipFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Summary chips (AVG/MAX)")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Controls the averages / max chips beneath each wheel header.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Current: x\(settings.seniorChipFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorLiveFontScale },
+                                        set: { settings.seniorLiveFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Live temperature badge")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Enlarges the floating badge showing the most recent temperature.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Current: x\(settings.seniorLiveFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorMetaFontScale },
+                                        set: { settings.seniorMetaFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Metadata rows (TRACK/DATE etc.)")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Adjusts the header fields at the top of Measure view.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Current: x\(settings.seniorMetaFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorPressureFontScale },
+                                        set: { settings.seniorPressureFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Inner pressure input")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Grows the pressure label, value, and keypad buttons for easier entry.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text("Current: x\(settings.seniorPressureFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text("Turn on Senior layout to adjust each font size.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
                 
                 Section("Bluetooth") {
                     Toggle("Auto connect first seen device", isOn: $settings.bleAutoConnect)

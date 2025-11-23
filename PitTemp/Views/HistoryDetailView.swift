@@ -81,9 +81,10 @@ struct HistoryDetailView: View {
                 NavigationStack {
                     SessionReportView(summary: summary, snapshot: snapshot)
                 }
-                // iPad でシートの高さが足りずレポートが切れないよう、常に large detent を選ぶ。
-                // これで全データを 1 画面に収め、スクロールなしで振り返れる。
-                .presentationDetents([.large])
+                // iPad 版の sheet は "large" detent でも 100% まで伸びず、履歴レポート下部が隠れることがある。
+                // fraction(1.0) でフルハイトを強制し、ドラッグしても高さが縮まらないようにして 1 画面で全行を見せる。
+                .presentationDetents([.fraction(1.0)])
+                .presentationDragIndicator(.visible)
             }
         }
     }

@@ -253,9 +253,11 @@ struct MeasureView: View {
                 NavigationStack {
                     SessionReportView(summary: payload.summary, snapshot: payload.snapshot)
                 }
-                // iPad（特に mini）の標準シート高さだとレポートの下部が隠れてしまうので、
-                // 大きめの detent を指定して常に 1 画面で全体が見えるようにする。
-                .presentationDetents([.large])
+                // iPad mini の sheet(.page) は "large" detent でも 7〜8 割程度しか開かず、
+                // そのままだと Session Report の下部が切れてしまう。fraction(1.0) で「画面いっぱい」を
+                // 明示することで、端末に関わらず 1 画面で全行が見えるようにする（ドラッグしても縮まない）。
+                .presentationDetents([.fraction(1.0)])
+                .presentationDragIndicator(.visible)
             }
         }
         .background(historyBackgroundColor.ignoresSafeArea())

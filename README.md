@@ -170,6 +170,17 @@ AnritsuM (BLE)
   * `Publishing changes from background threads` → `DeviceRegistry` をMain更新にして解消済み
   * `Info.plist duplicate` → `Build Settings > Info.plist File` の重複パスに注意
 
+### CI / ローカルテスト再現
+
+* シミュレータ向けのユニットテストは `xcodebuild test` で再現可能です。
+  ```bash
+  xcodebuild test \
+    -project PitTemp.xcodeproj \
+    -scheme PitTemp \
+    -destination 'platform=iOS Simulator,name=iPhone 15,OS=18.0'
+  ```
+* CI では同コマンドをベースに、必要であれば `-resultBundlePath` や `-derivedDataPath` を追加するとレポート収集が容易です。
+
 ---
 
 ## 7. コントリビュート / Contributing

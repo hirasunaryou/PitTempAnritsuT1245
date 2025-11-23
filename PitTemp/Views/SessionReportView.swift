@@ -370,31 +370,30 @@ struct SessionReportView: View {
     }
 
     private func pressureDisplay(for value: Double, metrics: LayoutMetrics) -> some View {
+        // 温度と同じ大きさの数値にそろえ、ラベルとの距離を詰めて「内圧だけ目立つ」印象を防ぐ
         let number = Self.pressureFormatter.string(from: NSNumber(value: value))?.ifEmpty("") ?? ""
-        return HStack(alignment: .center, spacing: 6) {
+        return HStack(alignment: .firstTextBaseline, spacing: metrics.pressureRowSpacing) {
             Text(localized("Pressure", "内圧"))
                 .font(.system(size: metrics.pressureLabelSize, weight: .semibold))
-                .foregroundStyle(Color.black.opacity(0.55))
+                .foregroundStyle(Color.black.opacity(0.6))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
 
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(number.ifEmpty("-"))
-                    .font(.system(size: metrics.pressureValueFontSize, weight: .semibold, design: .rounded))
-                    .foregroundStyle(Color.black.opacity(0.8))
+                    .font(.system(size: metrics.pressureValueFontSize, weight: .bold, design: .rounded))
+                    .foregroundStyle(Color.black.opacity(0.88))
                     .monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(metrics.pressureValueMinimumScale)
+                    .allowsTightening(true)
+                    .layoutPriority(1)
                 Text("kPa")
                     .font(.system(size: metrics.pressureUnitFontSize, weight: .semibold))
-                    .foregroundStyle(Color.black.opacity(0.55))
+                    .foregroundStyle(Color.black.opacity(0.6))
                     .lineLimit(1)
                     .minimumScaleFactor(metrics.pressureUnitMinimumScale)
             }
-            .padding(.horizontal, metrics.pressureBadgePadding)
-            .padding(.vertical, metrics.pressureBadgePadding * 0.55)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.black.opacity(0.05))
-            )
         }
     }
 
@@ -420,6 +419,8 @@ struct SessionReportView: View {
                 .monospacedDigit()
                 .minimumScaleFactor(metrics.temperatureMinimumScale)
                 .lineLimit(1)
+                .allowsTightening(true)
+                .layoutPriority(1)
                 .multilineTextAlignment(.center)
         }
         .padding(.vertical, metrics.temperatureTileVerticalPadding)
@@ -530,9 +531,9 @@ struct SessionReportView: View {
         let pressureValueFontSize: CGFloat
         let pressureUnitFontSize: CGFloat
         let pressureLabelSize: CGFloat
+        let pressureRowSpacing: CGFloat
         let pressureValueMinimumScale: CGFloat
         let pressureUnitMinimumScale: CGFloat
-        let pressureBadgePadding: CGFloat
         let zoneLabelSize: CGFloat
         let memoFontSize: CGFloat
         let memoSpacing: CGFloat
@@ -569,17 +570,17 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 4
                 wheelLabelSize = 14
                 temperatureFontSize = 26
-                temperatureMinimumScale = 0.88
-                temperatureTileVerticalPadding = 10
-                temperatureTileHorizontalPadding = 8
-                temperatureTileMinHeight = 78
+                temperatureMinimumScale = 0.65
+                temperatureTileVerticalPadding = 9
+                temperatureTileHorizontalPadding = 6
+                temperatureTileMinHeight = 74
                 temperatureTileCornerRadius = 12
-                pressureValueFontSize = 18
+                pressureValueFontSize = temperatureFontSize
                 pressureUnitFontSize = 11
                 pressureLabelSize = 10
-                pressureValueMinimumScale = 0.9
-                pressureUnitMinimumScale = 0.9
-                pressureBadgePadding = 6
+                pressureRowSpacing = 6
+                pressureValueMinimumScale = 0.6
+                pressureUnitMinimumScale = 0.75
                 zoneLabelSize = 11
                 memoFontSize = 11
                 memoSpacing = 6
@@ -612,17 +613,17 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 6
                 wheelLabelSize = 16
                 temperatureFontSize = 32
-                temperatureMinimumScale = 0.9
-                temperatureTileVerticalPadding = 12
-                temperatureTileHorizontalPadding = 10
-                temperatureTileMinHeight = 90
+                temperatureMinimumScale = 0.7
+                temperatureTileVerticalPadding = 11
+                temperatureTileHorizontalPadding = 8
+                temperatureTileMinHeight = 86
                 temperatureTileCornerRadius = 14
-                pressureValueFontSize = 20
+                pressureValueFontSize = temperatureFontSize
                 pressureUnitFontSize = 12
                 pressureLabelSize = 11
-                pressureValueMinimumScale = 0.9
-                pressureUnitMinimumScale = 0.9
-                pressureBadgePadding = 7
+                pressureRowSpacing = 8
+                pressureValueMinimumScale = 0.65
+                pressureUnitMinimumScale = 0.8
                 zoneLabelSize = 12
                 memoFontSize = 12
                 memoSpacing = 8
@@ -655,17 +656,17 @@ struct SessionReportView: View {
                 zoneInnerSpacing = 6
                 wheelLabelSize = 18
                 temperatureFontSize = 36
-                temperatureMinimumScale = 0.92
-                temperatureTileVerticalPadding = 14
-                temperatureTileHorizontalPadding = 12
-                temperatureTileMinHeight = 102
+                temperatureMinimumScale = 0.75
+                temperatureTileVerticalPadding = 13
+                temperatureTileHorizontalPadding = 10
+                temperatureTileMinHeight = 96
                 temperatureTileCornerRadius = 16
-                pressureValueFontSize = 22
+                pressureValueFontSize = temperatureFontSize
                 pressureUnitFontSize = 13
                 pressureLabelSize = 12
-                pressureValueMinimumScale = 0.9
-                pressureUnitMinimumScale = 0.9
-                pressureBadgePadding = 8
+                pressureRowSpacing = 10
+                pressureValueMinimumScale = 0.7
+                pressureUnitMinimumScale = 0.82
                 zoneLabelSize = 13
                 memoFontSize = 13
                 memoSpacing = 10

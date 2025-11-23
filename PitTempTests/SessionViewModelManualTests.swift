@@ -69,6 +69,7 @@ private struct StubSettings: SessionSettingsProviding {
     var minAdvanceSec: Double = 0.3
     var zoneOrderSequence: [Zone] = [.IN, .CL, .OUT]
     var autofillDateTime: Bool = false
+    var enableICloudUpload: Bool = false
 }
 
 private struct CSVExporterStub: CSVExporting {

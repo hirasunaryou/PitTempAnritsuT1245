@@ -61,7 +61,8 @@ struct MeasureView: View {
 
     // ゾーンボタンの縦幅も視線誘導しやすいよう余裕を持たせる。フォントを大きくしたときに窮屈にならないよう、高さも連動でアップ。
     private var zoneButtonHeight: CGFloat {
-        let base = seniorLayoutEnabled ? 156 : 112
+        // CGFloat のまま倍率を掛けられるよう、基準値も CGFloat にして型変換のエラーを防ぐ。
+        let base = CGFloat(seniorLayoutEnabled ? 156 : 112)
         return base * zoneFontScale
     }
 

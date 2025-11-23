@@ -29,6 +29,7 @@ final class SessionViewModel: ObservableObject {
     private var autosaveWorkItem: DispatchWorkItem?
     private var isRestoringAutosave = false
     private var currentSessionID = UUID()
+    private var bluetoothCancellable: AnyCancellable?
 
     init(exporter: CSVExporting = CSVExporter(),
          settings: SessionSettingsProviding? = nil,
@@ -99,6 +100,20 @@ final class SessionViewModel: ObservableObject {
     // タイマ
     private var startedAt: Date? = nil
     private var timer: Timer? = nil
+
+    /// Bind Bluetooth samples once so the View does not manage cancellation.
+    func bindBluetooth(service: BluetoothService) {
+        bluetoothCancellable?.cancel()
+        bluetoothCancellable = service.temperatureFrames
+            .map { TemperatureSample(time: $0.time, value: $0.value) }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] sample in
+                guard let self else { return }
+                // 履歴表示中はライブサンプルを無視し、ViewModel側で判定を一元化する。
+                guard self.loadedHistorySummary == nil else { return }
+                self.ingestBLESample(sample)
+            }
+    }
 
     // BLEからのサンプルをUI更新系に反映
     func ingestBLESample(_ s: TemperatureSample) {

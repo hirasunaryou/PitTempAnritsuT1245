@@ -10,6 +10,7 @@ struct MeasureViewPreviewFixtures {
     let viewModel: SessionViewModel
     let folderBookmark: FolderBookmark
     let bluetooth: BluetoothService
+    let bluetoothVM: BluetoothViewModel
     let registry: DeviceRegistry
     let driveService: GoogleDriveService
 
@@ -23,7 +24,11 @@ struct MeasureViewPreviewFixtures {
         folderBookmark = FolderBookmark()
         bluetooth = BluetoothService()
         registry = DeviceRegistry()
+        bluetoothVM = BluetoothViewModel(service: bluetooth, registry: registry)
         driveService = GoogleDriveService()
+
+        // Previews also bind to BLE so charts refresh just like the app.
+        viewModel.bindBluetooth(service: bluetooth)
 
         configureSamples()
     }

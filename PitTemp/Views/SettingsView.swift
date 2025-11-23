@@ -193,6 +193,75 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+
+                    if UIDevice.current.userInterfaceIdiom == .pad {
+                        if settings.enableSeniorLayout {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("Fine-tune which numbers get larger.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+
+                                // 個別にフォント倍率を調整。"x1.3" など倍率を明示することで、利用者が安心して操作できるようにする。
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorZoneFontScale },
+                                        set: { settings.seniorZoneFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Zone digits (IN/CL/OUT)")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Current: x\(settings.seniorZoneFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorChipFontScale },
+                                        set: { settings.seniorChipFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Summary chips (AVG/MAX)")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Current: x\(settings.seniorChipFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Slider(
+                                    value: Binding(
+                                        get: { settings.seniorLiveFontScale },
+                                        set: { settings.seniorLiveFontScale = $0 }
+                                    ),
+                                    in: 0.8...2.0,
+                                    step: 0.1
+                                ) {
+                                    Text("Live temperature badge")
+                                } minimumValueLabel: {
+                                    Text("x0.8")
+                                } maximumValueLabel: {
+                                    Text("x2.0")
+                                }
+                                Text("Current: x\(settings.seniorLiveFontScale, specifier: "%.1f")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } else {
+                            Text("Turn on Senior layout to adjust each font size.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
                 
                 Section("Bluetooth") {

@@ -54,23 +54,38 @@ struct MeasureView: View {
         settings.enableSeniorLayout && UIDevice.current.userInterfaceIdiom == .pad
     }
 
-    // ゾーンボタンの縦幅も視線誘導しやすいよう余裕を持たせる。
-    private var zoneButtonHeight: CGFloat { seniorLayoutEnabled ? 148 : 112 }
+    // 各フォントのスケール倍率は Settings で好みに合わせて調整できる（シニアレイアウトが ON のときだけ反映）。
+    private var zoneFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorZoneFontScale) : 1 }
+    private var chipFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorChipFontScale) : 1 }
+    private var liveFontScale: CGFloat { seniorLayoutEnabled ? CGFloat(settings.seniorLiveFontScale) : 1 }
+
+    // ゾーンボタンの縦幅も視線誘導しやすいよう余裕を持たせる。フォントを大きくしたときに窮屈にならないよう、高さも連動でアップ。
+    private var zoneButtonHeight: CGFloat {
+        let base = seniorLayoutEnabled ? 156 : 112
+        return base * zoneFontScale
+    }
 
     // ゾーン値のフォントは「桁を見間違えない」ことを重視し、大きさと太さを段階的に切り替える。
     private var zoneValueFont: Font {
-        seniorLayoutEnabled
-            ? .system(size: 44, weight: .bold, design: .rounded)
-            : .system(size: 32, weight: .semibold, design: .rounded)
+        // シニアレイアウト + スライダーの倍率でサイズを決定。iPad mini での読みやすさを優先して太字にする。
+        let baseSize: CGFloat = seniorLayoutEnabled ? 48 : 32
+        let weight: Font.Weight = seniorLayoutEnabled ? .bold : .semibold
+        return .system(size: baseSize * zoneFontScale, weight: weight, design: .rounded)
     }
 
     // 要約チップの値表示。小さい数字が並ぶ部分こそ拡大させ、集計の誤読を防ぐ。
     private var chipValueFont: Font {
-        seniorLayoutEnabled ? .title3.monospacedDigit() : .body.monospacedDigit()
+        let baseSize: CGFloat = seniorLayoutEnabled ? 22 : 17
+        // monospacedDigit で桁ずれを防ぎつつ、スライダー倍率でお好み調整。
+        return .system(size: baseSize * chipFontScale, weight: seniorLayoutEnabled ? .semibold : .regular, design: .rounded)
+            .monospacedDigit()
     }
 
     // ライブ温度バッジのフォントサイズ。瞬間値を一目で確認しやすくする。
-    private var liveTemperatureFontSize: CGFloat { seniorLayoutEnabled ? 56 : 40 }
+    private var liveTemperatureFontSize: CGFloat {
+        let base: CGFloat = seniorLayoutEnabled ? 60 : 40
+        return base * liveFontScale
+    }
 
     // シートに受け渡すレポート用のペイロード。
     // Identifiable にしておくことで .sheet(item:) にそのまま渡せる。

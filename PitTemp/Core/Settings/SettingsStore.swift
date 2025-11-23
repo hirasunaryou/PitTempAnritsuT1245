@@ -41,6 +41,11 @@ final class SettingsStore: ObservableObject {
     @AppStorage("pref.enableWheelVoiceInput") var enableWheelVoiceInput: Bool = false
     // 高齢の計測者向けに iPad mini を渡す運用があるため、大きな数字に切り替える設定を用意する。
     @AppStorage("pref.enableSeniorLayout") var enableSeniorLayout: Bool = false
+    // シニアレイアウト時に「さらに大きく/少しだけ大きく」など、利用者が好みで調整できるスケール係数。
+    // Double で保存しつつ getter でクランプすることで、不正値が入っても UI 崩れを防ぐ。
+    @AppStorage("pref.senior.zoneFontScale") private var seniorZoneFontScaleRaw: Double = 1.0
+    @AppStorage("pref.senior.chipFontScale") private var seniorChipFontScaleRaw: Double = 1.0
+    @AppStorage("pref.senior.liveFontScale") private var seniorLiveFontScaleRaw: Double = 1.0
 
     // ← zone順序は “Raw値” を保存して UI では型安全enumで扱う
     @AppStorage("pref.zoneOrder") private var zoneOrderRaw: Int = 0   // 0: IN-CL-OUT, 1: OUT-CL-IN
@@ -134,6 +139,26 @@ final class SettingsStore: ObservableObject {
         set { metaInputModeRaw = newValue.rawValue }
     }
 
+    // MARK: - シニアレイアウトのカスタム倍率（クランプ付き）
+
+    /// ゾーン値の拡大倍率。0.8〜2.0 の範囲で丸めることで「小さく戻しすぎ」「大きくしすぎ」を防ぐ。
+    var seniorZoneFontScale: Double {
+        get { clampedScale(seniorZoneFontScaleRaw) }
+        set { seniorZoneFontScaleRaw = clampedScale(newValue) }
+    }
+
+    /// 要約チップ値の拡大倍率。同様にクランプして UI の破綻を防ぐ。
+    var seniorChipFontScale: Double {
+        get { clampedScale(seniorChipFontScaleRaw) }
+        set { seniorChipFontScaleRaw = clampedScale(newValue) }
+    }
+
+    /// ライブ温度バッジの拡大倍率。瞬間値をどこまで強調するかを利用者が決められる。
+    var seniorLiveFontScale: Double {
+        get { clampedScale(seniorLiveFontScaleRaw) }
+        set { seniorLiveFontScaleRaw = clampedScale(newValue) }
+    }
+
     func metaVoiceKeywords(for field: MetaVoiceField) -> [String] {
         let raw = keywordText(for: field)
         let fallback = Self.defaultMetaVoiceKeywords[field] ?? []
@@ -197,6 +222,12 @@ final class SettingsStore: ObservableObject {
     private func normalizeKeywordInput(_ input: String) -> String {
         let components = parseKeywordList(input)
         return components.joined(separator: components.isEmpty ? "" : ", ")
+    }
+
+    private func clampedScale(_ value: Double) -> Double {
+        // 0.8〜2.0 に丸める。シニアの方が「もう少し小さくしたい」「もっと大きくしたい」と調整しても、
+        // 画面崩れにならない安全幅に収めるためのガード。
+        min(2.0, max(0.8, value))
     }
 
     private func migrateMetaVoiceKeywordsIfNeeded() {

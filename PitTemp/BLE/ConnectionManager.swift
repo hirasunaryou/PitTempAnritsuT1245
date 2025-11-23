@@ -43,9 +43,15 @@ final class ConnectionManager {
             if ch.uuid == readCharUUID { readChar = ch }
             if ch.uuid == writeCharUUID { writeChar = ch }
         }
-        if let ch = readChar {
-            service.peripheral.setNotifyValue(true, for: ch)
+        // CBService.peripheral は weak/optional なので、通知設定や後続のコールバックに渡す前に安全に unwrap する。
+        guard let peripheral = service.peripheral else {
+            onFailed?("Char discovery: missing peripheral reference")
+            return
         }
-        onCharacteristicsReady?(service.peripheral, readChar, writeChar)
+        if let ch = readChar {
+            // 実際にデバイスからの通知を受け取れるように通知フラグを有効化する。
+            peripheral.setNotifyValue(true, for: ch)
+        }
+        onCharacteristicsReady?(peripheral, readChar, writeChar)
     }
 }

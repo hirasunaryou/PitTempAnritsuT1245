@@ -297,12 +297,14 @@ struct MeasureView: View {
                 vm.stopAll()
                 if pressureSpeech.isRecording { pressureSpeech.stop() }
             }
-            .onReceive(ble.temperatureStream) { sample in
+            // 受信がバックグラウンドスレッドでも UI 更新はメインに集約する。
+            .onReceive(ble.temperatureStream.receive(on: RunLoop.main)) { sample in
                 if !isHistoryMode {
                     vm.ingestBLESample(sample)
                 }
             }
-            .onReceive(vm.$currentWheel) { newWheel in
+            // Publisher の発行スレッドを揃えるため、明示的にメインキューへ切り替えてから状態を書き換える。
+            .onReceive(vm.$currentWheel.receive(on: RunLoop.main)) { newWheel in
                 if let newWheel { selectedWheel = newWheel }
             }
             .onChange(of: isManualMode) { _, newValue in
@@ -336,13 +338,13 @@ struct MeasureView: View {
                     if pressureSpeech.isRecording { pressureSpeech.stop() }
                 }
             }
-            .onReceive(vm.$results) { _ in
+            .onReceive(vm.$results.receive(on: RunLoop.main)) { _ in
                 if isManualInteractionActive { syncManualDefaults(for: selectedWheel) }
             }
-            .onReceive(vm.$wheelMemos) { _ in
+            .onReceive(vm.$wheelMemos.receive(on: RunLoop.main)) { _ in
                 if isManualInteractionActive { syncManualMemo(for: selectedWheel) }
             }
-            .onReceive(vm.$wheelPressures) { _ in
+            .onReceive(vm.$wheelPressures.receive(on: RunLoop.main)) { _ in
                 syncManualPressureDefaults(for: selectedWheel)
             }
             .onChange(of: historyEditingEnabled) { _, enabled in
@@ -364,7 +366,7 @@ struct MeasureView: View {
             .onChange(of: showHistorySheet) { _, presenting in
                 if presenting { history.refresh() }
             }
-            .onReceive(vm.$sessionResetID) { _ in
+            .onReceive(vm.$sessionResetID.receive(on: RunLoop.main)) { _ in
                 selectedWheel = .FL
                 manualValues.removeAll()
                 manualMemos.removeAll()
@@ -377,7 +379,8 @@ struct MeasureView: View {
                 }
                 syncManualPressureDefaults(for: .FL)
             }
-            .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
+            .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)
+                .receive(on: RunLoop.main)) { note in
                 if let url = note.userInfo?["url"] as? URL {
                     let comps = url.pathComponents.suffix(2).joined(separator: "/")
                     uploadMessage = "Saved to: \(comps)"

@@ -948,17 +948,22 @@ struct MeasureView: View {
     }
 
     private func pressureEntrySection(for wheel: WheelPos) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        // ひとつのレンダリングサイクル内で isHistoryMode / historyEditingEnabled の評価が変わらないように
+        // ローカル定数へキャッシュする。条件式を毎回評価すると SwiftUI が同一フレーム内で別レイアウトを
+        // 生成しようとしてクラッシュ（EXC_BAD_ACCESS）する場合があるため、View の構造を安定させる。
+        let isLockedForHistory = isHistoryMode && !historyEditingEnabled
+
+        return VStack(alignment: .leading, spacing: 10) {
             ZStack(alignment: .topLeading) {
                 pressureEntryCard(for: wheel)
 
-                if isHistoryMode && !historyEditingEnabled {
+                if isLockedForHistory {
                     historyLockedOverlay(text: "Enable editing to adjust pressure / 編集モードで空気圧を修正")
                 }
             }
-            .disabled(isHistoryMode && !historyEditingEnabled)
+            .disabled(isLockedForHistory)
 
-            if isHistoryMode && !historyEditingEnabled {
+            if isLockedForHistory {
                 historyLockedFootnote()
             }
         }

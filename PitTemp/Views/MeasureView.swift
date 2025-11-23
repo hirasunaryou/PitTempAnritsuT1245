@@ -93,11 +93,17 @@ struct MeasureView: View {
     }()
 
 
+    @ViewBuilder
     var body: some View {
         // iPad の場合だけ大きなUIに切り替える。どちらのレイアウトでも同じロジック（通信・データ更新）を共有する。
-        withSharedLifecycle(
-            useSeniorIPadLayout ? seniorFriendlyNavigation : standardNavigation
-        )
+        // withSharedLifecycle を ViewBuilder 化しておくと、条件分岐の各ブランチが異なる View 型でも安全にまとめられる。
+        withSharedLifecycle {
+            if useSeniorIPadLayout {
+                seniorFriendlyNavigation
+            } else {
+                standardNavigation
+            }
+        }
     }
 
     /// iPad + シニア向け設定がONの場合に true になる。デバイス判定で iPhone には影響を与えない。
@@ -263,8 +269,11 @@ struct MeasureView: View {
     }
 
     /// ネットワーク接続や音声入力など、元の MeasureView が持っていた副作用をまとめて適用する。
-    private func withSharedLifecycle<Content: View>(_ content: Content) -> some View {
-        content
+    private func withSharedLifecycle<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        // content() を何度も呼ばないようにローカル定数へ格納。ViewBuilder はブランチごとの型を適切にまとめてくれる。
+        let base = content()
+
+        return base
             .background(historyBackgroundColor.ignoresSafeArea())
             .onAppear {
                 if settings.enableWheelVoiceInput {

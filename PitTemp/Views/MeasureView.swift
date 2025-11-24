@@ -2280,7 +2280,8 @@ struct MeasureView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.accentColor)
+                        // ShapeStyle に直接 .accentColor は存在しないので、Color.accentColor を明示して前景色を設定する
+                        .foregroundStyle(Color.accentColor)
                     Text(banner.title)
                         .font(.headline)
                 }

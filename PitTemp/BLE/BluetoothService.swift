@@ -6,6 +6,7 @@ import CoreBluetooth
 import Combine
 
 /// BLEから温度を受け取り、TemperatureFrameとしてPublishするサービス。
+/// - Note: DATA ボタンの単発送信も「通知をそのまま受け取る」運用とし、明示的なポーリング関数は持たない。
 final class BluetoothService: NSObject, TemperatureSensorClient {
     // 公開状態（UIは Main で触る）
     @Published var connectionState: ConnectionState = .idle
@@ -43,7 +44,6 @@ final class BluetoothService: NSObject, TemperatureSensorClient {
     private let parser = TemperaturePacketParser()
 
     // その他
-    @Published var writeCount: Int = 0
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
     @Published var notifyHz: Double = 0
 
@@ -100,15 +100,6 @@ final class BluetoothService: NSObject, TemperatureSensorClient {
         }
         // 2) 未取得なら、一度スキャン開始（UI側は “Scan→Connect” ボタン連携を想定）
         startScan()
-    }
-
-    // 単発要求
-    func requestOnce() {
-        guard let p = peripheral, let w = writeChar else { return }
-        let cmd = parser.buildDATARequest()
-        let type: CBCharacteristicWriteType = w.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
-        p.writeValue(cmd, for: w, type: type)
-        DispatchQueue.main.async { self.writeCount &+= 1 }
     }
 
     // 時刻設定

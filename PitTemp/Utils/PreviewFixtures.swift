@@ -46,7 +46,6 @@ struct MeasureViewPreviewFixtures {
 
         bluetooth.deviceName = "AnritsuM-Preview"
         bluetooth.notifyHz = 4.8
-        bluetooth.writeCount = 128
         bluetooth.notifyCountUI = 512
         bluetooth.latestTemperature = 84.1
 

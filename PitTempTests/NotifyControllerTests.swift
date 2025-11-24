@@ -22,4 +22,25 @@ final class NotifyControllerTests: XCTestCase {
 
         await fulfillment(of: [expectation], timeout: 1.0)
     }
+
+    func testParsesStubNotificationIntoFrames() {
+        let emitExpectation = expectation(description: "Emit parsed frame from notification payload")
+        // 実際の TemperatureIngestUseCase を使い、BLE Notify からの ASCII ペイロードをそのまま解析する。
+        let controller = NotifyController(
+            ingestor: TemperatureIngestUseCase(),
+            mainQueue: DispatchQueue(label: "notify.parse"),
+            emit: { frame in
+                // emit されたフレーム内容を main キューに戻さず即時検証する。
+                XCTAssertEqual(frame.deviceID, 7)
+                XCTAssertEqual(frame.value, 32.1, accuracy: 0.0001)
+                XCTAssertEqual(frame.status, .bout)
+                emitExpectation.fulfill()
+            }
+        )
+
+        // 実機ログに近いスタブ通知："007+03210B-OUT" → ID=007, 32.1℃, B-OUT ステータス。
+        controller.handleNotification(Data("007+03210B-OUT".utf8))
+
+        wait(for: [emitExpectation], timeout: 1.0)
+    }
 }

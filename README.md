@@ -1,5 +1,7 @@
 # PitTemp Anritsu T1245
 
+![CI](https://github.com/hirasunaryou/PitTempAnritsuT1245/actions/workflows/ci.yml/badge.svg)
+
 > iOS app for tyre surface temperature logging with Anritsu prototype thermometers (BLE).
 > 安立試作温度計（BLE）と連携してタイヤ表面温度を記録・可視化するiOSアプリ。
 

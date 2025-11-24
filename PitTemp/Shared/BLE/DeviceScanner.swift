@@ -4,10 +4,10 @@ import CoreBluetooth
 /// スキャンと発見処理を担当
 final class DeviceScanner {
     private let allowedNamePrefixes: [String]
-    weak var registry: DeviceRegistry?
+    weak var registry: DeviceRegistrying?
     var onDiscovered: ((ScannedDevice, CBPeripheral) -> Void)?
 
-    init(allowedNamePrefixes: [String], registry: DeviceRegistry? = nil) {
+    init(allowedNamePrefixes: [String], registry: DeviceRegistrying? = nil) {
         self.allowedNamePrefixes = allowedNamePrefixes
         self.registry = registry
     }

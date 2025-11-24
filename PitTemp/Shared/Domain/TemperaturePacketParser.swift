@@ -5,9 +5,16 @@
 
 import Foundation
 
-/// BLEのNotify(最大20B)から温度フレームを安全に取り出す
+/// 温度パケットの変換ロジックを抽象化するプロトコル。
+/// - Note: BLE 層だけでなくファイル再生などからも再利用できるようにする。
+protocol TemperaturePacketParsing {
+    func parseFrames(_ data: Data) -> [TemperatureFrame]
+    func buildTIMESet(date: Date) -> Data
+}
+
+/// BLE の Notify(最大20B)から温度フレームを安全に取り出す既定実装。
 /// 例: HEX ... → ASCII="001+00243"（ID=001, 温度=24.3℃）
-final class TemperaturePacketParser {
+final class TemperaturePacketParser: TemperaturePacketParsing {
 
     /// 1パケット(～20B)から取り出せるだけのフレームを返す（通常は1件）
     func parseFrames(_ data: Data) -> [TemperatureFrame] {

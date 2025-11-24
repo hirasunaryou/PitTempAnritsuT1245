@@ -496,7 +496,8 @@ struct MetaVoiceEditorView: View {
         case .track: return $vm.meta.track
         case .date: return $vm.meta.date
         case .time: return $vm.meta.time
-        case .car: return $vm.meta.car
+        case .car:
+            return Binding(get: { vm.meta.car }, set: { vm.updateCarIdentity(rawText: $0) })
         case .driver: return $vm.meta.driver
         case .tyre: return $vm.meta.tyre
         case .lap: return $vm.meta.lap
@@ -542,7 +543,7 @@ struct MetaVoiceEditorView: View {
         let parse = parseTranscript(transcript)
 
         if let v = parse.matched[.track]   { vm.meta.track   = v }
-        if let v = parse.matched[.car]     { vm.meta.car     = v }
+        if let v = parse.matched[.car]     { vm.updateCarIdentity(rawText: v) }
         if let v = parse.matched[.driver]  { vm.meta.driver  = v }
         if let v = parse.matched[.tyre]    { vm.meta.tyre    = v }
         if let v = parse.matched[.lap]     { vm.meta.lap     = v }

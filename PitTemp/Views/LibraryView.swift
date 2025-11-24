@@ -16,6 +16,10 @@ struct LogRow: Identifiable {
     var sessionISO: String     // SESSION_START_ISO
     var exportedISO: String    // EXPORTED_AT_ISO
     var uploadedISO: String    // UPLOADED_AT_ISO
+    // 端末識別用: フォルダ名と短縮IDを持っておくことで「自分/他人」の絞り込みに利用する。
+    // 教材メモ: CSV そのものには端末名カラムが無いので、ファイルの保存パスから補完する形を取る。
+    var deviceFolderLabel: String
+    var deviceShortID: String
 }
 
 extension LogRow {
@@ -267,7 +271,7 @@ enum SortKey: String, CaseIterable {
 // ALLビューでユーザーが選べる列
 enum Column: String, CaseIterable, Identifiable {
     case track = "TRACK", date="DATE", time="TIME", car="CAR", driver="DRIVER", tyre="TYRE"
-    case lap="LAP", checker="CHECKER", wheel="WHEEL"
+    case lap="LAP", checker="CHECKER", wheel="WHEEL", device="DEVICE"
     case out="OUT", cl="CL", inT="IN", memo="MEMO", session = "SESSION", exported="EXPORTED", uploaded="UPLOADED"
     var id: String { rawValue }
 
@@ -277,6 +281,7 @@ enum Column: String, CaseIterable, Identifiable {
         .time,
         .car,
         .tyre,
+        .device,
         .wheel,
         .out,
         .cl,
@@ -293,11 +298,31 @@ private struct ActiveFilterToken: Identifiable, Hashable {
     var id: String { "\(column.id)|\(text)" }
 }
 
+// 「誰の」「いつの」データをざっくり見たいかを表すクイックフィルタ。
+// 端末IDベースで自分/他人を判定し、日付・サーキット・ドライバーの軽い絞り込みを担う。
+enum LibraryQuickScope: String, CaseIterable, Identifiable {
+    case myToday
+    case myHistory
+    case teammates
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .myToday: return NSLocalizedString("今日の自分", comment: "Scope segment title: my today")
+        case .myHistory: return NSLocalizedString("自分の履歴", comment: "Scope segment title: my history")
+        case .teammates: return NSLocalizedString("仲間の測定", comment: "Scope segment title: teammates")
+        }
+    }
+}
+
 // URLをそのままIdentifiableに拡張しない（将来衝突回避）ための薄いラッパ
 struct FileItem: Identifiable, Hashable {
     let url: URL
     let dayFolder: String
     let modifiedAt: Date
+    let deviceFolder: String
+    let deviceShortID: String
     var id: String { url.absoluteString }
 }
 
@@ -360,6 +385,8 @@ struct LibraryView: View {
     @EnvironmentObject var folderBM: FolderBookmark
     @EnvironmentObject var settings: SettingsStore
 
+    private let currentDeviceShortID: String = DeviceIdentity.current().id.sanitizedPathComponent(limit: 8)
+
     // ファイル一覧
     @State private var files: [FileItem] = []
     @State private var dailyGroups: [DailyGroup] = []
@@ -386,8 +413,18 @@ struct LibraryView: View {
     @State private var columnFilters: [Column: String] = [:]
     @State private var filterEditorColumn: Column? = nil
 
+    // クイック用途別（今日の自分 / 自分の履歴 / 仲間の計測）向けのフィルタ
+    @State private var quickScope: LibraryQuickScope = .myToday
+    @State private var scopedDay: Date = Date()
+    @State private var scopedTrack: String = ""
+    @State private var scopedDriver: String = ""
+    @State private var useScopedDayFilter: Bool = true
+
     // 可視→検索→ソートを適用した配列
     private var visibleSortedRows: [LogRow] {
+        // 0) 用途別クイックフィルタ（端末や日付での大まかなスコープ）
+        let scoped = quickScopedRows(rows)
+
         // 1) 検索フィルタ
         let trimmedFilters = columnFilters.compactMapValues { value -> String? in
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -396,9 +433,9 @@ struct LibraryView: View {
 
         let columnFiltered: [LogRow]
         if trimmedFilters.isEmpty {
-            columnFiltered = rows
+            columnFiltered = scoped
         } else {
-            columnFiltered = rows.filter { r in
+            columnFiltered = scoped.filter { r in
                 trimmedFilters.allSatisfy { (column, keyword) in
                     displayValue(r, column).localizedCaseInsensitiveContains(keyword)
                 }
@@ -452,12 +489,46 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationStack {
-            libraryList
-                .navigationTitle("Library")
-                .toolbar { libraryToolbar }
-                .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
-                .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
-                .onAppear { reloadFiles() }
+            VStack(spacing: 0) {
+                quickScopeHeader
+                searchHeader
+
+                ScrollView([.vertical, .horizontal]) {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            ForEach(Array(visibleSortedRows.enumerated()), id: \.offset) { index, row in
+                                rowView(row, index: index)
+                            }
+                        } header: {
+                            headerRow
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle("Library")
+            .toolbar { primaryToolbar }
+            .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
+            .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
+            .onChange(of: quickScope) { _, newScope in
+                switch newScope {
+                case .myToday:
+                    scopedDay = Date()
+                    useScopedDayFilter = true
+                case .myHistory, .teammates:
+                    // 過去のデータ・仲間のデータは初期状態で日付フィルタを外し、必要なら手動でONにする。
+                    useScopedDayFilter = false
+                }
+            }
+            .onAppear {
+                reloadFiles()
+                rows = loadAll()
+                applyDynamicSort()
+                allSheetTitle = "All CSVs"
+                shareSource = .generated(suffix: "all")
+            }
         }
         .sheet(item: $selectedFile, content: singleFileSheet)
         .sheet(isPresented: $showAllSheet, content: allFilesSheet)
@@ -616,7 +687,7 @@ struct LibraryView: View {
     @ViewBuilder
     private func fileRow(for item: FileItem) -> some View {
         Button {
-            rows = parseCSV(item.url)
+            rows = parseCSV(item.url, deviceFolder: item.deviceFolder, deviceShortID: item.deviceShortID)
             rawPreview = (try? String(contentsOf: item.url, encoding: .utf8)) ?? ""
             selectedFile = item
             applySortForSingle()
@@ -636,17 +707,8 @@ struct LibraryView: View {
     }
 
     @ToolbarContentBuilder
-    private var libraryToolbar: some ToolbarContent {
+    private var primaryToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
-            Button("All") {
-                rows = loadAll()
-                searchText.removeAll()
-                applyDynamicSort()
-                allSheetTitle = "All CSVs"
-                shareSource = .generated(suffix: "all")
-                showAllSheet = true
-            }
-
             Button("Columns") { openColumnPicker(closeAllSheetFirst: false) }
 
             Menu("Sort") {
@@ -658,7 +720,13 @@ struct LibraryView: View {
                 Toggle("Ascending", isOn: $sortAscending)
             }
 
-            Button { reloadFiles() } label: { Image(systemName: "arrow.clockwise") }
+            if let shareDocument {
+                ShareLink(item: shareDocument, preview: SharePreview(Text(shareDocument.fileName))) {
+                    Image(systemName: "square.and.arrow.up")
+                }
+            }
+
+            Button { reloadFiles(); rows = loadAll(); applyDynamicSort() } label: { Image(systemName: "arrow.clockwise") }
         }
     }
 
@@ -723,6 +791,74 @@ struct LibraryView: View {
                 }
             }
         }
+    }
+
+    private var quickScopeHeader: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(NSLocalizedString("よく使う絞り込み", comment: "Quick scope header"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Picker("Scope", selection: $quickScope) {
+                ForEach(LibraryQuickScope.allCases) { scope in
+                    Text(scope.title).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+
+            HStack(spacing: 12) {
+                if quickScope == .myToday {
+                    Label(NSLocalizedString("今日の自分の計測のみ", comment: "Today filter label"), systemImage: "calendar")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Toggle(isOn: $useScopedDayFilter) {
+                        Label(NSLocalizedString("日付で絞り込む", comment: "Toggle day filter"), systemImage: "calendar")
+                    }
+                    .toggleStyle(.switch)
+                    .font(.footnote)
+
+                    if useScopedDayFilter {
+                        DatePicker("", selection: $scopedDay, displayedComponents: .date)
+                            .labelsHidden()
+                    }
+                }
+
+                Spacer(minLength: 8)
+            }
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(NSLocalizedString("サーキット", comment: "Track filter label"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField(NSLocalizedString("例: Suzuka", comment: "Track placeholder"), text: $scopedTrack)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(NSLocalizedString("ドライバー", comment: "Driver filter label"))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    TextField(NSLocalizedString("例: Tanaka", comment: "Driver placeholder"), text: $scopedDriver)
+                        .textFieldStyle(.roundedBorder)
+                }
+
+                Button {
+                    scopedTrack.removeAll()
+                    scopedDriver.removeAll()
+                    if quickScope != .myToday {
+                        useScopedDayFilter = false
+                    }
+                } label: {
+                    Label(NSLocalizedString("リセット", comment: "Reset filters"), systemImage: "arrow.uturn.left")
+                        .labelStyle(.titleAndIcon)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(10)
+        .background(Color(.tertiarySystemBackground))
     }
 
     private var searchHeader: some View {
@@ -992,7 +1128,14 @@ struct LibraryView: View {
                         continue
                     }
                     let day = dayFolderName(for: resolvedURL, baseFolder: folder)
-                    found.append(FileItem(url: resolvedURL, dayFolder: day, modifiedAt: modified))
+                    let device = deviceInfo(for: resolvedURL, baseFolder: folder)
+                    found.append(FileItem(
+                        url: resolvedURL,
+                        dayFolder: day,
+                        modifiedAt: modified,
+                        deviceFolder: device.folder,
+                        deviceShortID: device.shortID
+                    ))
                 }
             }
 
@@ -1037,7 +1180,7 @@ struct LibraryView: View {
         var out: [LogRow] = []
         folderBM.withAccess { _ in
             for item in files {
-                out.append(contentsOf: parseCSV(item.url))
+                out.append(contentsOf: parseCSV(item.url, deviceFolder: item.deviceFolder, deviceShortID: item.deviceShortID))
             }
         }
         return out
@@ -1047,7 +1190,7 @@ struct LibraryView: View {
         var out: [LogRow] = []
         folderBM.withAccess { _ in
             for item in group.files {
-                out.append(contentsOf: parseCSV(item.url))
+                out.append(contentsOf: parseCSV(item.url, deviceFolder: item.deviceFolder, deviceShortID: item.deviceShortID))
             }
         }
         return out
@@ -1078,7 +1221,7 @@ struct LibraryView: View {
     }
 
     private func openSummaryFile(_ item: FileItem) {
-        let parsed = parseCSV(item.url)
+        let parsed = parseCSV(item.url, deviceFolder: item.deviceFolder, deviceShortID: item.deviceShortID)
         rows = parsed
         searchText.removeAll()
         sortColumn = .date
@@ -1117,7 +1260,13 @@ struct LibraryView: View {
                     guard values?.isRegularFile == true else { return nil }
                     let dayKey = summaryDayKey(from: url) ?? url.deletingPathExtension().lastPathComponent
                     let modified = values?.contentModificationDate ?? .distantPast
-                    return FileItem(url: url, dayFolder: dayKey, modifiedAt: modified)
+                    return FileItem(
+                        url: url,
+                        dayFolder: dayKey,
+                        modifiedAt: modified,
+                        deviceFolder: "",
+                        deviceShortID: ""
+                    )
                 }
                 .sorted { $0.modifiedAt > $1.modifiedAt }
             } ?? []
@@ -1215,6 +1364,20 @@ struct LibraryView: View {
             return String(first)
         }
         return "(Root)"
+    }
+
+    private func deviceInfo(for url: URL, baseFolder: URL) -> (folder: String, shortID: String) {
+        // パス構造: base/<Day>/<DeviceFolder>/<file>.csv
+        let components = url.standardizedFileURL.pathComponents
+        let baseComponents = baseFolder.standardizedFileURL.pathComponents
+        let relative = components.dropFirst(baseComponents.count)
+        let deviceFolder = relative.dropLast().last ?? ""
+        let folderName = String(deviceFolder)
+
+        // フォルダ末尾の短縮ID（UUID先頭8文字相当）を抽出。"Name-ABCD1234" の最後のハイフン区切りを拾う。
+        let pieces = folderName.split(separator: "-")
+        let shortID = pieces.last.map(String.init) ?? ""
+        return (folder: folderName, shortID: shortID)
     }
 
     private func formattedDayTitle(_ day: String) -> String {
@@ -1331,6 +1494,7 @@ struct LibraryView: View {
         case .lap:   return r.lap
         case .checker:return r.checker
         case .wheel: return r.wheel
+        case .device: return r.deviceFolderLabel.ifEmpty(r.deviceShortID)
         case .out:   return r.outStr
         case .cl:    return r.clStr
         case .inT:   return r.inStr
@@ -1360,13 +1524,62 @@ struct LibraryView: View {
             return LibraryTimestampFormatter.displayTimestamp(from: row.exportedISO, timeZone: tz)
         case .uploaded:
             return LibraryTimestampFormatter.displayTimestamp(from: row.uploadedISO, timeZone: tz)
+        case .device:
+            return row.deviceFolderLabel.ifEmpty(row.deviceShortID.ifEmpty("-"))
         default:
             return cell(row, column)
         }
     }
 
+    // MARK: - クイックスコープ（誰の・いつの計測を見たいかの大まかなフィルタ）
+    private func quickScopedRows(_ base: [LogRow]) -> [LogRow] {
+        base.filter { row in
+            let isMine = !currentDeviceShortID.isEmpty && row.deviceShortID == currentDeviceShortID
+            let deviceMatches: Bool
+            switch quickScope {
+            case .myToday, .myHistory:
+                deviceMatches = isMine
+            case .teammates:
+                // 端末IDが欠けている古いファイルは「仲間」扱いに寄せておく。
+                deviceMatches = !isMine
+            }
+
+            guard deviceMatches else { return false }
+
+            let referenceDate = referenceDay(for: row)
+            if quickScope == .myToday {
+                // 今日の自分: 端末ローカル日付で当日のみ。
+                guard let referenceDate, Calendar.current.isDate(referenceDate, inSameDayAs: Date()) else { return false }
+            } else if useScopedDayFilter {
+                guard let referenceDate, Calendar.current.isDate(referenceDate, inSameDayAs: scopedDay) else { return false }
+            }
+
+            let trimmedTrack = scopedTrack.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedTrack.isEmpty && !row.track.localizedCaseInsensitiveContains(trimmedTrack) {
+                return false
+            }
+
+            let trimmedDriver = scopedDriver.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedDriver.isEmpty && !row.driver.localizedCaseInsensitiveContains(trimmedDriver) {
+                return false
+            }
+
+            return true
+        }
+    }
+
+    private func referenceDay(for row: LogRow) -> Date? {
+        if let ref = LibraryTimestampFormatter.referenceDate(for: row) {
+            return ref
+        }
+        if let dayDate = LibraryView.isoDayFormatter.date(from: row.date) {
+            return dayDate
+        }
+        return nil
+    }
+
     // MARK: - CSVパーサ（wflat → 旧flat → さらに旧形式の順）
-    private func parseCSV(_ url: URL) -> [LogRow] {
+    private func parseCSV(_ url: URL, deviceFolder: String = "", deviceShortID: String = "") -> [LogRow] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         guard let header = lines.first else { return [] }
@@ -1383,7 +1596,8 @@ struct LibraryView: View {
                 out.append(LogRow(
                     track: c[0], date: c[1], car: c[2], driver: c[3], tyre: c[4], time: c[5], lap: c[6], checker: c[7],
                     wheel: c[8], outStr: c[9], clStr: c[10], inStr: c[11], memo: c[12],
-                    sessionISO: session, exportedISO: exported, uploadedISO: uploaded
+                    sessionISO: session, exportedISO: exported, uploadedISO: uploaded,
+                    deviceFolderLabel: deviceFolder, deviceShortID: deviceShortID
                 ))
             }
             return out
@@ -1409,7 +1623,8 @@ struct LibraryView: View {
             return acc.map { (wheel, v) in
                 LogRow(track: v.track, date: v.date, car: v.car, driver: v.driver, tyre: v.tyre, time: v.time, lap: v.lap, checker: v.checker,
                        wheel: wheel, outStr: v.out, clStr: v.cl, inStr: v.inS, memo: v.memo,
-                       sessionISO: v.session, exportedISO: v.exported, uploadedISO: v.uploaded)
+                       sessionISO: v.session, exportedISO: v.exported, uploadedISO: v.uploaded,
+                       deviceFolderLabel: deviceFolder, deviceShortID: deviceShortID)
             }
         }
 

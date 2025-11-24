@@ -36,6 +36,7 @@ final class CSVExporterTests: XCTestCase {
             wheelPressures: [.FL: 195.5],
             sessionStart: Date(timeIntervalSince1970: 0),
             deviceName: "AnritsuM-試作#1",
+            deviceModelLabel: "iPhone16,2",
             sessionID: sessionID,
             sessionReadableID: "19691231-235959_DEV-DEV1_TEST",
             deviceIdentity: DeviceIdentity(id: "dev", name: "デバイス")

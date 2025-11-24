@@ -109,7 +109,8 @@ final class FolderBookmark: ObservableObject {
             let dayName = metadata.dayFolderName
             var destinationFolder = baseFolder.appendingPathComponent(dayName, isDirectory: true)
 
-            let deviceComponent = metadata.deviceID.sanitizedPathComponent()
+            // CSVExporter で使用したフォルダ名（短縮UUID + ニックネーム + 機種名）をそのまま共有フォルダ側にも適用する。
+            let deviceComponent = metadata.deviceFolderName
             if !deviceComponent.isEmpty {
                 destinationFolder = destinationFolder.appendingPathComponent(deviceComponent, isDirectory: true)
             }

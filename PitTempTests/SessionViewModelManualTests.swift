@@ -80,7 +80,9 @@ private struct CSVExporterStub: CSVExporting {
         wheelPressures: [WheelPos : Double],
         sessionStart: Date,
         deviceName: String?,
+        deviceModelLabel: String?,
         sessionID: UUID,
+        sessionReadableID: String,
         deviceIdentity: DeviceIdentity
     ) throws -> URL {
         let url = FileManager.default.temporaryDirectory

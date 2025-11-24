@@ -12,6 +12,7 @@ struct DriveCSVMetadata: Codable, Equatable, Hashable {
     var track: String
     var car: String
     var deviceID: String
+    var deviceFolderName: String
     var deviceName: String
     var exportedAt: Date
     var sessionStartedAt: Date
@@ -30,6 +31,7 @@ struct SessionFileContext {
     var sessionBeganAt: Date
     var deviceIdentity: DeviceIdentity
     var deviceName: String?
+    var deviceModelLabel: String?
 
     func driveMetadata(exportedAt: Date) -> DriveCSVMetadata {
         DriveCSVMetadata(
@@ -39,6 +41,11 @@ struct SessionFileContext {
             track: meta.track,
             car: meta.car,
             deviceID: deviceIdentity.id,
+            deviceFolderName: CSVExporter.deviceDirectoryName(
+                deviceIdentity: deviceIdentity,
+                deviceName: deviceName,
+                deviceModelLabel: deviceModelLabel
+            ),
             deviceName: deviceName ?? deviceIdentity.name,
             exportedAt: exportedAt,
             sessionStartedAt: sessionBeganAt

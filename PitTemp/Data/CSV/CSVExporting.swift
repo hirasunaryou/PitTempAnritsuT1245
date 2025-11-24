@@ -10,6 +10,7 @@ protocol CSVExporting {
         wheelPressures: [WheelPos: Double],
         sessionStart: Date,
         deviceName: String?,
+        deviceModelLabel: String?,
         sessionID: UUID,
         sessionReadableID: String,
         deviceIdentity: DeviceIdentity

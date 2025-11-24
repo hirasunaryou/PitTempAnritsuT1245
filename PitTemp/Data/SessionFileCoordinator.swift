@@ -52,6 +52,7 @@ final class SessionFileCoordinator: SessionFileCoordinating {
             wheelPressures: wheelPressures,
             sessionStart: context.sessionBeganAt,
             deviceName: context.deviceName,
+            deviceModelLabel: context.deviceModelLabel,
             sessionID: context.sessionID,
             sessionReadableID: context.sessionReadableID,
             deviceIdentity: context.deviceIdentity

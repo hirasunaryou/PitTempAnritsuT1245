@@ -12,16 +12,25 @@ struct LogRow: Identifiable {
     var outStr: String   // 温度（文字列）
     var clStr: String
     var inStr: String
+    var ipKpa: String
     var memo: String
     var sessionISO: String     // SESSION_START_ISO
     var exportedISO: String    // EXPORTED_AT_ISO
     var uploadedISO: String    // UPLOADED_AT_ISO
+    var sessionUUID: String
+    var sessionLabel: String
+    var deviceUUID: String
+    var deviceName: String
 }
 
 extension LogRow {
     /// CSVエクスポート時の行データ
     fileprivate func canonicalCSVColumns(in timeZone: TimeZone) -> [String] {
-        var columns = [track, date, car, driver, tyre, time, lap, checker, wheel, outStr, clStr, inStr, memo, sessionISO, exportedISO, uploadedISO]
+        // Export 時も「いつ・どこ・誰のデータか」を一目でわかるよう、デバイス情報やセッション情報を末尾に残す。
+        var columns = [
+            track, date, car, driver, tyre, time, lap, checker, wheel, outStr, clStr, inStr, ipKpa, memo,
+            sessionISO, exportedISO, uploadedISO, sessionUUID, sessionLabel, deviceUUID, deviceName
+        ]
 
         if let referenceDate = LibraryTimestampFormatter.referenceDate(for: self) {
             columns[1] = LibraryTimestampFormatter.exportDayString(from: referenceDate, timeZone: timeZone)
@@ -251,24 +260,12 @@ private struct LibraryTimestampFormatter {
     }
 }
 
-// 個別CSVビューのクイック並び替えキー（wflatに合わせて簡略化）
-enum SortKey: String, CaseIterable {
-    case newest = "Newest"
-    case oldest = "Oldest"
-    case track = "TRACK"
-    case date  = "DATE"
-    case car   = "CAR"
-    case tyre  = "TYRE"
-    case driver = "DRIVER"
-    case checker = "CHECKER"
-    case wheel = "WHEEL"
-}
-
 // ALLビューでユーザーが選べる列
 enum Column: String, CaseIterable, Identifiable {
     case track = "TRACK", date="DATE", time="TIME", car="CAR", driver="DRIVER", tyre="TYRE"
     case lap="LAP", checker="CHECKER", wheel="WHEEL"
     case out="OUT", cl="CL", inT="IN", memo="MEMO", session = "SESSION", exported="EXPORTED", uploaded="UPLOADED"
+    case deviceUUID = "DEVICE_UUID", deviceName = "DEVICE_NAME"
     var id: String { rawValue }
 
     static let defaultVisibleColumns: [Column] = [
@@ -283,7 +280,9 @@ enum Column: String, CaseIterable, Identifiable {
         .inT,
         .memo,
         .exported,
-        .uploaded
+        .uploaded,
+        .deviceUUID,
+        .deviceName
     ]
 }
 
@@ -343,7 +342,8 @@ private struct MergedCSVDocument: Transferable {
 
     private static let canonicalHeader: [String] = [
         "TRACK", "DATE", "CAR", "DRIVER", "TYRE", "TIME", "LAP", "CHECKER",
-        "WHEEL", "OUT", "CL", "IN", "MEMO", "SESSION_START_ISO", "EXPORTED_AT_ISO", "UPLOADED_AT_ISO"
+        "WHEEL", "OUT", "CL", "IN", "IP_KPA", "MEMO", "SESSION_START_ISO", "EXPORTED_AT_ISO", "UPLOADED_AT_ISO",
+        "SESSION_UUID", "SESSION_LABEL", "DEVICE_UUID", "DEVICE_NAME"
     ]
 
     private static func escape(_ value: String) -> String {
@@ -367,19 +367,15 @@ struct LibraryView: View {
 
     // 個別CSV表示用
     @State private var rows: [LogRow] = []
-    @State private var sortKey: SortKey = .newest
-    @State private var selectedFile: FileItem? = nil
     @State private var rawPreview: String = ""
     @State private var isMergingDailyCSV = false
 
     // ALL表示用
-    @State private var showAllSheet = false
     @State private var searchText = ""
     @State private var selectedColumns: [Column] = Column.defaultVisibleColumns
     @State private var sortColumn: Column = .date
     @State private var sortAscending: Bool = true
     @State private var showColumnSheet = false
-    @State private var pendingColumnSheet = false
     @State private var allSheetTitle = "All CSVs"
     @State private var timeZoneOption: LibraryTimeZoneOption = .tokyo
     @State private var shareSource: ShareFileSource = .generated(suffix: "all")
@@ -452,15 +448,13 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationStack {
-            libraryList
-                .navigationTitle("Library")
-                .toolbar { libraryToolbar }
+            allFilesContent
+                .navigationTitle(allSheetTitle)
+                .toolbar { allFilesToolbar }
                 .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
                 .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
-                .onAppear { reloadFiles() }
+                .onAppear { prepareAllRows() }
         }
-        .sheet(item: $selectedFile, content: singleFileSheet)
-        .sheet(isPresented: $showAllSheet, content: allFilesSheet)
         .sheet(isPresented: $showColumnSheet) {
             ColumnPickerSheet(allColumns: Column.allCases, selected: $selectedColumns)
                 .presentationDetents([.medium, .large])
@@ -475,29 +469,7 @@ struct LibraryView: View {
                 onClear: { clearFilter(for: column) }
             )
         }
-        .onChange(of: showAllSheet) { _, isPresented in
-            if !isPresented, pendingColumnSheet {
-                pendingColumnSheet = false
-                showColumnSheet = true
-            }
-        }
         .overlay(mergeOverlay)
-    }
-
-    @ViewBuilder
-    private var libraryList: some View {
-        List {
-            cloudSection
-
-            if folderBM.folderURL != nil {
-                quickSortSection
-            }
-
-            dailyCollectionsSection
-            summarySection
-
-            ForEach(files, id: \.self, content: fileRow)
-        }
     }
 
     @ViewBuilder
@@ -517,137 +489,16 @@ struct LibraryView: View {
         }
     }
 
-    @ViewBuilder
-    private var quickSortSection: some View {
-        Section {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach([SortKey.newest, .oldest, .track, .date, .car, .tyre, .driver, .checker, .wheel], id: \.self) { key in
-                        Button(key.rawValue) {
-                            sortKey = key
-                            applySortForSingle()
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var dailyCollectionsSection: some View {
-        if !dailyGroups.isEmpty {
-            Section("Daily collections") {
-                ForEach(dailyGroups) { group in
-                    Button { openDailyGroup(group) } label: { dailyCollectionRow(for: group) }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var summarySection: some View {
-        if !summaryFiles.isEmpty {
-            Section("Daily merged CSVs") {
-                ForEach(summaryFiles) { item in
-                    Button { openSummaryFile(item) } label: { summaryRow(for: item) }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func dailyCollectionRow(for group: DailyGroup) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(formattedDayTitle(group.day))
-                    .font(.headline)
-                HStack(spacing: 12) {
-                    Label(group.fileCountText, systemImage: "doc.on.doc")
-                        .font(.caption)
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                        Text(group.latestModified, format: .dateTime.year().month().day().hour().minute())
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private func summaryRow(for item: FileItem) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(formattedDayTitle(item.dayFolder))
-                    .font(.headline)
-                HStack(spacing: 12) {
-                    Label(item.url.lastPathComponent, systemImage: "doc.plaintext")
-                        .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock")
-                        Text(item.modifiedAt, format: .dateTime.year().month().day().hour().minute())
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
-
-    @ViewBuilder
-    private func fileRow(for item: FileItem) -> some View {
-        Button {
-            rows = parseCSV(item.url)
-            rawPreview = (try? String(contentsOf: item.url, encoding: .utf8)) ?? ""
-            selectedFile = item
-            applySortForSingle()
-        } label: {
-            HStack {
-                VStack(alignment: .leading) {
-                    Text(item.url.lastPathComponent)
-                        .font(.headline)
-                    Text(item.modifiedAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "doc.text")
-            }
-        }
-    }
-
     @ToolbarContentBuilder
-    private var libraryToolbar: some ToolbarContent {
+    private var allFilesToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
-            Button("All") {
-                rows = loadAll()
-                searchText.removeAll()
-                applyDynamicSort()
-                allSheetTitle = "All CSVs"
-                shareSource = .generated(suffix: "all")
-                showAllSheet = true
+            if let shareDocument {
+                ShareLink(item: shareDocument, preview: SharePreview(Text(shareDocument.fileName))) {
+                    Label("Export CSV (\(timeZoneOption.abbreviation()))", systemImage: "square.and.arrow.up")
+                }
             }
 
-            Button("Columns") { openColumnPicker(closeAllSheetFirst: false) }
+            Button("Columns") { openColumnPicker() }
 
             Menu("Sort") {
                 Picker("Column", selection: $sortColumn) {
@@ -658,70 +509,41 @@ struct LibraryView: View {
                 Toggle("Ascending", isOn: $sortAscending)
             }
 
-            Button { reloadFiles() } label: { Image(systemName: "arrow.clockwise") }
+            Button { prepareAllRows() } label: { Image(systemName: "arrow.clockwise") }
         }
     }
 
-    @ViewBuilder
-    private func singleFileSheet(file: FileItem) -> some View {
-        NavigationStack {
-            List {
-                Section("RESULTS") {
-                    Text("\(rows.count) rows")
-                        .font(.headline)
-                    if !rows.isEmpty {
-                        SingleTableView(rows: rows, timeZone: timeZoneOption)
-                    }
-                }
-                Section("RAW") {
-                    ScrollView {
-                        Text(rawPreview)
-                            .font(.footnote)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-            .navigationTitle(file.url.lastPathComponent)
-            .toolbar {
-                Button("Close") { selectedFile = nil }
-            }
-        }
+    private func prepareAllRows() {
+        // ライブラリに入った瞬間から「全部の表」を見せるため、一覧取得とソートをまとめて実行する。
+        reloadFiles()
+        rows = loadAll()
+        searchText.removeAll()
+        sortColumn = .date
+        sortAscending = false
+        allSheetTitle = "All CSVs"
+        shareSource = .generated(suffix: "all")
+        applyDynamicSort()
     }
 
     @ViewBuilder
-    private func allFilesSheet() -> some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                searchHeader
+    private var allFilesContent: some View {
+        VStack(spacing: 0) {
+            searchHeader
 
-                ScrollView([.vertical, .horizontal]) {
-                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
-                        Section {
-                            ForEach(Array(visibleSortedRows.enumerated()), id: \.offset) { index, row in
-                                rowView(row, index: index)
-                            }
-                        } header: {
-                            headerRow
+            ScrollView([.vertical, .horizontal]) {
+                LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                    Section {
+                        ForEach(Array(visibleSortedRows.enumerated()), id: \.offset) { index, row in
+                            rowView(row, index: index)
                         }
-                    }
-                    .padding(.horizontal)
-                    .padding(.bottom)
-                }
-                .buttonStyle(.plain)
-            }
-            .navigationTitle(allSheetTitle)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { showAllSheet = false }
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    if let shareDocument {
-                        ShareLink(item: shareDocument, preview: SharePreview(Text(shareDocument.fileName))) {
-                            Label("Export CSV (\(timeZoneOption.abbreviation()))", systemImage: "square.and.arrow.up")
-                        }
+                    } header: {
+                        headerRow
                     }
                 }
+                .padding(.horizontal)
+                .padding(.bottom)
             }
+            .buttonStyle(.plain)
         }
     }
 
@@ -758,7 +580,7 @@ struct LibraryView: View {
                 }
 
                 Button {
-                    openColumnPicker(closeAllSheetFirst: true)
+                    openColumnPicker()
                 } label: {
                     Label("Columns", systemImage: "square.grid.2x2")
                 }
@@ -910,14 +732,8 @@ struct LibraryView: View {
         clearFilter(for: column)
     }
 
-    private func openColumnPicker(closeAllSheetFirst: Bool) {
-        if closeAllSheetFirst, showAllSheet {
-            pendingColumnSheet = true
-            showAllSheet = false
-        } else {
-            pendingColumnSheet = false
-            showColumnSheet = true
-        }
+    private func openColumnPicker() {
+        showColumnSheet = true
     }
 
     private func isFilterActive(_ column: Column) -> Bool {
@@ -1068,7 +884,6 @@ struct LibraryView: View {
                 applyDynamicSort()
                 allSheetTitle = formattedDayTitle(group.day)
                 shareSource = .generated(suffix: group.day)
-                showAllSheet = true
                 isMergingDailyCSV = false
                 if wroteSummary {
                     refreshSummaryFiles()
@@ -1086,7 +901,6 @@ struct LibraryView: View {
         applyDynamicSort()
         allSheetTitle = formattedDayTitle(item.dayFolder)
         shareSource = .fixed(name: item.url.lastPathComponent)
-        showAllSheet = true
     }
 
     private func makeMergedFileName(suffix: String, option: LibraryTimeZoneOption) -> String {
@@ -1266,38 +1080,6 @@ struct LibraryView: View {
         return dayPart.isEmpty ? nil : dayPart
     }
 
-    // MARK: - 個別CSVビュー用ソート（wflatに合わせる）
-    private func applySortForSingle() {
-        rows.sort { a, b in
-            switch sortKey {
-            case .newest:
-                // EXPORTEDが空ならSESSIONで比較
-                let la = LibraryTimestampFormatter.parse(a.exportedISO)
-                    ?? LibraryTimestampFormatter.parse(a.sessionISO)
-                    ?? .distantPast
-                let lb = LibraryTimestampFormatter.parse(b.exportedISO)
-                    ?? LibraryTimestampFormatter.parse(b.sessionISO)
-                    ?? .distantPast
-                return la > lb
-            case .oldest:
-                let la = LibraryTimestampFormatter.parse(a.exportedISO)
-                    ?? LibraryTimestampFormatter.parse(a.sessionISO)
-                    ?? .distantPast
-                let lb = LibraryTimestampFormatter.parse(b.exportedISO)
-                    ?? LibraryTimestampFormatter.parse(b.sessionISO)
-                    ?? .distantPast
-                return la < lb
-            case .track:   return a.track.localizedCaseInsensitiveCompare(b.track) == .orderedAscending
-            case .date:    return a.date.localizedCaseInsensitiveCompare(b.date) == .orderedAscending
-            case .car:     return a.car.localizedCaseInsensitiveCompare(b.car) == .orderedAscending
-            case .tyre:    return a.tyre.localizedCaseInsensitiveCompare(b.tyre) == .orderedAscending
-            case .driver:  return a.driver.localizedCaseInsensitiveCompare(b.driver) == .orderedAscending
-            case .checker: return a.checker.localizedCaseInsensitiveCompare(b.checker) == .orderedAscending
-            case .wheel:   return a.wheel < b.wheel
-            }
-        }
-    }
-
     // MARK: - ALL表示用ソート（任意列）
     private func applyDynamicSort() {
         rows.sort { a, b in
@@ -1338,6 +1120,8 @@ struct LibraryView: View {
         case .session: return r.sessionISO
         case .exported: return r.exportedISO
         case .uploaded: return r.uploadedISO
+        case .deviceUUID: return r.deviceUUID
+        case .deviceName: return r.deviceName
         }
     }
 
@@ -1377,13 +1161,22 @@ struct LibraryView: View {
             for line in lines.dropFirst() where !line.trimmingCharacters(in: .whitespaces).isEmpty {
                 let c = splitCSV(line)
                 guard c.count >= 13 else { continue }
-                let session  = (c.count > 13) ? c[13] : ""
-                let exported = (c.count > 14) ? c[14] : ""
-                let uploaded = (c.count > 15) ? c[15] : ""
+                // 旧 CSV では IP_KPA が空欄のままになることがあるため、
+                // 範囲外アクセスを避けつつ安全に既定値を拾う。
+                let ipKpa    = (c.count > 12) ? c[12] : ""
+                let memo     = (c.count > 13) ? c[13] : (c.count > 12 ? c[12] : "")
+                let session  = (c.count > 14) ? c[14] : ""
+                let exported = (c.count > 15) ? c[15] : ""
+                let uploaded = (c.count > 16) ? c[16] : ""
+                let sessionUUID  = (c.count > 17) ? c[17] : ""
+                let sessionLabel = (c.count > 18) ? c[18] : ""
+                let deviceUUID   = (c.count > 19) ? c[19] : ""
+                let deviceName   = (c.count > 20) ? c[20] : ""
                 out.append(LogRow(
                     track: c[0], date: c[1], car: c[2], driver: c[3], tyre: c[4], time: c[5], lap: c[6], checker: c[7],
-                    wheel: c[8], outStr: c[9], clStr: c[10], inStr: c[11], memo: c[12],
-                    sessionISO: session, exportedISO: exported, uploadedISO: uploaded
+                    wheel: c[8], outStr: c[9], clStr: c[10], inStr: c[11], ipKpa: ipKpa, memo: memo,
+                    sessionISO: session, exportedISO: exported, uploadedISO: uploaded,
+                    sessionUUID: sessionUUID, sessionLabel: sessionLabel, deviceUUID: deviceUUID, deviceName: deviceName
                 ))
             }
             return out
@@ -1407,9 +1200,12 @@ struct LibraryView: View {
                 acc[wheel] = e
             }
             return acc.map { (wheel, v) in
-                LogRow(track: v.track, date: v.date, car: v.car, driver: v.driver, tyre: v.tyre, time: v.time, lap: v.lap, checker: v.checker,
-                       wheel: wheel, outStr: v.out, clStr: v.cl, inStr: v.inS, memo: v.memo,
-                       sessionISO: v.session, exportedISO: v.exported, uploadedISO: v.uploaded)
+                LogRow(
+                    track: v.track, date: v.date, car: v.car, driver: v.driver, tyre: v.tyre, time: v.time, lap: v.lap, checker: v.checker,
+                    wheel: wheel, outStr: v.out, clStr: v.cl, inStr: v.inS, ipKpa: "", memo: v.memo,
+                    sessionISO: v.session, exportedISO: v.exported, uploadedISO: v.uploaded,
+                    sessionUUID: "", sessionLabel: "", deviceUUID: "", deviceName: ""
+                )
             }
         }
 

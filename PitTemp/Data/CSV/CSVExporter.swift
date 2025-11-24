@@ -112,7 +112,8 @@ final class CSVExporter: CSVExporting {
                 w.rawValue, a.out, a.cl, a.inS, a.ip,
                 memo.replacingOccurrences(of: ",", with: " "),
                 sessionISO, exportedISO, uploadedISO,
-                sessionID.uuidString, sessionReadableID.replacingOccurrences(of: ",", with: " ")
+                sessionID.uuidString, sessionReadableID.replacingOccurrences(of: ",", with: " "),
+                deviceIdentity.id, (deviceName ?? deviceIdentity.name).replacingOccurrences(of: ",", with: " ")
             ].joined(separator: ",")
             csv += row + "\n"
         }

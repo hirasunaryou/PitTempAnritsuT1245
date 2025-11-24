@@ -183,7 +183,7 @@ final class FolderBookmark: ObservableObject {
         let header = String(text[..<firstNL])
 
         // 既定のヘッダ構造。読みやすい Session Label と機械判定用 UUID を並べて残す。
-        let expectedHeader = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO,SESSION_UUID,SESSION_LABEL"
+        let expectedHeader = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO,SESSION_UUID,SESSION_LABEL,DEVICE_UUID,DEVICE_NAME"
 
         // 期待ヘッダ: “…,UPLOADED_AT_ISO” まで含む
         guard header.hasPrefix("TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO")
@@ -195,13 +195,15 @@ final class FolderBookmark: ObservableObject {
         let body = lines.dropFirst().map { line -> String in
             var cols = splitCSV(line)
 
-            // 必要な列数 (19) を満たさない場合は空欄で埋める。古い CSV もここで補完。
-            if cols.count < 19 { cols.append(contentsOf: Array(repeating: "", count: 19 - cols.count)) }
+            // 必要な列数 (21) を満たさない場合は空欄で埋める。古い CSV もここで補完。
+            if cols.count < 21 { cols.append(contentsOf: Array(repeating: "", count: 21 - cols.count)) }
 
             // UPLOADED_AT_ISO を上書きし、セッションの識別情報が欠けていれば補う。
             cols[16] = uploadedISO
             if cols[17].isEmpty { cols[17] = metadata.sessionID.uuidString }
             if cols[18].isEmpty { cols[18] = metadata.sessionReadableID }
+            cols[19] = metadata.deviceID
+            cols[20] = metadata.deviceName
 
             return cols.joined(separator: ",")
         }.joined(separator: "\n")

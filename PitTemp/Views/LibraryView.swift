@@ -16,6 +16,10 @@ struct LogRow: Identifiable {
     var sessionISO: String     // SESSION_START_ISO
     var exportedISO: String    // EXPORTED_AT_ISO
     var uploadedISO: String    // UPLOADED_AT_ISO
+    /// ファイルパスなどから推測した端末名を表示用に保持する
+    var sourceDeviceLabel: String = ""
+    /// ローカル端末由来かどうかをすばやく判定するためのフラグ
+    var isFromCurrentDevice: Bool = false
 }
 
 extension LogRow {
@@ -360,6 +364,10 @@ struct LibraryView: View {
     @EnvironmentObject var folderBM: FolderBookmark
     @EnvironmentObject var settings: SettingsStore
 
+    /// ライブラリ内のファイルがどの端末から来たかを判定するために、
+    /// ビュー生成時に現在の端末 ID をキャッシュしておく。
+    private let deviceIdentity = DeviceIdentity.current()
+
     // ファイル一覧
     @State private var files: [FileItem] = []
     @State private var dailyGroups: [DailyGroup] = []
@@ -385,9 +393,19 @@ struct LibraryView: View {
     @State private var shareSource: ShareFileSource = .generated(suffix: "all")
     @State private var columnFilters: [Column: String] = [:]
     @State private var filterEditorColumn: Column? = nil
+    @State private var showOnlyLocalDevice = false
+    @State private var hasAutoOpenedAll = false
 
     // 可視→検索→ソートを適用した配列
     private var visibleSortedRows: [LogRow] {
+        // 0) 「この端末のみ」フィルタ
+        let deviceFiltered: [LogRow]
+        if showOnlyLocalDevice {
+            deviceFiltered = rows.filter { $0.isFromCurrentDevice }
+        } else {
+            deviceFiltered = rows
+        }
+
         // 1) 検索フィルタ
         let trimmedFilters = columnFilters.compactMapValues { value -> String? in
             let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -396,9 +414,9 @@ struct LibraryView: View {
 
         let columnFiltered: [LogRow]
         if trimmedFilters.isEmpty {
-            columnFiltered = rows
+            columnFiltered = deviceFiltered
         } else {
-            columnFiltered = rows.filter { r in
+            columnFiltered = deviceFiltered.filter { r in
                 trimmedFilters.allSatisfy { (column, keyword) in
                     displayValue(r, column).localizedCaseInsensitiveContains(keyword)
                 }
@@ -457,7 +475,10 @@ struct LibraryView: View {
                 .toolbar { libraryToolbar }
                 .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
                 .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
-                .onAppear { reloadFiles() }
+                .onAppear {
+                    reloadFiles()
+                    openAllOnFirstAppear()
+                }
         }
         .sheet(item: $selectedFile, content: singleFileSheet)
         .sheet(isPresented: $showAllSheet, content: allFilesSheet)
@@ -639,12 +660,8 @@ struct LibraryView: View {
     private var libraryToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
             Button("All") {
-                rows = loadAll()
                 searchText.removeAll()
-                applyDynamicSort()
-                allSheetTitle = "All CSVs"
-                shareSource = .generated(suffix: "all")
-                showAllSheet = true
+                presentAllSheet(with: loadAll(), title: "All CSVs", source: .generated(suffix: "all"))
             }
 
             Button("Columns") { openColumnPicker(closeAllSheetFirst: false) }
@@ -756,6 +773,13 @@ struct LibraryView: View {
                     Label(timeZoneOption.abbreviation(), systemImage: "globe")
                         .labelStyle(.titleAndIcon)
                 }
+
+                Toggle(isOn: $showOnlyLocalDevice) {
+                    Label("This device only", systemImage: "iphone")
+                        .labelStyle(.titleAndIcon)
+                }
+                .toggleStyle(.switch)
+                .help("Filter rows recorded on this device")
 
                 Button {
                     openColumnPicker(closeAllSheetFirst: true)
@@ -929,6 +953,18 @@ struct LibraryView: View {
         filterEditorColumn = column
     }
 
+    /// Library を開いたときに自動的に All テーブルを表示して、
+    /// 余計なタップなしで結果を確認できるようにする。
+    private func openAllOnFirstAppear() {
+        guard !hasAutoOpenedAll else { return }
+        hasAutoOpenedAll = true
+        // reloadFiles() の完了直後に rows を更新してシートを開く。
+        DispatchQueue.main.async {
+            searchText.removeAll()
+            presentAllSheet(with: loadAll(), title: "All CSVs", source: .generated(suffix: "all"))
+        }
+    }
+
     private func applyFilter(_ value: String, for column: Column) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
@@ -1061,14 +1097,11 @@ struct LibraryView: View {
             let merged = mergeRows(for: group)
             let wroteSummary = persistDailySummaryIfNeeded(rows: merged, day: group.day, latest: latest)
             DispatchQueue.main.async {
-                rows = merged
                 searchText.removeAll()
                 sortColumn = .date
                 sortAscending = false
                 applyDynamicSort()
-                allSheetTitle = formattedDayTitle(group.day)
-                shareSource = .generated(suffix: group.day)
-                showAllSheet = true
+                presentAllSheet(with: merged, title: formattedDayTitle(group.day), source: .generated(suffix: group.day))
                 isMergingDailyCSV = false
                 if wroteSummary {
                     refreshSummaryFiles()
@@ -1079,14 +1112,11 @@ struct LibraryView: View {
 
     private func openSummaryFile(_ item: FileItem) {
         let parsed = parseCSV(item.url)
-        rows = parsed
         searchText.removeAll()
         sortColumn = .date
         sortAscending = false
         applyDynamicSort()
-        allSheetTitle = formattedDayTitle(item.dayFolder)
-        shareSource = .fixed(name: item.url.lastPathComponent)
-        showAllSheet = true
+        presentAllSheet(with: parsed, title: formattedDayTitle(item.dayFolder), source: .fixed(name: item.url.lastPathComponent))
     }
 
     private func makeMergedFileName(suffix: String, option: LibraryTimeZoneOption) -> String {
@@ -1266,6 +1296,16 @@ struct LibraryView: View {
         return dayPart.isEmpty ? nil : dayPart
     }
 
+    /// All シートを開く際の状態更新を 1 箇所にまとめ、
+    /// All ボタン／自動表示／日別マージのいずれからでも同じ挙動にする。
+    private func presentAllSheet(with newRows: [LogRow], title: String, source: ShareFileSource) {
+        rows = newRows
+        applyDynamicSort()
+        allSheetTitle = title
+        shareSource = source
+        showAllSheet = true
+    }
+
     // MARK: - 個別CSVビュー用ソート（wflatに合わせる）
     private func applySortForSingle() {
         rows.sort { a, b in
@@ -1370,6 +1410,7 @@ struct LibraryView: View {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         guard let header = lines.first else { return [] }
+        let origin = originInfo(for: url)
 
         // 1) wheel-flat 新形式（13〜16列）
         if header.hasPrefix("TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN") {
@@ -1383,7 +1424,8 @@ struct LibraryView: View {
                 out.append(LogRow(
                     track: c[0], date: c[1], car: c[2], driver: c[3], tyre: c[4], time: c[5], lap: c[6], checker: c[7],
                     wheel: c[8], outStr: c[9], clStr: c[10], inStr: c[11], memo: c[12],
-                    sessionISO: session, exportedISO: exported, uploadedISO: uploaded
+                    sessionISO: session, exportedISO: exported, uploadedISO: uploaded,
+                    sourceDeviceLabel: origin.label, isFromCurrentDevice: origin.isLocal
                 ))
             }
             return out
@@ -1409,7 +1451,8 @@ struct LibraryView: View {
             return acc.map { (wheel, v) in
                 LogRow(track: v.track, date: v.date, car: v.car, driver: v.driver, tyre: v.tyre, time: v.time, lap: v.lap, checker: v.checker,
                        wheel: wheel, outStr: v.out, clStr: v.cl, inStr: v.inS, memo: v.memo,
-                       sessionISO: v.session, exportedISO: v.exported, uploadedISO: v.uploaded)
+                       sessionISO: v.session, exportedISO: v.exported, uploadedISO: v.uploaded,
+                       sourceDeviceLabel: origin.label, isFromCurrentDevice: origin.isLocal)
             }
         }
 
@@ -1426,6 +1469,34 @@ struct LibraryView: View {
         }
         out.append(cur)
         return out.map { $0.replacingOccurrences(of: "\"\"", with: "\"") }
+    }
+
+    /// ファイルパスから「どの端末フォルダか」を推測し、ローカル端末かどうかを判定する。
+    /// - Returns: (表示用の推測ラベル, ローカル端末かどうか)
+    private func originInfo(for url: URL) -> (label: String, isLocal: Bool) {
+        // パスをベースフォルダからの相対パスにして分解すると、day/device/file などの構造が取り出しやすい。
+        let basePath = folderBM.folderURL?.standardizedFileURL.path ?? ""
+        let absolutePath = url.standardizedFileURL.path
+        let trimmedPath: String
+        if !basePath.isEmpty, absolutePath.hasPrefix(basePath) {
+            trimmedPath = String(absolutePath.dropFirst(basePath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        } else {
+            trimmedPath = url.lastPathComponent
+        }
+
+        let parts = trimmedPath.split(separator: "/")
+        // day/device/file → device を優先。day/file → day を返す。ファイル直下なら親フォルダ名。
+        let guess = parts.dropLast().last.map(String.init) ?? parts.first.map(String.init) ?? url.deletingLastPathComponent().lastPathComponent
+
+        // exporter の deviceDirectoryName では UUID の先頭 8 文字が必ず含まれるため、
+        // ハイフン除去 & lowercased したトークンで部分一致を取る。
+        let idToken = deviceIdentity.id.replacingOccurrences(of: "-", with: "").lowercased()
+        let shortToken = String(idToken.prefix(8))
+        let normalizedPath = absolutePath.replacingOccurrences(of: "-", with: "").lowercased()
+        let normalizedGuess = guess.replacingOccurrences(of: "-", with: "").lowercased()
+        let isLocal = normalizedPath.contains(shortToken) || normalizedPath.contains(idToken) || normalizedGuess.contains(shortToken)
+
+        return (guess, isLocal)
     }
 }
 

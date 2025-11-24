@@ -88,6 +88,10 @@ struct MetaInfo {
     static func marketingName(for identifier: String) -> String {
         // 主要どころだけ例示。必要なら増やしてください。
         let map: [String:String] = [
+            "iPhone17,1": "iPhone 16 Pro",
+            "iPhone17,2": "iPhone 16 Pro Max",
+            "iPhone17,3": "iPhone 16",
+            "iPhone17,4": "iPhone 16 Plus",
             "iPhone16,2": "iPhone 15 Pro",
             "iPhone16,1": "iPhone 15 Pro Max",
             "iPhone15,2": "iPhone 14 Pro",

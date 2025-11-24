@@ -353,17 +353,14 @@ struct MeasureView: View {
             }
             syncManualPressureDefaults(for: .FL)
         }
-        .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
-            if let url = note.userInfo?["url"] as? URL {
-                let comps = url.pathComponents.suffix(2).joined(separator: "/")
-                presentSaveStatus(title: "iCloud copy complete", message: "Saved to: \(comps)")
-            }
-        }
+        // 以前は iCloud へのコピー完了を Notification 経由で受け取り、
+        // 「どこに届いたか」を短いポップアップで案内していた。
+        // しかしクラウドのパス断片が二重に表示されると視認性が落ちるため、
+        // 成功時のステータスは Save ボタン直後のカードのみに集約する。
         .onChange(of: folderBM.statusLabel) { _, newVal in
-            if case .done = newVal, let p = folderBM.lastUploadedDestination {
-                let hint = p.deletingLastPathComponent().lastPathComponent
-                presentSaveStatus(title: "Uploaded", message: "Uploaded to: \(hint)")
-            } else if case .failed(let message) = newVal {
+            // 成功時の「Uploaded to: ...」ポップアップは一般利用者には冗長なため抑制。
+            // 失敗時のみ簡潔にエラーを知らせ、再保存の判断材料にしてもらう。
+            if case .failed(let message) = newVal {
                 presentSaveStatus(title: "Upload failed", message: message)
             }
         }
@@ -2270,8 +2267,11 @@ struct MeasureView: View {
     private var uploadStatusView: some View {
         let driveState = driveService.uploadState
         let iCloudState = folderBM.statusLabel
-        let showDrive = settings.enableGoogleDriveUpload && driveState != .idle
-        let showICloud = settings.enableICloudUpload && iCloudState != .idle
+
+        // 完了 (.done) は Save ステータスのカードで明示するため、ここでは進行中と失敗のみ
+        // を表示する。緑文字が重なって読みにくいという指摘への対応。
+        let showDrive = settings.enableGoogleDriveUpload && isProgressOrError(driveState)
+        let showICloud = settings.enableICloudUpload && isProgressOrError(iCloudState)
 
         if showDrive || showICloud {
             HStack(spacing: 12) {
@@ -2334,6 +2334,20 @@ struct MeasureView: View {
             Label(message.isEmpty ? "Drive upload failed" : message, systemImage: "exclamationmark.triangle")
                 .font(.caption)
                 .foregroundStyle(.red)
+        }
+    }
+
+    /// UploadUIState が「進行中またはエラー」かどうかを判定する。
+    /// - Returns: uploading / failed の場合に true。
+    /// - Note: 完了 (.done) は Save ステータスのカードで伝えるため、ここでは除外している。
+    private func isProgressOrError(_ state: UploadUIState) -> Bool {
+        switch state {
+        case .uploading:
+            return true
+        case .failed:
+            return true
+        case .idle, .done:
+            return false
         }
     }
 

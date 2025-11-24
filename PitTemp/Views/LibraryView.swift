@@ -16,12 +16,16 @@ struct LogRow: Identifiable {
     var sessionISO: String     // SESSION_START_ISO
     var exportedISO: String    // EXPORTED_AT_ISO
     var uploadedISO: String    // UPLOADED_AT_ISO
+    /// 計測端末の UUID (フォルダ名などから復元した短縮 ID を含む)
+    var deviceID: String
+    /// Settings で入力した端末ニックネームなど、ユーザーが判別しやすいラベル
+    var deviceName: String
 }
 
 extension LogRow {
     /// CSVエクスポート時の行データ
     fileprivate func canonicalCSVColumns(in timeZone: TimeZone) -> [String] {
-        var columns = [track, date, car, driver, tyre, time, lap, checker, wheel, outStr, clStr, inStr, memo, sessionISO, exportedISO, uploadedISO]
+        var columns = [track, date, car, driver, tyre, time, lap, checker, wheel, outStr, clStr, inStr, memo, sessionISO, exportedISO, uploadedISO, deviceID, deviceName]
 
         if let referenceDate = LibraryTimestampFormatter.referenceDate(for: self) {
             columns[1] = LibraryTimestampFormatter.exportDayString(from: referenceDate, timeZone: timeZone)
@@ -32,6 +36,8 @@ extension LogRow {
         columns[14] = LibraryTimestampFormatter.exportISOString(from: exportedISO, timeZone: timeZone)
         columns[15] = LibraryTimestampFormatter.exportISOString(from: uploadedISO, timeZone: timeZone)
 
+        // 端末情報はそのまま利用する。フォルダ名や設定値から復元するため、フォーマット不要。
+        
         return columns
     }
 }
@@ -269,6 +275,7 @@ enum Column: String, CaseIterable, Identifiable {
     case track = "TRACK", date="DATE", time="TIME", car="CAR", driver="DRIVER", tyre="TYRE"
     case lap="LAP", checker="CHECKER", wheel="WHEEL"
     case out="OUT", cl="CL", inT="IN", memo="MEMO", session = "SESSION", exported="EXPORTED", uploaded="UPLOADED"
+    case deviceID = "DEVICE_ID", deviceName = "DEVICE_NAME"
     var id: String { rawValue }
 
     static let defaultVisibleColumns: [Column] = [
@@ -282,6 +289,8 @@ enum Column: String, CaseIterable, Identifiable {
         .cl,
         .inT,
         .memo,
+        .deviceName,
+        .deviceID,
         .exported,
         .uploaded
     ]
@@ -343,7 +352,8 @@ private struct MergedCSVDocument: Transferable {
 
     private static let canonicalHeader: [String] = [
         "TRACK", "DATE", "CAR", "DRIVER", "TYRE", "TIME", "LAP", "CHECKER",
-        "WHEEL", "OUT", "CL", "IN", "MEMO", "SESSION_START_ISO", "EXPORTED_AT_ISO", "UPLOADED_AT_ISO"
+        "WHEEL", "OUT", "CL", "IN", "MEMO", "SESSION_START_ISO", "EXPORTED_AT_ISO", "UPLOADED_AT_ISO",
+        "DEVICE_ID", "DEVICE_NAME"
     ]
 
     private static func escape(_ value: String) -> String {
@@ -368,18 +378,14 @@ struct LibraryView: View {
     // 個別CSV表示用
     @State private var rows: [LogRow] = []
     @State private var sortKey: SortKey = .newest
-    @State private var selectedFile: FileItem? = nil
-    @State private var rawPreview: String = ""
     @State private var isMergingDailyCSV = false
 
     // ALL表示用
-    @State private var showAllSheet = false
     @State private var searchText = ""
     @State private var selectedColumns: [Column] = Column.defaultVisibleColumns
     @State private var sortColumn: Column = .date
     @State private var sortAscending: Bool = true
     @State private var showColumnSheet = false
-    @State private var pendingColumnSheet = false
     @State private var allSheetTitle = "All CSVs"
     @State private var timeZoneOption: LibraryTimeZoneOption = .tokyo
     @State private var shareSource: ShareFileSource = .generated(suffix: "all")
@@ -452,15 +458,30 @@ struct LibraryView: View {
 
     var body: some View {
         NavigationStack {
-            libraryList
-                .navigationTitle("Library")
-                .toolbar { libraryToolbar }
-                .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
-                .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
-                .onAppear { reloadFiles() }
+            VStack(spacing: 0) {
+                searchHeader
+
+                ScrollView([.vertical, .horizontal]) {
+                    LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
+                        Section {
+                            ForEach(Array(visibleSortedRows.enumerated()), id: \.offset) { index, row in
+                                rowView(row, index: index)
+                            }
+                        } header: {
+                            headerRow
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.bottom)
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle(allSheetTitle)
+            .toolbar { allViewToolbar }
+            .onChange(of: sortColumn) { _, _ in applyDynamicSort() }    // iOS17+ の2引数版
+            .onChange(of: sortAscending) { _, _ in applyDynamicSort() } // 同上
+            .onAppear { reloadFiles() }
         }
-        .sheet(item: $selectedFile, content: singleFileSheet)
-        .sheet(isPresented: $showAllSheet, content: allFilesSheet)
         .sheet(isPresented: $showColumnSheet) {
             ColumnPickerSheet(allColumns: Column.allCases, selected: $selectedColumns)
                 .presentationDetents([.medium, .large])
@@ -475,46 +496,7 @@ struct LibraryView: View {
                 onClear: { clearFilter(for: column) }
             )
         }
-        .onChange(of: showAllSheet) { _, isPresented in
-            if !isPresented, pendingColumnSheet {
-                pendingColumnSheet = false
-                showColumnSheet = true
-            }
-        }
         .overlay(mergeOverlay)
-    }
-
-    @ViewBuilder
-    private var libraryList: some View {
-        List {
-            cloudSection
-
-            if folderBM.folderURL != nil {
-                quickSortSection
-            }
-
-            dailyCollectionsSection
-            summarySection
-
-            ForEach(files, id: \.self, content: fileRow)
-        }
-    }
-
-    @ViewBuilder
-    private var cloudSection: some View {
-        Section("Cloud") {
-            if settings.enableGoogleDriveUpload {
-                NavigationLink {
-                    DriveBrowserView()
-                } label: {
-                    Label("Google Drive", systemImage: "cloud")
-                }
-                .padding(.vertical, 4)
-            } else {
-                Label("Google Drive uploads disabled", systemImage: "cloud.slash")
-                    .foregroundStyle(.secondary)
-            }
-        }
     }
 
     @ViewBuilder
@@ -613,41 +595,16 @@ struct LibraryView: View {
         .contentShape(Rectangle())
     }
 
-    @ViewBuilder
-    private func fileRow(for item: FileItem) -> some View {
-        Button {
-            rows = parseCSV(item.url)
-            rawPreview = (try? String(contentsOf: item.url, encoding: .utf8)) ?? ""
-            selectedFile = item
-            applySortForSingle()
-        } label: {
-            HStack {
-                VStack(alignment: .leading) {
-                    Text(item.url.lastPathComponent)
-                        .font(.headline)
-                    Text(item.modifiedAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Image(systemName: "doc.text")
-            }
-        }
-    }
-
     @ToolbarContentBuilder
-    private var libraryToolbar: some ToolbarContent {
+    private var allViewToolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
-            Button("All") {
-                rows = loadAll()
-                searchText.removeAll()
-                applyDynamicSort()
-                allSheetTitle = "All CSVs"
-                shareSource = .generated(suffix: "all")
-                showAllSheet = true
+            if let shareDocument {
+                ShareLink(item: shareDocument, preview: SharePreview(Text(shareDocument.fileName))) {
+                    Image(systemName: "square.and.arrow.up")
+                }
             }
 
-            Button("Columns") { openColumnPicker(closeAllSheetFirst: false) }
+            Button("Columns") { openColumnPicker() }
 
             Menu("Sort") {
                 Picker("Column", selection: $sortColumn) {
@@ -659,32 +616,6 @@ struct LibraryView: View {
             }
 
             Button { reloadFiles() } label: { Image(systemName: "arrow.clockwise") }
-        }
-    }
-
-    @ViewBuilder
-    private func singleFileSheet(file: FileItem) -> some View {
-        NavigationStack {
-            List {
-                Section("RESULTS") {
-                    Text("\(rows.count) rows")
-                        .font(.headline)
-                    if !rows.isEmpty {
-                        SingleTableView(rows: rows, timeZone: timeZoneOption)
-                    }
-                }
-                Section("RAW") {
-                    ScrollView {
-                        Text(rawPreview)
-                            .font(.footnote)
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-            .navigationTitle(file.url.lastPathComponent)
-            .toolbar {
-                Button("Close") { selectedFile = nil }
-            }
         }
     }
 
@@ -758,7 +689,7 @@ struct LibraryView: View {
                 }
 
                 Button {
-                    openColumnPicker(closeAllSheetFirst: true)
+                    openColumnPicker()
                 } label: {
                     Label("Columns", systemImage: "square.grid.2x2")
                 }
@@ -910,14 +841,8 @@ struct LibraryView: View {
         clearFilter(for: column)
     }
 
-    private func openColumnPicker(closeAllSheetFirst: Bool) {
-        if closeAllSheetFirst, showAllSheet {
-            pendingColumnSheet = true
-            showAllSheet = false
-        } else {
-            pendingColumnSheet = false
-            showColumnSheet = true
-        }
+    private func openColumnPicker() {
+        showColumnSheet = true
     }
 
     private func isFilterActive(_ column: Column) -> Bool {
@@ -971,7 +896,7 @@ struct LibraryView: View {
 
     // MARK: - ファイル一覧
     private func reloadFiles() {
-        rows.removeAll(); rawPreview.removeAll()
+        rows.removeAll()
         files.removeAll(); dailyGroups.removeAll()
         folderBM.withAccess { folder in
             // 再帰的に enumerator で .csv を全部集める
@@ -1031,6 +956,13 @@ struct LibraryView: View {
         refreshSummaryFiles()
         let groupsSnapshot = dailyGroups
         scheduleDailySummarySync(for: groupsSnapshot)
+
+        // All ビュー前提なので、読み込み直後に全ファイルを集計しておく。
+        rows = loadAll()
+        searchText.removeAll()
+        applyDynamicSort()
+        allSheetTitle = "All CSVs"
+        shareSource = .generated(suffix: "all")
     }
     // MARK: - 一括読み込み
     private func loadAll() -> [LogRow] {
@@ -1068,7 +1000,6 @@ struct LibraryView: View {
                 applyDynamicSort()
                 allSheetTitle = formattedDayTitle(group.day)
                 shareSource = .generated(suffix: group.day)
-                showAllSheet = true
                 isMergingDailyCSV = false
                 if wroteSummary {
                     refreshSummaryFiles()
@@ -1086,7 +1017,6 @@ struct LibraryView: View {
         applyDynamicSort()
         allSheetTitle = formattedDayTitle(item.dayFolder)
         shareSource = .fixed(name: item.url.lastPathComponent)
-        showAllSheet = true
     }
 
     private func makeMergedFileName(suffix: String, option: LibraryTimeZoneOption) -> String {
@@ -1338,6 +1268,8 @@ struct LibraryView: View {
         case .session: return r.sessionISO
         case .exported: return r.exportedISO
         case .uploaded: return r.uploadedISO
+        case .deviceID: return r.deviceID
+        case .deviceName: return r.deviceName
         }
     }
 
@@ -1365,11 +1297,26 @@ struct LibraryView: View {
         }
     }
 
+    /// CSV が置かれているフォルダ名から端末メタデータを復元する。
+    /// - Parameter url: CSV ファイルの URL
+    /// - Returns: 短縮 UUID とニックネーム（取得できない場合は空文字）
+    private func deviceMetadata(from url: URL) -> (id: String, name: String) {
+        // 例: "MyPhone-14Pro-1A2B3C4D" というフォルダなら、末尾を短縮IDとして扱い、
+        // それ以外をユーザーのニックネームとして表示する。
+        let deviceFolder = url.deletingLastPathComponent().lastPathComponent
+        let components = deviceFolder.split(separator: "-")
+        let shortID = components.last.map(String.init) ?? ""
+        let nickname = components.dropLast().joined(separator: "-")
+        return (shortID, nickname)
+    }
+
     // MARK: - CSVパーサ（wflat → 旧flat → さらに旧形式の順）
     private func parseCSV(_ url: URL) -> [LogRow] {
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         guard let header = lines.first else { return [] }
+
+        let deviceMeta = deviceMetadata(from: url)
 
         // 1) wheel-flat 新形式（13〜16列）
         if header.hasPrefix("TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN") {
@@ -1383,7 +1330,8 @@ struct LibraryView: View {
                 out.append(LogRow(
                     track: c[0], date: c[1], car: c[2], driver: c[3], tyre: c[4], time: c[5], lap: c[6], checker: c[7],
                     wheel: c[8], outStr: c[9], clStr: c[10], inStr: c[11], memo: c[12],
-                    sessionISO: session, exportedISO: exported, uploadedISO: uploaded
+                    sessionISO: session, exportedISO: exported, uploadedISO: uploaded,
+                    deviceID: deviceMeta.id, deviceName: deviceMeta.name
                 ))
             }
             return out
@@ -1409,7 +1357,8 @@ struct LibraryView: View {
             return acc.map { (wheel, v) in
                 LogRow(track: v.track, date: v.date, car: v.car, driver: v.driver, tyre: v.tyre, time: v.time, lap: v.lap, checker: v.checker,
                        wheel: wheel, outStr: v.out, clStr: v.cl, inStr: v.inS, memo: v.memo,
-                       sessionISO: v.session, exportedISO: v.exported, uploadedISO: v.uploaded)
+                       sessionISO: v.session, exportedISO: v.exported, uploadedISO: v.uploaded,
+                       deviceID: deviceMeta.id, deviceName: deviceMeta.name)
             }
         }
 

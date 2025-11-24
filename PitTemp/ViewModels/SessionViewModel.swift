@@ -47,19 +47,22 @@ final class SessionViewModel: ObservableObject {
         self.uiLog = uiLog
         self.deviceIdentity = DeviceIdentity.current()
         self.fileCoordinator = fileCoordinator ?? SessionFileCoordinator(exporter: exporter)
-        // 起動直後から「現在のセッションID」を画面に出せるよう、初期値をまとめて設定。
-        let initialLabel = SessionIdentifierFormatter.makeReadableID(
-            createdAt: Date(),
-            device: deviceIdentity,
-            seed: currentSessionID
-        )
-        updateSessionIdentifierState(id: currentSessionID, readableID: initialLabel)
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
         if let settings {
             self.settings = settings
         } else {
             self.settings = SettingsStore()
         }
+
+        // 起動直後から「現在のセッションID」を画面に出せるよう、初期値をまとめて設定。
+        // ここでは self の完全初期化後に公開用プロパティへ反映させる。
+        let initialLabel = SessionIdentifierFormatter.makeReadableID(
+            createdAt: Date(),
+            device: deviceIdentity,
+            seed: currentSessionID
+        )
+        updateSessionIdentifierState(id: currentSessionID, readableID: initialLabel)
+
         restoreAutosaveIfAvailable()
     }
 

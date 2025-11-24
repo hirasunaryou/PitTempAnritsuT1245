@@ -61,45 +61,37 @@
 
 ```
 PitTemp/
-├─ App/
-│  ├─ PitTempApp.swift          # Appエントリ
-│  ├─ Info.plist, entitlements
-│
-├─ BLE/
-│  ├─ BluetoothService.swift    # CoreBluetooth: scan/connect/notify/write/poll
-│  └─ TemperaturePacketParser.swift
-│
-├─ Core/
-│  ├─ Features/
-│  │  └─ Memo/
-│  │     └─ SpeechMemoManager.swift
-│  ├─ Parsing/
-│  │  └─ CarNumberExtractor.swift   # 音声からの抽出補助（必要に応じて拡張予定）
-│  └─ Settings/
-│     ├─ SettingsStore.swift        # @AppStorage ラッパ（メタ入力モード等）
-│     └─ DeviceRegistry.swift       # 既知デバイス保存（UserDefaults/JSON）
-│
-├─ Data/
-│  └─ CSV/
-│     ├─ CSVExporter.swift
-│     └─ CSVExporting.swift
-│
-├─ Models/
-│  ├─ TemperatureFrame.swift    # time/deviceID/value/status
-│  └─ SessionRecorder.swift     # 記録セッション管理
-│
-├─ Utils/
-│  ├─ Haptics.swift
-│  └─ FolderBookmark.swift      # iCloudフォルダへのアップロード支援
-│
-└─ Views/
-   ├─ MeasureView.swift         # メイン画面（Now/Hz/W/N、グリッド、グラフ）
-   ├─ MiniTempChart.swift
-   ├─ MetaEditorView.swift      # 項目別入力（音声/キーボード）
-   ├─ MetaVoiceEditorView.swift # まとめ取り→抽出→反映
-   ├─ SettingsView.swift
-   └─ ConnectView.swift         # スキャン→選択→接続（RSSI/last seen）
+├─ App/                         # Appエントリ @main, Info.plist, entitlements
+├─ Assets.xcassets/             # アプリアイコン/アクセントカラー
+├─ Shared/                      # 機能横断の共通層（下記サブフォルダ参照）
+│  ├─ Core/                     # デバイスIDなど基盤データ
+│  ├─ Domain/                   # パケット解析・取込みユースケース
+│  ├─ Settings/                 # 設定ストア / デバイスレジストリ（＋モック）
+│  ├─ Data/CSV/                 # CSVエクスポート/プロトコル
+│  ├─ Models/                   # TemperatureFrame 等のドメインモデル
+│  ├─ BLE/                      # scan/connect/notify/write/poll の実装
+│  ├─ Protocols/                # プロトコル定義
+│  ├─ Logging/                  # ログユーティリティ
+│  ├─ Utils/                    # 位置情報・ファイル系ユーティリティ
+│  ├─ UI/                       # View修飾・シートヘルパー
+│  └─ Testing/                  # プレビュー/テスト用フィクスチャ
+├─ Features/                    # 画面/機能単位のSwiftUIレイヤー
+│  ├─ Root/                     # タブ構成、ルートナビゲーション
+│  ├─ Measure/                  # メイン計測ビュー（グラフ・Hz/W/N）
+│  ├─ Connect/                  # スキャン→選択→接続（RSSI/last seen）
+│  ├─ Meta/                     # メタ情報の入力・音声取り込み
+│  ├─ History/                  # 記録セッションの履歴/レポート
+│  ├─ Library/                  # 保存データ一覧
+│  └─ Settings/                 # アプリ設定画面
+└─ PitTempTests/                # シミュレータ向けユニットテスト
 ```
+
+**フォルダ移動後にXcode参照を直す手順（開発者向け）**
+
+* Finder/Terminalで実ファイルを移動したら、Xcode側の **Project Navigator** で該当グループを右クリック → **Delete** → **Remove Reference**（ファイルは残す）を実行して重複参照を消す。
+* `PitTemp` ターゲットの **Build Phases > Compile Sources** を開き、赤い参照（Missing File）があれば削除し、新しいパスのファイルをドラッグして再追加する。
+* `Info.plist` や `entitlements` は **Build Settings > Packaging** に差分が残りやすいので、パスが最新フォルダと一致しているか確認する。
+* SwiftPMのビルドエラーが出た場合は、`File > Packages > Reset Package Caches` と **DerivedData** フォルダのクリアで参照ずれをリセットする。
 
 **データフロー（概念）**
 
@@ -163,23 +155,36 @@ AnritsuM (BLE)
 
 ## 6. ビルド & 実行 / Build & Run
 
-* Xcode 16.x / iOS 18.x 実機で動作確認
-* **Signing**: `PitTemp/App/PitTemp.entitlements` の存在と `CFBundleIdentifier` を `Info.plist` で正しく設定
-* トラブル:
+### 初回セットアップ
 
-  * `Publishing changes from background threads` → `DeviceRegistry` をMain更新にして解消済み
-  * `Info.plist duplicate` → `Build Settings > Info.plist File` の重複パスに注意
+* Xcode 16.x / iOS 18.x Simulator で開発。（`xcodebuild -version` でバージョン確認）
+* `PitTemp.xcodeproj` を開き、`CFBundleIdentifier` とチーム署名を自身の開発者アカウントに合わせて設定。
+* `File > Packages > Reset Package Caches` → **DerivedData の削除** を実施し、フォルダ再編後の参照ずれを解消。
+* iCloud を使う場合は `PitTemp/App/PitTemp.entitlements` 内のコンテナIDを環境に合わせて更新し、`Signing & Capabilities` の設定と一致させる。
 
-### CI / ローカルテスト再現
+### テスト / CI
 
-* シミュレータ向けのユニットテストは `xcodebuild test` で再現可能です。
+* シミュレータユニットテスト（ローカル再現）
   ```bash
   xcodebuild test \
     -project PitTemp.xcodeproj \
     -scheme PitTemp \
     -destination 'platform=iOS Simulator,name=iPhone 15,OS=18.0'
   ```
-* CI では同コマンドをベースに、必要であれば `-resultBundlePath` や `-derivedDataPath` を追加するとレポート収集が容易です。
+* CIの推奨最小コマンド例（結果バンドル付き）
+  ```bash
+  xcodebuild test \
+    -project PitTemp.xcodeproj \
+    -scheme PitTemp \
+    -destination 'platform=iOS Simulator,name=iPhone 15,OS=18.0' \
+    -resultBundlePath .build/TestResults \
+    -derivedDataPath .build/DerivedData
+  ```
+* ビルドのみで署名検証したい場合は `-destination 'generic/platform=iOS' build` を追加し、タスクの早期フィードバックに活用してください。
+
+* トラブルシューティング:
+  * `Publishing changes from background threads` → `DeviceRegistry` をMain更新にして解消済み
+  * `Info.plist duplicate` → `Build Settings > Info.plist File` の重複パスに注意
 
 ---
 

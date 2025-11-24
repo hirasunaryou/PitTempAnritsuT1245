@@ -5,6 +5,7 @@ import Foundation
 /// ViewModel からは `SessionFileContext.driveMetadata` を呼ぶだけで埋まるようにする。
 struct DriveCSVMetadata: Codable, Equatable {
     var sessionID: UUID
+    var sessionReadableID: String
     var driver: String
     var track: String
     var car: String
@@ -23,6 +24,7 @@ struct DriveCSVMetadata: Codable, Equatable {
 struct SessionFileContext {
     var meta: MeasureMeta
     var sessionID: UUID
+    var sessionReadableID: String
     var sessionBeganAt: Date
     var deviceIdentity: DeviceIdentity
     var deviceName: String?
@@ -30,6 +32,7 @@ struct SessionFileContext {
     func driveMetadata(exportedAt: Date) -> DriveCSVMetadata {
         DriveCSVMetadata(
             sessionID: sessionID,
+            sessionReadableID: sessionReadableID,
             driver: meta.driver,
             track: meta.track,
             car: meta.car,

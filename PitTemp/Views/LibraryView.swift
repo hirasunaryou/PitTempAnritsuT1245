@@ -1452,6 +1452,7 @@ struct DriveBrowserView: View {
                     file.car,
                     file.deviceID,
                     file.deviceName,
+                    file.sessionReadableID,
                     file.sessionID?.uuidString ?? "",
                     file.dayFolder
                 ].map { $0.lowercased() }
@@ -1523,6 +1524,15 @@ struct DriveBrowserView: View {
                                 .foregroundStyle(.secondary)
                             Text(file.deviceName.ifEmpty(file.deviceID.ifEmpty("-")))
                                 .font(.caption)
+                        }
+                        if !file.sessionReadableID.isEmpty {
+                            GridRow {
+                                Text("Session label")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(file.sessionReadableID)
+                                    .font(.caption.monospaced())
+                            }
                         }
                         if let sessionID = file.sessionID {
                             GridRow {

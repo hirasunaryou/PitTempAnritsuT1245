@@ -37,6 +37,7 @@ final class CSVExporter: CSVExporting {
         sessionStart: Date,
         deviceName: String?,
         sessionID: UUID,
+        sessionReadableID: String,
         deviceIdentity: DeviceIdentity
     ) throws -> URL {
 
@@ -50,6 +51,7 @@ final class CSVExporter: CSVExporting {
 
         let fileName = Self.fileName(
             sessionID: sessionID,
+            sessionReadableID: sessionReadableID,
             meta: meta,
             deviceName: deviceName,
             deviceIdentity: deviceIdentity
@@ -130,11 +132,12 @@ final class CSVExporter: CSVExporting {
 
     private static func fileName(
         sessionID: UUID,
+        sessionReadableID: String,
         meta: MeasureMeta,
         deviceName: String?,
         deviceIdentity: DeviceIdentity
     ) -> String {
-        var components: [String] = ["session", sessionID.uuidString]
+        var components: [String] = ["session", sessionReadableID.sanitizedPathComponent(limit: 48), sessionID.uuidString]
 
         let driver = meta.driver.sanitizedPathComponent()
         let track = meta.track.sanitizedPathComponent()

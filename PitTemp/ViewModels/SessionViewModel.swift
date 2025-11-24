@@ -29,6 +29,7 @@ final class SessionViewModel: ObservableObject {
     private var autosaveWorkItem: DispatchWorkItem?
     private var isRestoringAutosave = false
     private var currentSessionID = UUID()
+    private var currentSessionReadableID: String = ""
     private var bluetoothCancellable: AnyCancellable?
 
     init(exporter: CSVExporting = CSVExporter(),
@@ -40,6 +41,11 @@ final class SessionViewModel: ObservableObject {
         self.uiLog = uiLog
         self.deviceIdentity = DeviceIdentity.current()
         self.fileCoordinator = fileCoordinator ?? SessionFileCoordinator(exporter: exporter)
+        self.currentSessionReadableID = SessionIdentifierFormatter.makeReadableID(
+            createdAt: Date(),
+            device: deviceIdentity,
+            seed: currentSessionID
+        )
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
         if let settings {
             self.settings = settings
@@ -95,6 +101,18 @@ final class SessionViewModel: ObservableObject {
     private var minAdvanceSec: Double { settings.minAdvanceSec }
     private var autofillDateTime: Bool { settings.autofillDateTime }
     private var enableICloudUpload: Bool { settings.enableICloudUpload }
+
+    /// Refresh both the UUID (machine key) and the human-friendly label that is
+    /// shown in history, exports, and debug logs. Keeping them paired here avoids
+    /// accidental drift between what operators see and what gets persisted.
+    private func regenerateSessionIdentifiers(at date: Date = Date()) {
+        currentSessionID = UUID()
+        currentSessionReadableID = SessionIdentifierFormatter.makeReadableID(
+            createdAt: date,
+            device: deviceIdentity,
+            seed: currentSessionID
+        )
+    }
 
       
     // タイマ
@@ -158,7 +176,7 @@ final class SessionViewModel: ObservableObject {
         if hadResults {
             persistAutosaveNow()
             autosaveStore.archiveLatest()
-            archiveMessage = "前の計測セッション (\(currentSessionID.uuidString)) をアーカイブしました。\nArchived previous session before starting a new one."
+            archiveMessage = "前の計測セッション (\(currentSessionReadableID)) をアーカイブしました。\nArchived previous session before starting a new one."
         }
 
         let preservedMeta: MeasureMeta
@@ -196,7 +214,7 @@ final class SessionViewModel: ObservableObject {
 
         loadedHistorySummary = nil
 
-        currentSessionID = UUID()
+        regenerateSessionIdentifiers(at: Date())
         persistAutosaveNow()
 
         sessionResetID = UUID()
@@ -305,6 +323,7 @@ final class SessionViewModel: ObservableObject {
                 context: SessionFileContext(
                     meta: meta,
                     sessionID: currentSessionID,
+                    sessionReadableID: currentSessionReadableID,
                     sessionBeganAt: sessionStart,
                     deviceIdentity: deviceIdentity,
                     deviceName: deviceName
@@ -512,6 +531,7 @@ final class SessionViewModel: ObservableObject {
             wheelPressures: wheelPressures,
             sessionBeganAt: sessionBeganAt,
             sessionID: currentSessionID,
+            sessionReadableID: currentSessionReadableID,
             originDeviceID: deviceIdentity.id,
             originDeviceName: deviceIdentity.name
         )
@@ -528,6 +548,7 @@ final class SessionViewModel: ObservableObject {
             wheelPressures: wheelPressures,
             sessionBeganAt: sessionBeganAt,
             sessionID: currentSessionID,
+            sessionReadableID: currentSessionReadableID,
             originDeviceID: deviceIdentity.id,
             originDeviceName: deviceIdentity.name
         )
@@ -546,6 +567,7 @@ final class SessionViewModel: ObservableObject {
         wheelPressures = snapshot.wheelPressures
         sessionBeganAt = snapshot.sessionBeganAt
         currentSessionID = snapshot.sessionID
+        currentSessionReadableID = snapshot.sessionReadableID
         isCaptureActive = false
         currentWheel = nil
         currentZone = nil
@@ -602,6 +624,6 @@ final class SessionViewModel: ObservableObject {
         case .resetEverything:
             base = "計測結果とメタ情報をすべて初期化しました。\nReset results and meta for the next vehicle."
         }
-        return base + "\n\nSession ID: \(currentSessionID.uuidString)"
+        return base + "\n\nSession ID: \(currentSessionReadableID) (UUID: \(currentSessionID.uuidString))"
     }
 }

@@ -22,7 +22,11 @@ struct SessionSnapshot: Codable {
     var wheelMemos: [WheelPos: String]
     var wheelPressures: [WheelPos: Double]
     var sessionBeganAt: Date?
-    var sessionID: UUID
+    /// Machine-friendly UUID and human-friendly string are both kept.
+    /// UUID remains the canonical primary key; readableID is for operators.
+    private var sessionUUID: UUID
+    var sessionID: UUID { sessionUUID }
+    var sessionReadableID: String
     var originDeviceID: String
     var originDeviceName: String
     var createdAt: Date
@@ -34,6 +38,7 @@ struct SessionSnapshot: Codable {
         case wheelPressures
         case sessionBeganAt
         case sessionID
+        case sessionReadableID
         case originDeviceID
         case originDeviceName
         case createdAt
@@ -45,6 +50,7 @@ struct SessionSnapshot: Codable {
          wheelPressures: [WheelPos: Double] = [:],
          sessionBeganAt: Date?,
          sessionID: UUID,
+         sessionReadableID: String? = nil,
          originDeviceID: String,
          originDeviceName: String,
          createdAt: Date = Date()) {
@@ -53,10 +59,16 @@ struct SessionSnapshot: Codable {
         self.wheelMemos = wheelMemos
         self.wheelPressures = wheelPressures
         self.sessionBeganAt = sessionBeganAt
-        self.sessionID = sessionID
+        self.sessionUUID = sessionID
         self.originDeviceID = originDeviceID
         self.originDeviceName = originDeviceName
         self.createdAt = createdAt
+        self.sessionReadableID = sessionReadableID ?? SessionIdentifierFormatter.makeReadableID(
+            createdAt: createdAt,
+            deviceName: originDeviceName,
+            deviceID: originDeviceID,
+            seed: sessionID
+        )
     }
 
     init(from decoder: Decoder) throws {
@@ -64,10 +76,21 @@ struct SessionSnapshot: Codable {
         meta = try container.decode(MeasureMeta.self, forKey: .meta)
         results = try container.decode([MeasureResult].self, forKey: .results)
         sessionBeganAt = try container.decodeIfPresent(Date.self, forKey: .sessionBeganAt)
-        sessionID = try container.decodeIfPresent(UUID.self, forKey: .sessionID) ?? UUID()
         originDeviceID = try container.decodeIfPresent(String.self, forKey: .originDeviceID) ?? ""
         originDeviceName = try container.decodeIfPresent(String.self, forKey: .originDeviceName) ?? ""
         createdAt = try container.decode(Date.self, forKey: .createdAt)
+
+        // Legacy archives may not contain the readable ID. Rebuild it deterministically
+        // from the UUID + timestamps so that old files still show meaningful labels.
+        let legacySessionID = try container.decodeIfPresent(UUID.self, forKey: .sessionID) ?? UUID()
+        sessionUUID = legacySessionID
+        sessionReadableID = try container.decodeIfPresent(String.self, forKey: .sessionReadableID)
+            ?? SessionIdentifierFormatter.makeReadableID(
+                createdAt: createdAt,
+                deviceName: originDeviceName,
+                deviceID: originDeviceID,
+                seed: legacySessionID
+            )
 
         let rawMap = try container.decode([WheelPos.RawValue: String].self, forKey: .wheelMemos)
         wheelMemos = Dictionary(uniqueKeysWithValues: rawMap.compactMap { key, value in
@@ -88,6 +111,8 @@ struct SessionSnapshot: Codable {
         try container.encode(meta, forKey: .meta)
         try container.encode(results, forKey: .results)
         try container.encodeIfPresent(sessionBeganAt, forKey: .sessionBeganAt)
+        // Keep both forms for backward compatibility with previously exported archives.
+        try container.encode(sessionReadableID, forKey: .sessionReadableID)
         try container.encode(sessionID, forKey: .sessionID)
         try container.encode(originDeviceID, forKey: .originDeviceID)
         try container.encode(originDeviceName, forKey: .originDeviceName)
@@ -200,11 +225,16 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
                 try fileManager.createDirectory(at: dayDirectory, withIntermediateDirectories: true)
             }
 
+            let labelSlug = snapshot.sessionReadableID.replacingOccurrences(
+                of: "[^A-Za-z0-9_-]",
+                with: "-",
+                options: .regularExpression
+            )
             let destination = dayDirectory
-                .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+                .appendingPathComponent("session-\(labelSlug)-\(snapshot.sessionID.uuidString)")
                 .appendingPathExtension("json")
             let destinationCSV = dayDirectory
-                .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+                .appendingPathComponent("session-\(labelSlug)-\(snapshot.sessionID.uuidString)")
                 .appendingPathExtension("csv")
 
             if fileManager.fileExists(atPath: destination.path) {

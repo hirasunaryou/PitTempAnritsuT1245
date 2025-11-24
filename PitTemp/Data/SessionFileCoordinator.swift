@@ -53,6 +53,7 @@ final class SessionFileCoordinator: SessionFileCoordinating {
             sessionStart: context.sessionBeganAt,
             deviceName: context.deviceName,
             sessionID: context.sessionID,
+            sessionReadableID: context.sessionReadableID,
             deviceIdentity: context.deviceIdentity
         )
         let metadata = context.driveMetadata(exportedAt: exportedAt)

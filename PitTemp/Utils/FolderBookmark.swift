@@ -317,6 +317,7 @@ final class GoogleDriveService: ObservableObject {
         let properties: [String: String]
 
         var sessionID: UUID? { properties["sessionID"].flatMap(UUID.init) }
+        var sessionReadableID: String { properties["sessionReadableID"] ?? "" }
         var driver: String { properties["driver"] ?? "" }
         var track: String { properties["track"] ?? "" }
         var car: String { properties["car"] ?? "" }
@@ -569,6 +570,7 @@ final class GoogleDriveService: ObservableObject {
             "parents": [folderID],
             "properties": [
                 "sessionID": metadata.sessionID.uuidString,
+                "sessionReadableID": metadata.sessionReadableID,
                 "driver": metadata.driver,
                 "track": metadata.track,
                 "car": metadata.car,

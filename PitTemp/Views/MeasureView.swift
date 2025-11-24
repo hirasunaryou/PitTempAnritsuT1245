@@ -11,6 +11,7 @@ struct MeasureView: View {
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var bluetooth: BluetoothViewModel
     @EnvironmentObject var driveService: GoogleDriveService
+    @EnvironmentObject var connectivity: ConnectivityMonitor
 
     @StateObject private var speech = SpeechMemoManager()
     @StateObject private var pressureSpeech = SpeechMemoManager()
@@ -21,9 +22,7 @@ struct MeasureView: View {
     @State private var showMetaEditor = false
     @State private var showConnectSheet = false
     @State private var shareURL: URL?
-    @State private var showUploadAlert = false
-    @State private var uploadedPathText = ""
-    @State private var uploadMessage = ""
+    @State private var saveStatusBanner: SaveStatusBanner? = nil
     @State private var isManualMode = false
     @State private var manualValues: [WheelPos: [Zone: String]] = [:]
     @State private var manualErrors: [WheelPos: [Zone: String]] = [:]
@@ -197,6 +196,7 @@ struct MeasureView: View {
             }
             .background(historyBackgroundColor)
             .safeAreaInset(edge: .bottom) { bottomBar }
+            .overlay(alignment: .top) { statusOverlay }
             .navigationTitle(appTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -356,21 +356,20 @@ struct MeasureView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pitUploadFinished)) { note in
             if let url = note.userInfo?["url"] as? URL {
                 let comps = url.pathComponents.suffix(2).joined(separator: "/")
-                uploadMessage = "Saved to: \(comps)"
-                showUploadAlert = true
+                presentSaveStatus(title: "iCloud copy complete", message: "Saved to: \(comps)")
             }
         }
         .onChange(of: folderBM.statusLabel) { _, newVal in
             if case .done = newVal, let p = folderBM.lastUploadedDestination {
                 let hint = p.deletingLastPathComponent().lastPathComponent
-                uploadMessage = "Uploaded to: \(hint)"
-                showUploadAlert = true
+                presentSaveStatus(title: "Uploaded", message: "Uploaded to: \(hint)")
+            } else if case .failed(let message) = newVal {
+                presentSaveStatus(title: "Upload failed", message: message)
             }
         }
-        // アラートはこれ1つに
-        .alert("Upload complete", isPresented: $showUploadAlert) {
-            Button("OK", role: .cancel) { }
-        } message: { Text(uploadMessage) }
+        .onReceive(connectivity.$isOnline.removeDuplicates()) { isOnline in
+            Task { await driveService.flushPendingUploadsIfPossible(isOnline: isOnline) }
+        }
         .alert(
             "History error / 履歴エラー",
             isPresented: Binding(
@@ -381,16 +380,6 @@ struct MeasureView: View {
             Button("OK") { historyError = nil }
         } message: {
             Text(historyError ?? "")
-        }
-        .onChange(of: folderBM.statusLabel) { _, newVal in
-            if case .done = newVal {
-                let p = folderBM.lastUploadedDestination
-                // 例: "iCloud/YourFolder/2025-10-13"
-                let parent = p?.deletingLastPathComponent()
-                let hint = parent?.lastPathComponent ?? ""
-                uploadMessage = "Uploaded to: \(hint)"
-                showUploadAlert = true
-            }
         }
         .confirmationDialog(
             "次の測定の準備 / Prepare next measurement",
@@ -2030,21 +2019,90 @@ struct MeasureView: View {
             }
             .buttonStyle(.bordered)
 
-            Button("Export CSV") {
-                // 1) CSVを両フォーマットで生成（デバイス名を付与）
-                vm.exportCSV(deviceName: bluetooth.deviceName)
-
-                if settings.enableGoogleDriveUpload, let metadata = vm.lastCSVMetadata, let url = vm.lastCSV {
-                    Task { await driveService.upload(csvURL: url, metadata: metadata) }
-                }
+            Button("Save") {
+                handleSaveTapped()
             }
             .buttonStyle(.borderedProminent)
 
-            uploadStatusView
+            Spacer(minLength: 0)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
+    }
+
+    private var statusOverlay: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let banner = saveStatusBanner {
+                SaveStatusToast(banner: banner)
+            }
+
+            uploadStatusView
+        }
+        .padding(.horizontal)
+        .padding(.top, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .allowsHitTesting(false) // ステータス表示は操作を邪魔しない
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: saveStatusBanner)
+        .animation(.default, value: driveService.uploadState)
+    }
+
+    /// Saveボタンに紐づく処理をまとめる。保存先の説明やアップロードの扱いもここで一元化。
+    private func handleSaveTapped() {
+        // 1) CSV を生成
+        guard let export = vm.exportCSV(deviceName: bluetooth.deviceName) else {
+            presentSaveStatus(title: "Save failed", message: "CSV could not be generated.")
+            return
+        }
+
+        var lines: [String] = []
+        lines.append(saveLocationDescription(for: export.url))
+
+        // 2) iCloud 共有フォルダへのコピーは既存ロジックに任せるが、UI には案内を出す
+        if settings.enableICloudUpload {
+            lines.append("iCloud: 共有フォルダへコピーし、同期は iCloud の状態に追随します。")
+        }
+
+        // 3) Google Drive アップロードを条件付きで実施 or キューに積む
+        if settings.uploadAfterSave, settings.enableGoogleDriveUpload, let metadata = vm.lastCSVMetadata {
+            if connectivity.isOnline {
+                lines.append("Google Drive: アップロードを開始しました。")
+                Task { await driveService.upload(csvURL: export.url, metadata: metadata) }
+                Task { await driveService.flushPendingUploadsIfPossible(isOnline: true) }
+            } else {
+                // オフライン時はキューに積んでおき、オンライン復帰後にまとめて送る
+                let nextCount = driveService.pendingUploadsCount + 1
+                Task { @MainActor in
+                    driveService.enqueueForUpload(export.url, metadata: metadata)
+                }
+                lines.append("Google Drive: オフラインのためキューに追加 (残り \(nextCount))。")
+            }
+        } else if settings.enableGoogleDriveUpload {
+            // 利用者が「クラウドに上げない」を選んだケース
+            lines.append("Google Drive: 今回はアップロードしません (Settings > Export で切替)。")
+        }
+
+        presentSaveStatus(title: "Save complete", message: lines.joined(separator: "\n"))
+    }
+
+    /// ユーザーに「どこへ保存されたか」を短く伝えるための整形。
+    private func saveLocationDescription(for url: URL) -> String {
+        let folder = url.deletingLastPathComponent()
+        // 末尾 3 階層程度を抜き出して、人間が読めるパスにする
+        let components = folder.pathComponents.suffix(3).joined(separator: "/")
+        let baseLabel = folder.path.contains("Mobile Documents") ? "iCloud Drive" : "On My iPhone"
+        return "保存先: \(baseLabel) / \(components)"
+    }
+
+    /// ポップアップ表示をまとめて制御。最新のバナーだけを残し、一定時間で自動的に消す。
+    private func presentSaveStatus(title: String, message: String) {
+        let banner = SaveStatusBanner(title: title, message: message)
+        saveStatusBanner = banner
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            if saveStatusBanner?.id == banner.id {
+                saveStatusBanner = nil
+            }
+        }
     }
 
 
@@ -2204,6 +2262,40 @@ struct MeasureView: View {
             Label(message.isEmpty ? "Drive upload failed" : message, systemImage: "exclamationmark.triangle")
                 .font(.caption)
                 .foregroundStyle(.red)
+        }
+    }
+
+    // Save ステータスのモデル。Identifiable にすることで SwiftUI の animation/transition が扱いやすくなる。
+    private struct SaveStatusBanner: Identifiable, Equatable {
+        let id = UUID()
+        let title: String
+        let message: String
+    }
+
+    // Save ステータスをポップアップ表示するための小さなビュー。
+    private struct SaveStatusToast: View {
+        let banner: SaveStatusBanner
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        // ShapeStyle に直接 .accentColor は存在しないので、Color.accentColor を明示して前景色を設定する
+                        .foregroundStyle(Color.accentColor)
+                    Text(banner.title)
+                        .font(.headline)
+                }
+                Text(banner.message)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .shadow(radius: 6)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -2433,6 +2525,7 @@ struct MeasureView: View {
         .environmentObject(fixtures.driveService)
         .environmentObject(fixtures.bluetoothVM)
         .environmentObject(fixtures.logStore)
+        .environmentObject(fixtures.connectivity)
 }
 
 #Preview("MeasureView – Accessibility", traits: .sizeThatFitsLayout) {
@@ -2444,6 +2537,7 @@ struct MeasureView: View {
         .environmentObject(fixtures.driveService)
         .environmentObject(fixtures.bluetoothVM)
         .environmentObject(fixtures.logStore)
+        .environmentObject(fixtures.connectivity)
         .environment(\.dynamicTypeSize, .accessibility3)
         .preferredColorScheme(.dark)
 }

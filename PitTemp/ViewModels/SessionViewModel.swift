@@ -330,13 +330,13 @@ final class SessionViewModel: ObservableObject {
     /// 既存CSVを返す。無ければ新規出力
     func ensureCSV(deviceName: String?) -> URL? {
         if let u = lastCSV { return u }
-        exportCSV(deviceName: deviceName)
-        return lastCSV
+        return exportCSV(deviceName: deviceName)?.url
     }
 
     // 既定: wflat を保存（Library互換）。
     // 1) DTO にまとめる → 2) ファサードへ渡す → 3) autosave と iCloud へ反映
-    func exportCSV(deviceName: String? = nil) {
+    @discardableResult
+    func exportCSV(deviceName: String? = nil) -> SessionFileExport? {
         let sessionStart = sessionBeganAt ?? Date()
 
         if autofillDateTime && meta.date.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -372,8 +372,10 @@ final class SessionViewModel: ObservableObject {
                 persistAutosaveNow()
                 autosaveStore.archiveLatest()
             }
+            return export
         } catch {
             print("CSV export error:", error)
+            return nil
         }
     }
 

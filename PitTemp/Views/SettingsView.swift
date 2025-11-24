@@ -68,6 +68,18 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Export") {
+                    Toggle("Upload to cloud after Save", isOn: $settings.uploadAfterSave)
+                    // 追加説明: 計測を保存した直後にクラウドへ上げるかどうかを
+                    // ワンタップで切り替える。オフにすると「Save ＝ローカル保存のみ」
+                    // となり、あとで必要な分だけ Library などから手動アップロード
+                    // するといった運用ができる。
+                    Text("トグルをオフにすると、この端末内にのみ保存します。オンにすると通信状態を見ながらクラウドへキューイングまたは即時アップロードします。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 Section("Google Drive") {
                     Toggle("Upload to Google Drive", isOn: $settings.enableGoogleDriveUpload)
 

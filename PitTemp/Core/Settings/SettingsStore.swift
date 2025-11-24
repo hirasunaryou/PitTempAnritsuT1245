@@ -65,6 +65,7 @@ final class SettingsStore: ObservableObject {
         static let hr2500ID = "hr2500.id"
         static let enableICloudUpload = "cloud.enableICloudUpload"
         static let enableGoogleDriveUpload = "cloud.enableDriveUpload"
+        static let uploadAfterSave = "cloud.uploadAfterSave"
         static let metaInputMode = "pref.metaInputMode"
         static let metaKeywordTrack = "pref.metaKeyword.track"
         static let metaKeywordDate = "pref.metaKeyword.date"
@@ -98,6 +99,7 @@ final class SettingsStore: ObservableObject {
     @Published var hr2500ID: String { didSet { save(hr2500ID, key: Keys.hr2500ID) } }
     @Published var enableICloudUpload: Bool { didSet { save(enableICloudUpload, key: Keys.enableICloudUpload) } }
     @Published var enableGoogleDriveUpload: Bool { didSet { save(enableGoogleDriveUpload, key: Keys.enableGoogleDriveUpload) } }
+    @Published var uploadAfterSave: Bool { didSet { save(uploadAfterSave, key: Keys.uploadAfterSave) } }
     @Published private var metaInputModeRaw: Int { didSet { save(metaInputModeRaw, key: Keys.metaInputMode) } }
     @Published private var metaKeywordTrackRaw: String { didSet { save(metaKeywordTrackRaw, key: Keys.metaKeywordTrack) } }
     @Published private var metaKeywordDateRaw: String { didSet { save(metaKeywordDateRaw, key: Keys.metaKeywordDate) } }
@@ -131,6 +133,7 @@ final class SettingsStore: ObservableObject {
         hr2500ID = store.value(forKey: Keys.hr2500ID, default: "")
         enableICloudUpload = store.value(forKey: Keys.enableICloudUpload, default: true)
         enableGoogleDriveUpload = store.value(forKey: Keys.enableGoogleDriveUpload, default: false)
+        uploadAfterSave = store.value(forKey: Keys.uploadAfterSave, default: true)
         metaInputModeRaw = store.value(forKey: Keys.metaInputMode, default: 0)
 
         metaKeywordTrackRaw = store.value(forKey: Keys.metaKeywordTrack, default: Self.defaultMetaVoiceKeywords[.track]!.joined(separator: ", "))

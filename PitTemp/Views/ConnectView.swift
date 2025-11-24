@@ -1,6 +1,10 @@
 //
 //  ConnectView.swift
 //  PitTemp
+//
+//  役割: BLE デバイス一覧と接続・切断ボタンをまとめた1つの画面定義。
+//  初学者メモ: 同名ファイルが複数あるとビルドエラーや混乱の原因になるため、
+//  このファイルを唯一の ConnectView として残し、責務をここに集約します。
 import SwiftUI
 
 struct ConnectView: View {

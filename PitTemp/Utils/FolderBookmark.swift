@@ -346,6 +346,13 @@ final class GoogleDriveService: ObservableObject {
         var sessionStartISO: String { properties["sessionStartedISO"] ?? "" }
     }
 
+    // Drive へのアップロード待ち行列。
+    struct PendingUpload: Identifiable, Hashable {
+        let id = UUID()
+        let url: URL
+        let metadata: DriveCSVMetadata
+    }
+
     @AppStorage("drive.parentFolderID") var parentFolderID: String = ""
     @AppStorage("drive.manualAccessToken") var manualAccessToken: String = ""
 
@@ -353,6 +360,7 @@ final class GoogleDriveService: ObservableObject {
     @Published private(set) var uploadState: UploadUIState = .idle
     @Published private(set) var lastErrorMessage: String? = nil
     @Published private(set) var files: [DriveCSVFile] = []
+    @Published private(set) var pendingUploads: [PendingUpload] = []
 
     private var dayFolderCache: [String: String] = [:]
     private let isoFormatter: ISO8601DateFormatter = {
@@ -366,6 +374,8 @@ final class GoogleDriveService: ObservableObject {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
+
+    var pendingUploadsCount: Int { pendingUploads.count }
 
     private static let driveScope = "https://www.googleapis.com/auth/drive.file"
 
@@ -431,6 +441,29 @@ final class GoogleDriveService: ObservableObject {
 #else
         throw DriveError.unsupported
 #endif
+    }
+
+    // ---- キュー管理 ----
+    @MainActor
+    func enqueueForUpload(_ csvURL: URL, metadata: DriveCSVMetadata) {
+        // 既に同一 URL が並んでいれば重複を避ける
+        guard !pendingUploads.contains(where: { $0.url == csvURL }) else { return }
+        pendingUploads.append(PendingUpload(url: csvURL, metadata: metadata))
+    }
+
+    @MainActor
+    func flushPendingUploadsIfPossible(isOnline: Bool) async {
+        // オフラインなら何もしない。オンライン復帰時や Save 後に呼び出す。
+        guard isOnline else { return }
+
+        // uploadState が .uploading のときは、連続で走らせない。
+        if case .uploading = uploadState { return }
+
+        // FIFO でキューを処理する。upload は async なので await で逐次処理する。
+        while !pendingUploads.isEmpty {
+            let next = pendingUploads.removeFirst()
+            await upload(csvURL: next.url, metadata: next.metadata)
+        }
     }
 
     func upload(csvURL: URL, metadata: DriveCSVMetadata) async {

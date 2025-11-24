@@ -22,6 +22,8 @@ struct MeasureMeta: Codable {
     var lap = ""
     var checker = ""
     var carNo: String = ""            // 末尾数字ブロック（例: "18"）
+    // 以前は CarNumberExtractor で正規化を補助していたが、呼び出し元で責務分離したため
+    // ここでは「整形済みの文字列を格納するだけ」というデータ指向のコメントを明示している。
     var carNoAndMemo: String = ""     // 生テキスト（正規化済み）
 }
 

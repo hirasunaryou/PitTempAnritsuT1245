@@ -61,7 +61,7 @@ struct DeviceRecord: Identifiable, Codable, Equatable {
 }
 
 /// 既知デバイスのレジストリ。UserDefaults 以外にも切り替え可能。
-final class DeviceRegistry: ObservableObject {
+final class DeviceRegistry: ObservableObject, DeviceRegistrying {
     @Published private(set) var known: [DeviceRecord] = []
 
     private let store: DeviceRegistryStore

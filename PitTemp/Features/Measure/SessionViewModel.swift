@@ -29,6 +29,7 @@ final class SessionViewModel: ObservableObject {
     private let autosaveStore: SessionAutosaveHandling
     private let uiLog: UILogPublishing?
     private let deviceIdentity: DeviceIdentity
+    private let carNumberExtractor: CarNumberExtracting
     private var autosaveWorkItem: DispatchWorkItem?
     private var isRestoringAutosave = false
     private var currentSessionID = UUID()
@@ -45,11 +46,13 @@ final class SessionViewModel: ObservableObject {
          settings: SessionSettingsProviding? = nil,
          autosaveStore: SessionAutosaveHandling = SessionAutosaveStore(),
          uiLog: UILogPublishing? = nil,
-         fileCoordinator: SessionFileCoordinating? = nil) {
+         fileCoordinator: SessionFileCoordinating? = nil,
+         carNumberExtractor: CarNumberExtracting = CarNumberExtractionUseCase()) {
         self.autosaveStore = autosaveStore
         self.uiLog = uiLog
         self.deviceIdentity = DeviceIdentity.current()
         self.fileCoordinator = fileCoordinator ?? SessionFileCoordinator(exporter: exporter)
+        self.carNumberExtractor = carNumberExtractor
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
         if let settings {
             self.settings = settings
@@ -150,7 +153,7 @@ final class SessionViewModel: ObservableObject {
     private var timer: Timer? = nil
 
     /// Bind Bluetooth samples once so the View does not manage cancellation.
-    func bindBluetooth(service: BluetoothService) {
+    func bindBluetooth(service: TemperatureSensorClient) {
         bluetoothCancellable?.cancel()
         bluetoothCancellable = service.temperatureFrames
             .map { TemperatureSample(time: $0.time, value: $0.value) }
@@ -177,6 +180,17 @@ final class SessionViewModel: ObservableObject {
         if let idx = live.firstIndex(where: { $0.ts >= cutoff }), idx > 0 {
             live.removeFirst(idx)
         }
+    }
+
+    /// 車両名の入力と同時に番号/メモを正規化して内部状態へ反映するヘルパー。
+    /// - Note: View 層からは「生テキスト」を渡すだけにして、正規化ロジックの所在を固定する。
+    func updateCarIdentity(rawText: String) {
+        let result = carNumberExtractor.extract(from: rawText)
+        var updated = meta
+        updated.car = result.cleanedCarText
+        updated.carNo = result.carNumber
+        updated.carNoAndMemo = result.memoText
+        meta = updated
     }
 
     

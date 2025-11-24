@@ -8,7 +8,8 @@ final class NotifyControllerTests: XCTestCase {
 
     func testHzIsRaisedWhenNotificationsArriveBackToBack() async throws {
         let expectation = expectation(description: "Hz updates for continuous notifications")
-        let controller = NotifyController(parser: TemperaturePacketParser(), mainQueue: DispatchQueue(label: "notify.test")) { _ in }
+        let ingestor = MockTemperatureIngestUseCase()
+        let controller = NotifyController(ingestor: ingestor, mainQueue: DispatchQueue(label: "notify.test")) { _ in }
         controller.onHzUpdate = { hz in
             // 約0.12秒間隔なら 8Hz 付近。連続送信とみなせる閾値 3Hz 超を狙う。
             if hz > 3.0 { expectation.fulfill() }

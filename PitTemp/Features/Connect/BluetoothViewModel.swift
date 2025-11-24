@@ -16,11 +16,11 @@ final class BluetoothViewModel: ObservableObject {
     @Published private(set) var notifyHzText: String = "Hz: --"
     @Published private(set) var notifyCountText: String = "N: --"
 
-    private let service: BluetoothService
-    private let registry: DeviceRegistry
+    private let service: BluetoothServicing
+    private let registry: DeviceRegistrying
     private var cancellables: Set<AnyCancellable> = []
 
-    init(service: BluetoothService, registry: DeviceRegistry) {
+    init(service: BluetoothServicing, registry: DeviceRegistrying) {
         self.service = service
         self.registry = registry
         // Seed with the current service state so the UI renders instantly.
@@ -113,35 +113,35 @@ final class BluetoothViewModel: ObservableObject {
 
     /// Subscribe to BluetoothService so views receive MainActor updates only from here.
     private func bindServiceState() {
-        service.$connectionState
+        service.connectionStatePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 self?.connectionState = state
             }
             .store(in: &cancellables)
 
-        service.$scanned
+        service.scannedPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] devices in
                 self?.scanned = devices
             }
             .store(in: &cancellables)
 
-        service.$deviceName
+        service.deviceNamePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] name in
                 self?.deviceName = name
             }
             .store(in: &cancellables)
 
-        service.$latestTemperature
+        service.latestTemperaturePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] temperature in
                 self?.latestTemperature = temperature
             }
             .store(in: &cancellables)
 
-        service.$autoConnectOnDiscover
+        service.autoConnectPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] enabled in
                 self?.autoConnectOnDiscover = enabled
@@ -149,14 +149,14 @@ final class BluetoothViewModel: ObservableObject {
             .store(in: &cancellables)
 
         // Debug metrics stay formatted here to keep Views presentational only.
-        service.$notifyHz
+        service.notifyHzPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] hz in
                 self?.notifyHzText = String(format: "Hz: %.1f", hz)
             }
             .store(in: &cancellables)
 
-        service.$notifyCountUI
+        service.notifyCountPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] count in
                 self?.notifyCountText = "N: \(count)"

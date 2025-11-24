@@ -7,7 +7,7 @@ import Combine
 
 /// BLEから温度を受け取り、TemperatureFrameとしてPublishするサービス。
 /// - Note: DATA ボタンの単発送信も「通知をそのまま受け取る」運用とし、明示的なポーリング関数は持たない。
-final class BluetoothService: NSObject, TemperatureSensorClient {
+final class BluetoothService: NSObject, BluetoothServicing {
     // 公開状態（UIは Main で触る）
     @Published var connectionState: ConnectionState = .idle
     @Published var latestTemperature: Double?
@@ -19,7 +19,7 @@ final class BluetoothService: NSObject, TemperatureSensorClient {
     var temperatureFrames: AnyPublisher<TemperatureFrame, Never> { temperatureFramesSubject.eraseToAnyPublisher() }
 
     // 外部レジストリ（App から注入）
-    weak var registry: DeviceRegistry? {
+    weak var registry: DeviceRegistrying? {
         didSet { scanner.registry = registry }
     }
 
@@ -40,8 +40,8 @@ final class BluetoothService: NSObject, TemperatureSensorClient {
     // 受信処理用の専用キュー
     private let bleQueue = DispatchQueue(label: "BLE.AnritsuT1245")
 
-    // Parser
-    private let parser = TemperaturePacketParser()
+    // Parser / UseCase
+    private let temperatureUseCase: TemperatureIngesting
 
     // その他
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
@@ -51,16 +51,26 @@ final class BluetoothService: NSObject, TemperatureSensorClient {
     @Published var autoConnectOnDiscover: Bool = false
     private(set) var preferredIDs: Set<String> = []  // ← registry から設定（空なら「最初に見つけた1台」）
 
+    // Combine での購読口。Protocol を介しても変更検知できるよう AnyPublisher 化。
+    var connectionStatePublisher: AnyPublisher<ConnectionState, Never> { $connectionState.eraseToAnyPublisher() }
+    var scannedPublisher: AnyPublisher<[ScannedDevice], Never> { $scanned.eraseToAnyPublisher() }
+    var deviceNamePublisher: AnyPublisher<String?, Never> { $deviceName.eraseToAnyPublisher() }
+    var latestTemperaturePublisher: AnyPublisher<Double?, Never> { $latestTemperature.eraseToAnyPublisher() }
+    var autoConnectPublisher: AnyPublisher<Bool, Never> { $autoConnectOnDiscover.eraseToAnyPublisher() }
+    var notifyHzPublisher: AnyPublisher<Double, Never> { $notifyHz.eraseToAnyPublisher() }
+    var notifyCountPublisher: AnyPublisher<Int, Never> { $notifyCountUI.eraseToAnyPublisher() }
+
     // コンポーネント
     private lazy var scanner = DeviceScanner(allowedNamePrefixes: allowedNamePrefixes, registry: registry)
     private lazy var connectionManager = ConnectionManager(serviceUUID: serviceUUID, readCharUUID: readCharUUID, writeCharUUID: writeCharUUID)
-    private lazy var notifyController = NotifyController(parser: parser) { [weak self] frame in
+    private lazy var notifyController = NotifyController(ingestor: temperatureUseCase) { [weak self] frame in
         guard let self else { return }
         DispatchQueue.main.async { self.latestTemperature = frame.value }
         self.temperatureFramesSubject.send(frame)
     }
 
-    override init() {
+    init(temperatureUseCase: TemperatureIngesting = TemperatureIngestUseCase()) {
+        self.temperatureUseCase = temperatureUseCase
         super.init()
         central = CBCentralManager(delegate: self, queue: bleQueue)
         setupCallbacks()
@@ -105,7 +115,7 @@ final class BluetoothService: NSObject, TemperatureSensorClient {
     // 時刻設定
     func setDeviceTime(to date: Date = Date()) {
         guard let p = peripheral, let w = writeChar else { return }
-        let cmd = parser.buildTIMESet(date: date)
+        let cmd = temperatureUseCase.makeTimeSyncPayload(for: date)
         p.writeValue(cmd, for: w, type: .withResponse)
     }
 

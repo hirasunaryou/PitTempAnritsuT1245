@@ -2,7 +2,7 @@ import Foundation
 
 /// Notify受信処理とメトリクス計測を担当
 final class NotifyController {
-    private let parser: TemperaturePacketParser
+    private let ingestor: TemperatureIngesting
     private let emit: (TemperatureFrame) -> Void
     // Combine なしでもメインスレッドへ戻せるように、シンプルに DispatchQueue を保持する。
     private let mainQueue: DispatchQueue
@@ -15,10 +15,10 @@ final class NotifyController {
     var onCountUpdate: ((Int) -> Void)?
     var onHzUpdate: ((Double) -> Void)?
 
-    init(parser: TemperaturePacketParser,
+    init(ingestor: TemperatureIngesting,
          mainQueue: DispatchQueue = .main,
          emit: @escaping (TemperatureFrame) -> Void) {
-        self.parser = parser
+        self.ingestor = ingestor
         self.mainQueue = mainQueue
         self.emit = emit
     }
@@ -44,6 +44,8 @@ final class NotifyController {
         }
         prevNotifyAt = now
 
-        parser.parseFrames(data).forEach(emit)
+        // ドメイン層の温度取り込みユースケースに処理を委譲。
+        // テストではこのユースケースを差し替えてフレーム生成を固定できる。
+        ingestor.frames(from: data).forEach(emit)
     }
 }

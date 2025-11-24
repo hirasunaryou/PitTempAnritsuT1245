@@ -37,7 +37,10 @@ struct MetaEditorView: View {
 
                 // --- CAR & PEOPLE ---
                 Section("CAR & PEOPLE") {
-                    FieldRow(label: "CAR", text: $vm.meta.car)
+                    FieldRow(label: "CAR", text: Binding(
+                        get: { vm.meta.car },
+                        set: { vm.updateCarIdentity(rawText: $0) }
+                    ))
                     FieldRow(label: "DRIVER", text: $vm.meta.driver)
                     FieldRow(label: "TYRE", text: $vm.meta.tyre)
                 }

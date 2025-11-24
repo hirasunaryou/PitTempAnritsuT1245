@@ -369,6 +369,8 @@ private struct MergedCSVDocument: Transferable {
 struct LibraryView: View {
     @EnvironmentObject var folderBM: FolderBookmark
     @EnvironmentObject var settings: SettingsStore
+    /// モーダルで表示された場合に閉じるためのハンドラ（現状は未使用だが将来の再利用に備える）
+    @Environment(\.dismiss) private var dismiss
 
     // ファイル一覧
     @State private var files: [FileItem] = []
@@ -643,7 +645,8 @@ struct LibraryView: View {
             .navigationTitle(allSheetTitle)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { showAllSheet = false }
+                    // 旧シート表示時に閉じるためのトリガー。NavigationStack化後も安全な no-op として残す。
+                    Button("Close") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
                     if let shareDocument {

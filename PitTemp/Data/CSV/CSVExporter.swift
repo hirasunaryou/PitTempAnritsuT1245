@@ -63,8 +63,9 @@ final class CSVExporter: CSVExporting {
         }
 
         // ヘッダは旧資産に合わせる
-        // TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO
-        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO\n"
+        // TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO,SESSION_UUID,SESSION_LABEL
+        // 末尾に Session 情報を追加して、後からログを辿りやすくする。
+        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO,SESSION_UUID,SESSION_LABEL\n"
 
         // wheelごとに OUT/CL/IN を詰める
         struct Acc { var out="", cl="", inS="", ip="" }
@@ -99,7 +100,8 @@ final class CSVExporter: CSVExporting {
                 meta.track, meta.date, meta.car, meta.driver, meta.tyre, meta.time, meta.lap, meta.checker,
                 w.rawValue, a.out, a.cl, a.inS, a.ip,
                 memo.replacingOccurrences(of: ",", with: " "),
-                sessionISO, exportedISO, uploadedISO
+                sessionISO, exportedISO, uploadedISO,
+                sessionID.uuidString, sessionReadableID.replacingOccurrences(of: ",", with: " ")
             ].joined(separator: ",")
             csv += row + "\n"
         }

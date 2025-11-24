@@ -32,6 +32,12 @@ final class SessionViewModel: ObservableObject {
     private var currentSessionReadableID: String = ""
     private var bluetoothCancellable: AnyCancellable?
 
+    // UI からも確認できるよう公開しておく。@Published にすることで
+    // 「新しいセッションへ切り替えた」「履歴を復元した」といった変化を
+    // 画面が即座に検知できる。読み取り専用のため `private(set)` を付ける。
+    @Published private(set) var sessionReadableIDForUI: String = ""
+    @Published private(set) var sessionUUIDForUI: UUID = UUID()
+
     init(exporter: CSVExporting = CSVExporter(),
          settings: SessionSettingsProviding? = nil,
          autosaveStore: SessionAutosaveHandling = SessionAutosaveStore(),
@@ -41,11 +47,13 @@ final class SessionViewModel: ObservableObject {
         self.uiLog = uiLog
         self.deviceIdentity = DeviceIdentity.current()
         self.fileCoordinator = fileCoordinator ?? SessionFileCoordinator(exporter: exporter)
-        self.currentSessionReadableID = SessionIdentifierFormatter.makeReadableID(
+        // 起動直後から「現在のセッションID」を画面に出せるよう、初期値をまとめて設定。
+        let initialLabel = SessionIdentifierFormatter.makeReadableID(
             createdAt: Date(),
             device: deviceIdentity,
             seed: currentSessionID
         )
+        updateSessionIdentifierState(id: currentSessionID, readableID: initialLabel)
         // SettingsStore は @MainActor なため、デフォルト生成は init 本体で行う
         if let settings {
             self.settings = settings
@@ -106,12 +114,24 @@ final class SessionViewModel: ObservableObject {
     /// shown in history, exports, and debug logs. Keeping them paired here avoids
     /// accidental drift between what operators see and what gets persisted.
     private func regenerateSessionIdentifiers(at date: Date = Date()) {
-        currentSessionID = UUID()
-        currentSessionReadableID = SessionIdentifierFormatter.makeReadableID(
+        let freshID = UUID()
+        let freshLabel = SessionIdentifierFormatter.makeReadableID(
             createdAt: date,
             device: deviceIdentity,
-            seed: currentSessionID
+            seed: freshID
         )
+        updateSessionIdentifierState(id: freshID, readableID: freshLabel)
+    }
+
+    /// UUID と可読ラベルを一箇所で同期させ、公開用プロパティも同時に更新する。
+    /// - Parameters:
+    ///   - id: 機械向けの UUID。
+    ///   - readableID: 人が読めるラベル（デバッグや履歴表示用）。
+    private func updateSessionIdentifierState(id: UUID, readableID: String) {
+        currentSessionID = id
+        currentSessionReadableID = readableID
+        sessionUUIDForUI = id
+        sessionReadableIDForUI = readableID
     }
 
       
@@ -566,8 +586,9 @@ final class SessionViewModel: ObservableObject {
         wheelMemos = snapshot.wheelMemos
         wheelPressures = snapshot.wheelPressures
         sessionBeganAt = snapshot.sessionBeganAt
-        currentSessionID = snapshot.sessionID
-        currentSessionReadableID = snapshot.sessionReadableID
+        // ここで UUID/ラベル/公開用プロパティをまとめて同期し、
+        // 「履歴を開いたらセッションID表示が即座に切り替わる」ようにする。
+        updateSessionIdentifierState(id: snapshot.sessionID, readableID: snapshot.sessionReadableID)
         isCaptureActive = false
         currentWheel = nil
         currentZone = nil

@@ -143,6 +143,25 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Session identifiers (Session ID / UUID)") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Session ID は人が読める短いラベル、UUID は機械向けの絶対識別子です。両方を残すことで、測定担当者はラベルで会話し、管理者や開発者は UUID で衝突なくログを突き合わせられます。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("クラウドにアップロードされた CSV にも両者を埋め込みます。アップロード済みファイル単体でも、いつ・どの端末で記録された計測か追跡できるようにしています。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text("読み方の目安: ラベルは '20240605-142310_IPHONE-1A2B_X7K9' のように日時+端末+短いランダム値。UUID は '550e8400-e29b-41d4-a716-446655440000' のような固定長文字列で、ログ連携やサポート問い合わせで引用してください。")
+                            .font(.footnote.monospaced())
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+
                 Section("Meta Input") {
                     Picker("Mode", selection: Binding(
                         get: { settings.metaInputMode },

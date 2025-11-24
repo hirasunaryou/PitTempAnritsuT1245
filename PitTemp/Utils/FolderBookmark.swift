@@ -99,26 +99,19 @@ final class FolderBookmark: ObservableObject {
     }
 
     @Published var lastUploadedDestination: URL? = nil
-    func upload(file originalCSV: URL, metadata: DriveCSVMetadata? = nil) {
+    func upload(file originalCSV: URL, metadata: DriveCSVMetadata) {
         // 連打ガード
         guard case .idle = statusLabel else { return }
         statusLabel = .uploading
 
         let handled = withAccess { baseFolder -> Bool in
             // 日付フォルダ（YYYY-MM-DD）を「指定フォルダ直下」に作る
-            let dayName: String
-            if let metadata {
-                dayName = metadata.dayFolderName
-            } else {
-                dayName = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
-            }
+            let dayName = metadata.dayFolderName
             var destinationFolder = baseFolder.appendingPathComponent(dayName, isDirectory: true)
 
-            if let metadata {
-                let deviceComponent = metadata.deviceID.sanitizedPathComponent()
-                if !deviceComponent.isEmpty {
-                    destinationFolder = destinationFolder.appendingPathComponent(deviceComponent, isDirectory: true)
-                }
+            let deviceComponent = metadata.deviceID.sanitizedPathComponent()
+            if !deviceComponent.isEmpty {
+                destinationFolder = destinationFolder.appendingPathComponent(deviceComponent, isDirectory: true)
             }
 
             do {
@@ -129,7 +122,11 @@ final class FolderBookmark: ObservableObject {
                 let isoFormatter = ISO8601DateFormatter()
                 isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
                 let uploadedISO = isoFormatter.string(from: Date())
-                let dataToWrite = csvDataWithUploadedTimestamp(from: originalCSV, uploadedISO: uploadedISO)
+                let dataToWrite = csvDataWithUploadedTimestamp(
+                    from: originalCSV,
+                    uploadedISO: uploadedISO,
+                    metadata: metadata
+                )
 
                 try coordinateWrite(
                     destination: dest,
@@ -163,13 +160,26 @@ final class FolderBookmark: ObservableObject {
     // MARK: - Helpers
 
     /// 既存 CSV（wheel-flat 形式想定）に UPLOADED_AT_ISO を埋め込んだ Data を返す
-    private func csvDataWithUploadedTimestamp(from original: URL, uploadedISO: String) -> Data {
+    ///
+    /// - Parameters:
+    ///   - original: 元の CSV URL。既存の 17〜19 列を尊重しつつ欠損を補う。
+    ///   - uploadedISO: アップロード時刻の ISO 8601 文字列。
+    ///   - metadata: セッション ID やラベルを埋め戻すためのメタ情報。クラウドに
+    ///     上げた CSV 単体でもセッションを特定できるようにする。
+    private func csvDataWithUploadedTimestamp(
+        from original: URL,
+        uploadedISO: String,
+        metadata: DriveCSVMetadata
+    ) -> Data {
         guard let text = try? String(contentsOf: original, encoding: .utf8),
               let firstNL = text.firstIndex(of: "\n")
         else {
             return (try? Data(contentsOf: original)) ?? Data()
         }
         let header = String(text[..<firstNL])
+
+        // 既定のヘッダ構造。読みやすい Session Label と機械判定用 UUID を並べて残す。
+        let expectedHeader = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO,SESSION_UUID,SESSION_LABEL"
 
         // 期待ヘッダ: “…,UPLOADED_AT_ISO” まで含む
         guard header.hasPrefix("TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO")
@@ -180,11 +190,20 @@ final class FolderBookmark: ObservableObject {
         let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         let body = lines.dropFirst().map { line -> String in
             var cols = splitCSV(line)
-            if cols.count >= 17 { cols[16] = uploadedISO }
+
+            // 必要な列数 (19) を満たさない場合は空欄で埋める。古い CSV もここで補完。
+            if cols.count < 19 { cols.append(contentsOf: Array(repeating: "", count: 19 - cols.count)) }
+
+            // UPLOADED_AT_ISO を上書きし、セッションの識別情報が欠けていれば補う。
+            cols[16] = uploadedISO
+            if cols[17].isEmpty { cols[17] = metadata.sessionID.uuidString }
+            if cols[18].isEmpty { cols[18] = metadata.sessionReadableID }
+
             return cols.joined(separator: ",")
         }.joined(separator: "\n")
 
-        let stamped = ([header, body].joined(separator: "\n") + "\n")
+        let stampedHeader = header == expectedHeader ? header : expectedHeader
+        let stamped = ([stampedHeader, body].joined(separator: "\n") + "\n")
         return Data(stamped.utf8)
     }
 

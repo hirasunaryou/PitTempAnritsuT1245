@@ -37,6 +37,7 @@ final class CSVExporterTests: XCTestCase {
             sessionStart: Date(timeIntervalSince1970: 0),
             deviceName: "AnritsuM-試作#1",
             sessionID: sessionID,
+            sessionReadableID: "19691231-235959_DEV-DEV1_TEST",
             deviceIdentity: DeviceIdentity(id: "dev", name: "デバイス")
         )
 
@@ -53,5 +54,7 @@ final class CSVExporterTests: XCTestCase {
         // 旧 wflat ヘッダーが書き込まれていることを軽く確認。
         let contents = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(contents.hasPrefix("TRACK,DATE,CAR"))
+        XCTAssertTrue(contents.contains("SESSION_UUID"))
+        XCTAssertTrue(contents.contains(sessionID.uuidString))
     }
 }

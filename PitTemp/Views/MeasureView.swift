@@ -2229,9 +2229,11 @@ struct MeasureView: View {
     // 計測者が「いま編集しているセッション」をさっと確認できる控えめな表示。
     // 履歴モードで過去データを開いているときも即時で切り替わるよう、
     // ViewModel 側の @Published プロパティを監視している。
+    // "UUID が途切れて読めない" という不安を避けるため、短縮せず全文を複数行で表示し、
+    // textSelection を有効化してコピーペーストもできるようにしている。
     private var sessionIdentifierRow: some View {
         let readable = vm.sessionReadableIDForUI
-        let uuidPrefix = vm.sessionUUIDForUI.uuidString.prefix(8)
+        let uuidFull = vm.sessionUUIDForUI.uuidString
 
         return VStack(alignment: .leading, spacing: 2) {
             Label("Session ID / 現在のセッション", systemImage: "barcode.viewfinder")
@@ -2242,9 +2244,17 @@ struct MeasureView: View {
                 Text(readable.isEmpty ? "--" : readable)
                     .font(.caption.monospaced())
                     .foregroundStyle(.primary)
-                Text("UUID: \(uuidPrefix)…")
+                    .textSelection(.enabled)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("UUID: \(uuidFull)")
                     .font(.caption2.monospaced())
                     .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if vm.loadedHistorySummary != nil {

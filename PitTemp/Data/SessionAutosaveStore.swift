@@ -289,7 +289,9 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
             perWheel[wheel] = acc
         }
 
-        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO\n"
+        // 旧式 CSV と互換性を保ちつつ、後追いデバッグ用に Session ID/Readable ID を末尾に残す。
+        // これで「この行はどの計測セッションに属するのか」をファイル単体で辿れる。
+        var csv = "TRACK,DATE,CAR,DRIVER,TYRE,TIME,LAP,CHECKER,WHEEL,OUT,CL,IN,IP_KPA,MEMO,SESSION_START_ISO,EXPORTED_AT_ISO,UPLOADED_AT_ISO,SESSION_UUID,SESSION_LABEL\n"
 
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime]
@@ -319,7 +321,9 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
                 memo,
                 sessionISO,
                 exportedISO,
-                uploadedISO
+                uploadedISO,
+                snapshot.sessionID.uuidString,
+                snapshot.sessionReadableID.replacingOccurrences(of: ",", with: " ")
             ].joined(separator: ",")
             csv += row + "\n"
         }

@@ -103,6 +103,10 @@ final class SessionViewModel: ObservableObject {
     @Published private(set) var sessionResetID = UUID()
     @Published private(set) var loadedHistorySummary: SessionHistorySummary? = nil
 
+    /// 履歴閲覧・編集中かどうかを ViewModel 側でも判定できるようにする。
+    /// これにより「ライブ計測のオートセーブを過去データで上書きしてしまう」事故を防ぐ。
+    private var isHistoryModeActive: Bool { loadedHistorySummary != nil }
+
     // MARK: - 設定値（SettingsStore への窓口：同名で差し替え）
     private var autoStopLimitSec: Int { settings.validatedAutoStopLimitSec }
     private var chartWindowSec: Double { settings.chartWindowSec }
@@ -362,8 +366,12 @@ final class SessionViewModel: ObservableObject {
             if enableICloudUpload {
                 fileCoordinator.uploadIfPossible(export)
             }
-            persistAutosaveNow()
-            autosaveStore.archiveLatest()
+            // 履歴編集モードではライブセッションのオートセーブ／アーカイブを
+            // 汚染しない。あくまで手元で CSV を出すだけにとどめる。
+            if !isHistoryModeActive {
+                persistAutosaveNow()
+                autosaveStore.archiveLatest()
+            }
         } catch {
             print("CSV export error:", error)
         }
@@ -520,12 +528,17 @@ final class SessionViewModel: ObservableObject {
     }
 
     func persistAutosaveNow() {
+        // 履歴モード中は「ライブセッションの状態保存」そのものを無効化する。
+        // 現在の計測を再開したときに、過去データで上書きされないようにするため。
+        guard !isHistoryModeActive else { return }
         autosaveWorkItem?.cancel()
         persistAutosave()
     }
 
     private func scheduleAutosave(reason: AutosaveReason) {
-        guard !isRestoringAutosave else { return }
+        // 履歴データを眺めたり修正したりしている間は、ライブ計測用のオートセーブ
+        // ファイルを汚さないように完全にスキップする。
+        guard !isRestoringAutosave, !isHistoryModeActive else { return }
         autosaveWorkItem?.cancel()
 
         let work = DispatchWorkItem { [weak self] in
@@ -547,6 +560,9 @@ final class SessionViewModel: ObservableObject {
     }
 
     private func persistAutosave() {
+        // 上位で履歴モードをチェックしているが、ここでも二重チェックを置いて
+        // 安全側に倒す。万一の直接呼び出しでもライブデータを壊さない。
+        guard !isHistoryModeActive else { return }
         let snapshot = SessionSnapshot(
             meta: meta,
             results: results,

@@ -45,7 +45,16 @@ final class CSVExporter: CSVExporting {
         let uploadsDir = base.appendingPathComponent("PitTempUploads", isDirectory: true)
         let day = Self.dayString(from: sessionStart)
         let dayDir = uploadsDir.appendingPathComponent(day, isDirectory: true)
-        let deviceDir = dayDir.appendingPathComponent(deviceIdentity.id.sanitizedPathComponent(), isDirectory: true)
+
+        // UUID そのままだと 36 文字以上の長さになるため、
+        // ユーザーが Finder / ファイルアプリで扱いやすいように短縮版を使用する。
+        // 端末名（読めるラベル）と短縮 ID の両方を含めることで、
+        // 人間にとってのわかりやすさと重複しにくさのバランスを取っている。
+        let deviceDirName = Self.deviceDirectoryName(
+            deviceIdentity: deviceIdentity,
+            deviceName: deviceName
+        )
+        let deviceDir = dayDir.appendingPathComponent(deviceDirName, isDirectory: true)
 
         try FileManager.default.createDirectory(at: deviceDir, withIntermediateDirectories: true)
 
@@ -108,6 +117,33 @@ final class CSVExporter: CSVExporting {
 
         try csv.data(using: .utf8)!.write(to: url, options: .atomic)
         return url
+    }
+
+    /// デバイスごとのフォルダ名を生成するヘルパ。
+    /// - Parameters:
+    ///   - deviceIdentity: UUID を含む識別情報。
+    ///   - deviceName: ユーザーが付けた端末名（nil の場合は識別情報の name を利用）。
+    /// - Returns: 読みやすさと一意性のバランスを取った短めのフォルダ名。
+    private static func deviceDirectoryName(deviceIdentity: DeviceIdentity, deviceName: String?) -> String {
+        // UUID の先頭 8 文字だけ抜き出して短いままでも識別できるようにする。
+        let shortID = deviceIdentity.id.sanitizedPathComponent(limit: 8)
+        // 端末名がある場合は最大 24 文字に抑えて読みやすさを優先。
+        let readableName = (deviceName ?? deviceIdentity.name).sanitizedPathComponent(limit: 24)
+
+        switch (readableName.isEmpty, shortID.isEmpty) {
+        case (false, false):
+            // 読める名前 + 短縮 ID のハイブリッド。
+            return "\(readableName)-\(shortID)"
+        case (false, true):
+            // ID が取れない場合でも人が読める名前だけで保存できるようにする。
+            return readableName
+        case (true, false):
+            // 名前が空でも短縮 ID だけで十分に衝突を避けられる。
+            return shortID
+        case (true, true):
+            // ここまで来たら何も情報がないのでフォールバック。
+            return "device"
+        }
     }
 
     // 共通: iCloud Documents or ローカル Documents

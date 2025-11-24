@@ -62,10 +62,10 @@ final class SettingsStore: ObservableObject {
         static let seniorPressureFontScale = "pref.senior.pressureFontScale"
         static let zoneOrder = "pref.zoneOrder"
         static let autofillDateTime = "pref.autofillDateTime"
-        static let hr2500ID = "hr2500.id"
         static let enableICloudUpload = "cloud.enableICloudUpload"
         static let enableGoogleDriveUpload = "cloud.enableDriveUpload"
         static let uploadAfterSave = "cloud.uploadAfterSave"
+        static let deviceNickname = "device.nickname"
         static let metaInputMode = "pref.metaInputMode"
         static let metaKeywordTrack = "pref.metaKeyword.track"
         static let metaKeywordDate = "pref.metaKeyword.date"
@@ -96,7 +96,8 @@ final class SettingsStore: ObservableObject {
     @Published private var seniorPressureFontScaleRaw: Double { didSet { save(seniorPressureFontScaleRaw, key: Keys.seniorPressureFontScale) } }
     @Published private var zoneOrderRaw: Int { didSet { save(zoneOrderRaw, key: Keys.zoneOrder) } }
     @Published var autofillDateTime: Bool { didSet { save(autofillDateTime, key: Keys.autofillDateTime) } }
-    @Published var hr2500ID: String { didSet { save(hr2500ID, key: Keys.hr2500ID) } }
+    /// ユーザーが端末に付けたニックネーム。フォルダ名やCSVに反映して「自分のデータ」を探しやすくする。
+    @Published var deviceNickname: String { didSet { save(deviceNickname, key: Keys.deviceNickname) } }
     @Published var enableICloudUpload: Bool { didSet { save(enableICloudUpload, key: Keys.enableICloudUpload) } }
     @Published var enableGoogleDriveUpload: Bool { didSet { save(enableGoogleDriveUpload, key: Keys.enableGoogleDriveUpload) } }
     @Published var uploadAfterSave: Bool { didSet { save(uploadAfterSave, key: Keys.uploadAfterSave) } }
@@ -130,7 +131,7 @@ final class SettingsStore: ObservableObject {
         seniorPressureFontScaleRaw = store.value(forKey: Keys.seniorPressureFontScale, default: 1.0)
         zoneOrderRaw = store.value(forKey: Keys.zoneOrder, default: 0)
         autofillDateTime = store.value(forKey: Keys.autofillDateTime, default: true)
-        hr2500ID = store.value(forKey: Keys.hr2500ID, default: "")
+        deviceNickname = store.value(forKey: Keys.deviceNickname, default: "")
         enableICloudUpload = store.value(forKey: Keys.enableICloudUpload, default: true)
         enableGoogleDriveUpload = store.value(forKey: Keys.enableGoogleDriveUpload, default: false)
         uploadAfterSave = store.value(forKey: Keys.uploadAfterSave, default: true)

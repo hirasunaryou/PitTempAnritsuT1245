@@ -2048,8 +2048,12 @@ struct MeasureView: View {
     /// - Note: ここで生成する `SaveStatusBanner` は「ローカルの保存先」と「クラウドの転送状況」を
     ///         1 つのポップアップに集約し、ユーザーが 1 タップで全体像を把握できるようにする。
     private func handleSaveTapped() {
+        // Settings で入力した端末ニックネームを最優先で採用し、空の場合のみ BLE 側のデバイス名を使用する。
+        // こうすることで、保存フォルダ名から「自分が測ったファイル」をすぐに見分けられるようにしている。
+        let preferredDeviceName = settings.deviceNickname.isEmpty ? bluetooth.deviceName : settings.deviceNickname
+
         // 1) CSV を生成
-        guard let export = vm.exportCSV(deviceName: bluetooth.deviceName) else {
+        guard let export = vm.exportCSV(deviceName: preferredDeviceName) else {
             presentSaveStatus(title: "Save failed", message: "CSV could not be generated.")
             return
         }

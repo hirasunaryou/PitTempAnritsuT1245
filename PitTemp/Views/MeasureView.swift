@@ -44,6 +44,7 @@ struct MeasureView: View {
     @State private var pendingExportForUpload: SessionFileExport? = nil
     @State private var skipCloudUploadThisSession = false
     @State private var saveLocationMessage: String? = nil
+    @State private var showSaveLocationPopup = false
     // レポート表示用のデータを1つのまとまりとして保持する。
     // 最初の表示で空シート（真っ黒な画面）になるのを防ぐため、
     // シートのトリガーとデータの準備を同じ状態にまとめて扱う。"item" のバインディングは
@@ -385,6 +386,16 @@ struct MeasureView: View {
         .alert("Upload complete", isPresented: $showUploadAlert) {
             Button("OK", role: .cancel) { }
         } message: { Text(uploadMessage) }
+        .alert(
+            "Save location",
+            isPresented: $showSaveLocationPopup,
+            presenting: saveLocationMessage
+        ) { _ in
+            Button("OK", role: .cancel) { }
+        } message: { message in
+            // ポップアップで全文を見せることで、長いパスを無理にカード内で折り返さない。
+            Text(message)
+        }
         .alert(
             "History error / 履歴エラー",
             isPresented: Binding(
@@ -2059,8 +2070,6 @@ struct MeasureView: View {
 
     private var bottomBar: some View {
         HStack(spacing: 12) {
-            Spacer(minLength: 0)
-
             Button {
                 showNextSessionDialog = true
             } label: {
@@ -2068,8 +2077,10 @@ struct MeasureView: View {
             }
             .buttonStyle(.bordered)
 
-            Button("Save (CSV)") { showExportOptions = true }
+            Button("Save") { showExportOptions = true }
             .buttonStyle(.borderedProminent)
+
+            Spacer(minLength: 0)
 
             VStack(alignment: .trailing, spacing: 4) {
                 uploadStatusView
@@ -2244,11 +2255,18 @@ struct MeasureView: View {
     private var saveDestinationView: some View {
         if let message = saveLocationMessage {
             // ローカル保存先を即時にフィードバックし、"どこにある?" を解消する。
-            Label(message, systemImage: connectivity.isOnline ? "externaldrive.badge.icloud" : "externaldrive.fill")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .multilineTextAlignment(.trailing)
+            Button {
+                // 長いパス文字列はポップアップで全文を見せ、ボタンの位置がズレないようにする。
+                showSaveLocationPopup = true
+            } label: {
+                Label(message, systemImage: connectivity.isOnline ? "externaldrive.badge.icloud" : "externaldrive.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.trailing)
+            }
+            .buttonStyle(.plain)
         }
     }
 

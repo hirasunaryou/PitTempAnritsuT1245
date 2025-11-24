@@ -29,7 +29,14 @@ final class SessionViewModel: ObservableObject {
     private var autosaveWorkItem: DispatchWorkItem?
     private var isRestoringAutosave = false
     private var currentSessionID = UUID()
+    private var currentSessionReadableID: String = ""
     private var bluetoothCancellable: AnyCancellable?
+
+    // UI からも確認できるよう公開しておく。@Published にすることで
+    // 「新しいセッションへ切り替えた」「履歴を復元した」といった変化を
+    // 画面が即座に検知できる。読み取り専用のため `private(set)` を付ける。
+    @Published private(set) var sessionReadableIDForUI: String = ""
+    @Published private(set) var sessionUUIDForUI: UUID = UUID()
 
     init(exporter: CSVExporting = CSVExporter(),
          settings: SessionSettingsProviding? = nil,
@@ -46,6 +53,16 @@ final class SessionViewModel: ObservableObject {
         } else {
             self.settings = SettingsStore()
         }
+
+        // 起動直後から「現在のセッションID」を画面に出せるよう、初期値をまとめて設定。
+        // ここでは self の完全初期化後に公開用プロパティへ反映させる。
+        let initialLabel = SessionIdentifierFormatter.makeReadableID(
+            createdAt: Date(),
+            device: deviceIdentity,
+            seed: currentSessionID
+        )
+        updateSessionIdentifierState(id: currentSessionID, readableID: initialLabel)
+
         restoreAutosaveIfAvailable()
     }
 
@@ -95,6 +112,30 @@ final class SessionViewModel: ObservableObject {
     private var minAdvanceSec: Double { settings.minAdvanceSec }
     private var autofillDateTime: Bool { settings.autofillDateTime }
     private var enableICloudUpload: Bool { settings.enableICloudUpload }
+
+    /// Refresh both the UUID (machine key) and the human-friendly label that is
+    /// shown in history, exports, and debug logs. Keeping them paired here avoids
+    /// accidental drift between what operators see and what gets persisted.
+    private func regenerateSessionIdentifiers(at date: Date = Date()) {
+        let freshID = UUID()
+        let freshLabel = SessionIdentifierFormatter.makeReadableID(
+            createdAt: date,
+            device: deviceIdentity,
+            seed: freshID
+        )
+        updateSessionIdentifierState(id: freshID, readableID: freshLabel)
+    }
+
+    /// UUID と可読ラベルを一箇所で同期させ、公開用プロパティも同時に更新する。
+    /// - Parameters:
+    ///   - id: 機械向けの UUID。
+    ///   - readableID: 人が読めるラベル（デバッグや履歴表示用）。
+    private func updateSessionIdentifierState(id: UUID, readableID: String) {
+        currentSessionID = id
+        currentSessionReadableID = readableID
+        sessionUUIDForUI = id
+        sessionReadableIDForUI = readableID
+    }
 
       
     // タイマ
@@ -158,7 +199,7 @@ final class SessionViewModel: ObservableObject {
         if hadResults {
             persistAutosaveNow()
             autosaveStore.archiveLatest()
-            archiveMessage = "前の計測セッション (\(currentSessionID.uuidString)) をアーカイブしました。\nArchived previous session before starting a new one."
+            archiveMessage = "前の計測セッション (\(currentSessionReadableID)) をアーカイブしました。\nArchived previous session before starting a new one."
         }
 
         let preservedMeta: MeasureMeta
@@ -196,7 +237,7 @@ final class SessionViewModel: ObservableObject {
 
         loadedHistorySummary = nil
 
-        currentSessionID = UUID()
+        regenerateSessionIdentifiers(at: Date())
         persistAutosaveNow()
 
         sessionResetID = UUID()
@@ -305,6 +346,7 @@ final class SessionViewModel: ObservableObject {
                 context: SessionFileContext(
                     meta: meta,
                     sessionID: currentSessionID,
+                    sessionReadableID: currentSessionReadableID,
                     sessionBeganAt: sessionStart,
                     deviceIdentity: deviceIdentity,
                     deviceName: deviceName
@@ -512,6 +554,7 @@ final class SessionViewModel: ObservableObject {
             wheelPressures: wheelPressures,
             sessionBeganAt: sessionBeganAt,
             sessionID: currentSessionID,
+            sessionReadableID: currentSessionReadableID,
             originDeviceID: deviceIdentity.id,
             originDeviceName: deviceIdentity.name
         )
@@ -528,6 +571,7 @@ final class SessionViewModel: ObservableObject {
             wheelPressures: wheelPressures,
             sessionBeganAt: sessionBeganAt,
             sessionID: currentSessionID,
+            sessionReadableID: currentSessionReadableID,
             originDeviceID: deviceIdentity.id,
             originDeviceName: deviceIdentity.name
         )
@@ -545,7 +589,9 @@ final class SessionViewModel: ObservableObject {
         wheelMemos = snapshot.wheelMemos
         wheelPressures = snapshot.wheelPressures
         sessionBeganAt = snapshot.sessionBeganAt
-        currentSessionID = snapshot.sessionID
+        // ここで UUID/ラベル/公開用プロパティをまとめて同期し、
+        // 「履歴を開いたらセッションID表示が即座に切り替わる」ようにする。
+        updateSessionIdentifierState(id: snapshot.sessionID, readableID: snapshot.sessionReadableID)
         isCaptureActive = false
         currentWheel = nil
         currentZone = nil
@@ -602,6 +648,6 @@ final class SessionViewModel: ObservableObject {
         case .resetEverything:
             base = "計測結果とメタ情報をすべて初期化しました。\nReset results and meta for the next vehicle."
         }
-        return base + "\n\nSession ID: \(currentSessionID.uuidString)"
+        return base + "\n\nSession ID: \(currentSessionReadableID) (UUID: \(currentSessionID.uuidString))"
     }
 }

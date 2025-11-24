@@ -11,6 +11,7 @@ protocol CSVExporting {
         sessionStart: Date,
         deviceName: String?,
         sessionID: UUID,
+        sessionReadableID: String,
         deviceIdentity: DeviceIdentity
     ) throws -> URL
 

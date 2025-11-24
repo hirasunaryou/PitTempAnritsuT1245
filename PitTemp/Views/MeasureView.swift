@@ -2056,6 +2056,7 @@ struct MeasureView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     bleHeader
                     captureStatusRow
+                    sessionIdentifierRow
                 }
 
                 Spacer(minLength: 0)
@@ -2222,6 +2223,45 @@ struct MeasureView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
+        }
+    }
+
+    // 計測者が「いま編集しているセッション」をさっと確認できる控えめな表示。
+    // 履歴モードで過去データを開いているときも即時で切り替わるよう、
+    // ViewModel 側の @Published プロパティを監視している。
+    // "UUID が途切れて読めない" という不安を避けるため、短縮せず全文を複数行で表示し、
+    // textSelection を有効化してコピーペーストもできるようにしている。
+    private var sessionIdentifierRow: some View {
+        let readable = vm.sessionReadableIDForUI
+        let uuidFull = vm.sessionUUIDForUI.uuidString
+
+        return VStack(alignment: .leading, spacing: 2) {
+            Label("Session ID / 現在のセッション", systemImage: "barcode.viewfinder")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(readable.isEmpty ? "--" : readable)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Text("UUID: \(uuidFull)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.75)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if vm.loadedHistorySummary != nil {
+                Text("閲覧/編集モードで過去セッションを開いています。\nYou are viewing an archived session.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 

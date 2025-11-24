@@ -5,6 +5,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
     let createdAt: Date
     let sessionBeganAt: Date?
     let sessionID: UUID
+    let sessionReadableID: String
     let track: String
     let date: String
     let car: String
@@ -25,6 +26,10 @@ struct SessionHistorySummary: Identifiable, Equatable {
         let primary = car.ifEmpty("Unknown car")
         let trackText = track.ifEmpty("-")
         return "\(primary) · \(trackText)"
+    }
+
+    var displaySessionID: String {
+        sessionReadableID.ifEmpty(String(sessionID.uuidString.prefix(8)))
     }
 
     var displayDetail: String {
@@ -85,6 +90,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
             checker,
             tyre,
             lap,
+            sessionReadableID,
             sessionID.uuidString,
             originDeviceID,
             originDeviceName,
@@ -155,6 +161,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
             createdAt: snapshot.createdAt,
             sessionBeganAt: snapshot.sessionBeganAt,
             sessionID: snapshot.sessionID,
+            sessionReadableID: snapshot.sessionReadableID,
             track: snapshot.meta.track,
             date: snapshot.meta.date,
             car: snapshot.meta.car,
@@ -255,6 +262,7 @@ final class SessionHistoryStore: ObservableObject {
                     createdAt: snapshot.createdAt,
                     sessionBeganAt: snapshot.sessionBeganAt,
                     sessionID: snapshot.sessionID,
+                    sessionReadableID: snapshot.sessionReadableID,
                     track: snapshot.meta.track,
                     date: snapshot.meta.date,
                     car: snapshot.meta.car,
@@ -349,8 +357,10 @@ private extension SessionHistoryStore {
             try? fileManager.createDirectory(at: dayDirectory, withIntermediateDirectories: true)
         }
 
+        let labelSlug = snapshot.sessionReadableID.ifEmpty(snapshot.sessionID.uuidString)
+            .replacingOccurrences(of: "[^A-Za-z0-9_-]", with: "-", options: .regularExpression)
         let destination = dayDirectory
-            .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+            .appendingPathComponent("session-\(labelSlug)-\(snapshot.sessionID.uuidString)")
             .appendingPathExtension("json")
 
         if fileManager.fileExists(atPath: destination.path) {

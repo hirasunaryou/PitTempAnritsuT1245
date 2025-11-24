@@ -26,6 +26,5 @@ protocol TemperatureSensorClient: ObservableObject {
     func stopScan()
     func connect(deviceID: String)
     func disconnect()
-    func requestOnce()
     func setDeviceTime(to date: Date)
 }

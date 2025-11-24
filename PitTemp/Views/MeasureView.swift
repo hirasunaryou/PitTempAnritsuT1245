@@ -11,6 +11,7 @@ struct MeasureView: View {
     @EnvironmentObject var settings: SettingsStore
     @EnvironmentObject var bluetooth: BluetoothViewModel
     @EnvironmentObject var driveService: GoogleDriveService
+    @EnvironmentObject var connectivity: ConnectivityMonitor
 
     @StateObject private var speech = SpeechMemoManager()
     @StateObject private var pressureSpeech = SpeechMemoManager()
@@ -39,6 +40,10 @@ struct MeasureView: View {
     @State private var historyError: String? = nil
     @State private var historyEditingEnabled = false
     @State private var activePressureWheel: WheelPos? = nil
+    @State private var showExportOptions = false
+    @State private var pendingExportForUpload: SessionFileExport? = nil
+    @State private var skipCloudUploadThisSession = false
+    @State private var saveLocationMessage: String? = nil
     // レポート表示用のデータを1つのまとまりとして保持する。
     // 最初の表示で空シート（真っ黒な画面）になるのを防ぐため、
     // シートのトリガーとデータの準備を同じ状態にまとめて扱う。"item" のバインディングは
@@ -340,6 +345,15 @@ struct MeasureView: View {
         .onChange(of: showHistorySheet) { _, presenting in
             if presenting { history.refresh() }
         }
+        .onChange(of: connectivity.isOnline) { _, online in
+            // "圏外で保存したあと、電波が戻ったら自動アップロード" を実現する。
+            if online, let pending = pendingExportForUpload, !skipCloudUploadThisSession {
+                uploadExport(pending)
+                pendingExportForUpload = nil
+                uploadMessage = "Back online. Uploading saved CSV…"
+                showUploadAlert = true
+            }
+        }
         .onReceive(vm.$sessionResetID) { _ in
             selectedWheel = .FL
             manualValues.removeAll()
@@ -381,6 +395,30 @@ struct MeasureView: View {
             Button("OK") { historyError = nil }
         } message: {
             Text(historyError ?? "")
+        }
+        .confirmationDialog(
+            "保存方法を選択 / Choose how to save",
+            isPresented: $showExportOptions,
+            titleVisibility: .visible
+        ) {
+            Button("端末に保存 / Save to device") {
+                performExport(uploadRequested: false)
+            }
+            if settings.enableGoogleDriveUpload || settings.enableICloudUpload {
+                let uploadLabel = connectivity.isOnline ? "保存してクラウドへ / Save & upload now" : "あとで電波が戻ったらアップロード / Save & upload when online"
+                Button(uploadLabel) {
+                    performExport(uploadRequested: true)
+                }
+            }
+            Button(skipCloudUploadThisSession ? "このセッションはクラウドに上げない: ON" : "このセッションはクラウドに上げない: OFF") {
+                skipCloudUploadThisSession.toggle()
+                if skipCloudUploadThisSession { pendingExportForUpload = nil }
+            }
+            Button("キャンセル / Cancel", role: .cancel) { }
+        } message: {
+            Text("""
+            Save = 端末の書類フォルダに CSV を残します。\nUpload を選ぶと、オンライン時のみ iCloud/Drive に送信します。\nオフライン中でも保存場所を表示するので、"どこに置かれたか" を確認できます。
+            """)
         }
         .onChange(of: folderBM.statusLabel) { _, newVal in
             if case .done = newVal {
@@ -2030,21 +2068,66 @@ struct MeasureView: View {
             }
             .buttonStyle(.bordered)
 
-            Button("Export CSV") {
-                // 1) CSVを両フォーマットで生成（デバイス名を付与）
-                vm.exportCSV(deviceName: bluetooth.deviceName)
-
-                if settings.enableGoogleDriveUpload, let metadata = vm.lastCSVMetadata, let url = vm.lastCSV {
-                    Task { await driveService.upload(csvURL: url, metadata: metadata) }
-                }
-            }
+            Button("Save (CSV)") { showExportOptions = true }
             .buttonStyle(.borderedProminent)
 
-            uploadStatusView
+            VStack(alignment: .trailing, spacing: 4) {
+                uploadStatusView
+                saveDestinationView
+            }
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
+    }
+
+    /// Export ボタンの実際の処理を 1 か所にまとめ、オフライン時のフォールバックも含めて見通しを良くする。
+    private func performExport(uploadRequested: Bool) {
+        // "CSV がどこに保存されたか" を明示し、複雑なパス文字列の不安を取り除く。
+        guard let export = vm.exportCSV(deviceName: bluetooth.deviceName, uploadToCloud: false) else {
+            uploadMessage = "Failed to save CSV."
+            showUploadAlert = true
+            return
+        }
+
+        let locationHint = formattedLocation(for: export.url)
+        saveLocationMessage = "Saved to: \(locationHint)"
+
+        // クラウドに上げないと宣言している場合は、ローカル保存だけで終了。
+        guard uploadRequested, !skipCloudUploadThisSession else {
+            uploadMessage = saveLocationMessage ?? "Saved locally."
+            showUploadAlert = true
+            pendingExportForUpload = nil
+            return
+        }
+
+        if connectivity.isOnline {
+            uploadExport(export)
+            uploadMessage = "\(saveLocationMessage ?? "")\nUploading now…"
+            showUploadAlert = true
+        } else {
+            // 圏外時はローカル保存に徹し、接続が戻ったら自動アップロードするようキューに乗せる。
+            pendingExportForUpload = export
+            uploadMessage = "\(saveLocationMessage ?? "")\nOffline: will upload when network is back."
+            showUploadAlert = true
+        }
+    }
+
+    /// iCloud 共有フォルダと Google Drive の両方に向けてアップロードを発火する。
+    /// - Parameter export: CSV の保存先とメタデータをまとめた DTO。
+    private func uploadExport(_ export: SessionFileExport) {
+        if settings.enableICloudUpload {
+            folderBM.upload(file: export.url, metadata: export.metadata)
+        }
+        if settings.enableGoogleDriveUpload {
+            Task { await driveService.upload(csvURL: export.url, metadata: export.metadata) }
+        }
+    }
+
+    /// 書類フォルダ内のパスをユーザー向けに読みやすく整形する。
+    private func formattedLocation(for url: URL) -> String {
+        let components = url.pathComponents.suffix(2).joined(separator: "/")
+        return "Documents/\(components)"
     }
 
 
@@ -2154,6 +2237,18 @@ struct MeasureView: View {
                 .foregroundStyle(.secondary)
         } else {
             EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var saveDestinationView: some View {
+        if let message = saveLocationMessage {
+            // ローカル保存先を即時にフィードバックし、"どこにある?" を解消する。
+            Label(message, systemImage: connectivity.isOnline ? "externaldrive.badge.icloud" : "externaldrive.fill")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.trailing)
         }
     }
 

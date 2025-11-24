@@ -13,6 +13,7 @@ struct PitTempApp: App {
     @StateObject private var registry: DeviceRegistry
     @StateObject private var bluetoothVM: BluetoothViewModel
     @StateObject private var uiLog: UILogStore
+    @StateObject private var connectivity = ConnectivityMonitor()
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -49,6 +50,7 @@ struct PitTempApp: App {
                     .environmentObject(settings)
                     .environmentObject(folderBM)
                     .environmentObject(driveService)
+                    .environmentObject(connectivity)
                     .environmentObject(bluetoothVM)
                     .environmentObject(registry)
                     .environmentObject(uiLog)

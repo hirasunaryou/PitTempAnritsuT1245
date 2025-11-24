@@ -336,7 +336,8 @@ final class SessionViewModel: ObservableObject {
 
     // 既定: wflat を保存（Library互換）。
     // 1) DTO にまとめる → 2) ファサードへ渡す → 3) autosave と iCloud へ反映
-    func exportCSV(deviceName: String? = nil) {
+    @discardableResult
+    func exportCSV(deviceName: String? = nil, uploadToCloud: Bool = true) -> SessionFileExport? {
         let sessionStart = sessionBeganAt ?? Date()
 
         if autofillDateTime && meta.date.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -362,8 +363,8 @@ final class SessionViewModel: ObservableObject {
             lastCSV = export.url
             lastCSVMetadata = export.metadata
             print("CSV saved (wflat):", export.url.lastPathComponent)
-            // 設定で許可されていれば、そのまま iCloud へブリッジする。
-            if enableICloudUpload {
+            // 設定で許可されていて、呼び出し側が明示的に許した場合のみ iCloud に送る。
+            if uploadToCloud && enableICloudUpload {
                 fileCoordinator.uploadIfPossible(export)
             }
             // 履歴編集モードではライブセッションのオートセーブ／アーカイブを
@@ -372,8 +373,10 @@ final class SessionViewModel: ObservableObject {
                 persistAutosaveNow()
                 autosaveStore.archiveLatest()
             }
+            return export
         } catch {
             print("CSV export error:", error)
+            return nil
         }
     }
 

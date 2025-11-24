@@ -2077,7 +2077,7 @@ struct MeasureView: View {
                 SaveDestinationDetail(
                     iconName: "icloud.and.arrow.up.fill",
                     title: "iCloud Drive (shared)",
-                    description: iCloudDestinationDescription(for: export.url),
+                    description: iCloudDestinationDescription(for: export),
                     tint: .blue
                 )
             )
@@ -2136,21 +2136,44 @@ struct MeasureView: View {
     }
 
     /// ユーザーに「どこへ保存されたか」を短く伝えるための整形。
-    /// - Returns: ローカル保存先の表示用ラベルとパス（最後の 3 階層のみ抜粋）。
+    /// - Returns: ローカル保存先の表示用ラベルとパス（共有リンクでも完全な階層を表示）。
     private func saveLocationDescription(for url: URL) -> (label: String, path: String) {
         let folder = url.deletingLastPathComponent()
-        // 末尾 3 階層程度を抜き出して、人間が読めるパスにする
-        let components = folder.pathComponents.suffix(3).joined(separator: "/")
+        // サンドボックスの手前を落として、人間が追跡したい階層だけを並べる。
+        let components = readablePathComponents(from: folder).joined(separator: "/")
         let baseLabel = folder.path.contains("Mobile Documents") ? "iCloud Drive" : "On My iPhone"
         return (baseLabel, components)
     }
 
     /// iCloud へのコピー先を表示する説明文を生成する。
     /// - Note: 端末に保存されたパスと区別できるように「shared」などのキーワードを含める。
-    private func iCloudDestinationDescription(for url: URL) -> String {
-        let folder = url.deletingLastPathComponent()
-        let components = folder.pathComponents.suffix(2).joined(separator: "/")
-        return "Shared folder • \(components)"
+    private func iCloudDestinationDescription(for export: SessionFileExport) -> String {
+        guard let base = folderBM.folderURL ?? folderBM.restore() else {
+            return "Shared folder • Not configured"
+        }
+
+        // 共有リンク先のフォルダ階層から日付/端末フォルダ/ファイル名まで全て表示する。
+        let baseComponents = readablePathComponents(from: base)
+        let relativeComponents = [
+            export.metadata.dayFolderName,
+            export.metadata.deviceFolderName,
+            export.url.lastPathComponent
+        ]
+        let fullPath = (baseComponents + relativeComponents).joined(separator: "/")
+        return "Shared folder • \(fullPath)"
+    }
+
+    /// `URL.pathComponents` からサンドボックスやシステム領域を取り除き、ユーザーが知りたい階層だけを返す。
+    /// - Note: iCloud Drive の場合は `.../Documents` より後ろを優先し、共有リンクの下位階層が省略されないようにする。
+    private func readablePathComponents(from folder: URL) -> [String] {
+        let components = folder.pathComponents
+        if let docsIndex = components.lastIndex(of: "Documents"), docsIndex + 1 < components.count {
+            return Array(components.suffix(from: docsIndex + 1))
+        }
+        if let cloudIndex = components.firstIndex(where: { $0.contains("CloudDocs") }), cloudIndex + 1 < components.count {
+            return Array(components.suffix(from: cloudIndex + 1))
+        }
+        return components
     }
 
     /// Google Drive への保存先を説明するための短いテキスト。

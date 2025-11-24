@@ -10,6 +10,9 @@
 import Combine
 import Foundation
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @MainActor
 final class SessionViewModel: ObservableObject {
@@ -353,7 +356,8 @@ final class SessionViewModel: ObservableObject {
                     sessionReadableID: currentSessionReadableID,
                     sessionBeganAt: sessionStart,
                     deviceIdentity: deviceIdentity,
-                    deviceName: deviceName
+                    deviceName: deviceName,
+                    deviceModelLabel: deviceModelLabelForFolder()
                 ),
                 results: results,
                 wheelMemos: wheelMemos,
@@ -377,6 +381,20 @@ final class SessionViewModel: ObservableObject {
             print("CSV export error:", error)
             return nil
         }
+    }
+
+    /// フォルダ名に添える端末機種ラベルを生成。
+    /// - Note: iCloud 側でもローカルと同じ並びになるよう、マーケティング名を空白抜きで短縮する。
+    private func deviceModelLabelForFolder() -> String? {
+#if canImport(UIKit)
+        let identifier = MetaInfo.modelIdentifier()
+        let marketing = MetaInfo.marketingName(for: identifier)
+        let rawLabel = marketing.isEmpty ? identifier : marketing
+        let compact = rawLabel.replacingOccurrences(of: " ", with: "")
+        return compact.sanitizedPathComponent(limit: 20)
+#else
+        return nil
+#endif
     }
 
     // MARK: - 内部処理

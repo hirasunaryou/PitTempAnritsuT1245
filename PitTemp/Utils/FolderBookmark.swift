@@ -11,6 +11,9 @@
 import Foundation
 import SwiftUI
 
+// NOTE: 文字列のパス整形は PathSanitizer.swift の `sanitizedPathComponent` 拡張を共通で利用します。
+//       ここで再定義すると重複シンボルになってしまうため、必ず共通ユーティリティを参照してください。
+
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -109,7 +112,8 @@ final class FolderBookmark: ObservableObject {
             let dayName = metadata.dayFolderName
             var destinationFolder = baseFolder.appendingPathComponent(dayName, isDirectory: true)
 
-            let deviceComponent = metadata.deviceID.sanitizedPathComponent()
+            // CSVExporter で使用したフォルダ名（短縮UUID + ニックネーム + 機種名）をそのまま共有フォルダ側にも適用する。
+            let deviceComponent = metadata.deviceFolderName
             if !deviceComponent.isEmpty {
                 destinationFolder = destinationFolder.appendingPathComponent(deviceComponent, isDirectory: true)
             }
@@ -219,30 +223,6 @@ final class FolderBookmark: ObservableObject {
         }
         out.append(cur)
         return out.map { $0.replacingOccurrences(of: "\"\"", with: "\"") }
-    }
-}
-
-private extension String {
-    func sanitizedPathComponent(limit: Int = 48) -> String {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-
-        let collapsed = trimmed.replacingOccurrences(
-            of: "[^A-Za-z0-9._-]",
-            with: "_",
-            options: .regularExpression
-        )
-
-        let deduped = collapsed
-            .replacingOccurrences(of: "__+", with: "_", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "._-"))
-
-        if limit > 0 && deduped.count > limit {
-            let index = deduped.index(deduped.startIndex, offsetBy: limit)
-            return String(deduped[..<index])
-        }
-
-        return deduped
     }
 }
 

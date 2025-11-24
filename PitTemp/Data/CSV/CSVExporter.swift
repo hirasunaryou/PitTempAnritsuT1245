@@ -36,6 +36,7 @@ final class CSVExporter: CSVExporting {
         wheelPressures: [WheelPos: Double],
         sessionStart: Date,
         deviceName: String?,
+        deviceModelLabel: String?,
         sessionID: UUID,
         sessionReadableID: String,
         deviceIdentity: DeviceIdentity
@@ -52,7 +53,8 @@ final class CSVExporter: CSVExporting {
         // 人間にとってのわかりやすさと重複しにくさのバランスを取っている。
         let deviceDirName = Self.deviceDirectoryName(
             deviceIdentity: deviceIdentity,
-            deviceName: deviceName
+            deviceName: deviceName,
+            deviceModelLabel: deviceModelLabel
         )
         let deviceDir = dayDir.appendingPathComponent(deviceDirName, isDirectory: true)
 
@@ -123,27 +125,28 @@ final class CSVExporter: CSVExporting {
     /// - Parameters:
     ///   - deviceIdentity: UUID を含む識別情報。
     ///   - deviceName: ユーザーが付けた端末名（nil の場合は識別情報の name を利用）。
+    ///   - deviceModelLabel: 機種名やマーケティング名など、端末種別を示す短いラベル。
     /// - Returns: 読みやすさと一意性のバランスを取った短めのフォルダ名。
-    private static func deviceDirectoryName(deviceIdentity: DeviceIdentity, deviceName: String?) -> String {
+    static func deviceDirectoryName(
+        deviceIdentity: DeviceIdentity,
+        deviceName: String?,
+        deviceModelLabel: String? = nil
+    ) -> String {
         // UUID の先頭 8 文字だけ抜き出して短いままでも識別できるようにする。
         let shortID = deviceIdentity.id.sanitizedPathComponent(limit: 8)
         // 端末名がある場合は最大 24 文字に抑えて読みやすさを優先。
         let readableName = (deviceName ?? deviceIdentity.name).sanitizedPathComponent(limit: 24)
+        // 機種名などは 16 文字程度に抑えて補助情報として添える。
+        let modelLabel = (deviceModelLabel ?? "").sanitizedPathComponent(limit: 16)
 
-        switch (readableName.isEmpty, shortID.isEmpty) {
-        case (false, false):
-            // 読める名前 + 短縮 ID のハイブリッド。
-            return "\(readableName)-\(shortID)"
-        case (false, true):
-            // ID が取れない場合でも人が読める名前だけで保存できるようにする。
-            return readableName
-        case (true, false):
-            // 名前が空でも短縮 ID だけで十分に衝突を避けられる。
-            return shortID
-        case (true, true):
-            // ここまで来たら何も情報がないのでフォールバック。
-            return "device"
-        }
+        // 名前・機種・ID の順で優先的に並べて、「読みやすいけれど衝突しにくい」構造を保つ。
+        var pieces: [String] = []
+        if !readableName.isEmpty { pieces.append(readableName) }
+        if !modelLabel.isEmpty { pieces.append(modelLabel) }
+        if !shortID.isEmpty { pieces.append(shortID) }
+
+        if pieces.isEmpty { return "device" }
+        return pieces.joined(separator: "-")
     }
 
     // 共通: iCloud Documents or ローカル Documents
@@ -214,30 +217,6 @@ final class CSVExporter: CSVExporting {
         } catch {
             handle = nil // 準備失敗時は以降の appendLive を無視
         }
-    }
-}
-
-private extension String {
-    func sanitizedPathComponent(limit: Int = 48) -> String {
-        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "" }
-
-        let collapsed = trimmed.replacingOccurrences(
-            of: "[^A-Za-z0-9._-]",
-            with: "_",
-            options: .regularExpression
-        )
-
-        let deduped = collapsed
-            .replacingOccurrences(of: "__+", with: "_", options: .regularExpression)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "._-"))
-
-        if limit > 0 && deduped.count > limit {
-            let index = deduped.index(deduped.startIndex, offsetBy: limit)
-            return String(deduped[..<index])
-        }
-
-        return deduped
     }
 }
 

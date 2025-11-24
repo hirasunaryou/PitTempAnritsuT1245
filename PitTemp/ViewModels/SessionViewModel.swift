@@ -383,18 +383,22 @@ final class SessionViewModel: ObservableObject {
         }
     }
 
-    /// フォルダ名に添える端末機種ラベルを生成。
-    /// - Note: iCloud 側でもローカルと同じ並びになるよう、マーケティング名を空白抜きで短縮する。
+    /// フォルダ名に添える端末ラベルを生成。
+    /// - Note: これまでは機種名（マーケティング名）を入れていたが、
+    ///         型番ごとの差分がわかりにくくメンテナンスも増えるため、
+    ///         「ユーザーが設定アプリで付けた端末名」だけに絞る。
+    ///         deviceDirectoryName 側で短縮IDを足してくれるので、ここは nil を返し
+    ///         「機種名コンポーネント」を完全にスキップする方針とする。
     private func deviceModelLabelForFolder() -> String? {
-#if canImport(UIKit)
-        let identifier = MetaInfo.modelIdentifier()
-        let marketing = MetaInfo.marketingName(for: identifier)
-        let rawLabel = marketing.isEmpty ? identifier : marketing
-        let compact = rawLabel.replacingOccurrences(of: " ", with: "")
-        return compact.sanitizedPathComponent(limit: 20)
-#else
+        #if canImport(UIKit)
+        // UIKit 環境では deviceDirectoryName の第一コンポーネントとして端末名が
+        // 既に渡されるため、機種名は不要。nil を返すことでフォルダ名が
+        // 「端末名-短縮ID」のシンプルな形になる。
         return nil
-#endif
+        #else
+        // macOS Preview など UIKit 非対応の場面でも機種名は足さない。
+        return nil
+        #endif
     }
 
     // MARK: - 内部処理

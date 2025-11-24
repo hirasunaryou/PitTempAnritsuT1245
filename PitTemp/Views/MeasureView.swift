@@ -1026,7 +1026,9 @@ struct MeasureView: View {
 
     private func pressureEntryCard(for wheel: WheelPos) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            let manualText = manualPressureBinding(for: wheel).wrappedValue.trimmingCharacters(in: .whitespaces)
+            // Binding を直接たどると SwiftUI の再描画タイミングでアクセスが競合しクラッシュすることがあるため、
+            // 値の取り出し専用に生の State 辞書を使って表示文字列を決定する。
+            let manualText = manualPressureValues[wheel]?.trimmingCharacters(in: .whitespaces) ?? ""
             let existingPressure = vm.wheelPressures[wheel].map { String(format: "%.1f", $0) }
             let displayText = !manualText.isEmpty ? manualText : (existingPressure ?? "")
             let showPlaceholder = displayText.isEmpty

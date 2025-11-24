@@ -1,12 +1,8 @@
-//
 //  FolderBookmark.swift
 //  PitTemp
-//
-//  役割: iCloud Drive など外部フォルダの URL を「ブックマーク化」して永続保存
-//  初心者向けメモ:
-//   - iOSでは bookmarkData(options: []) を保存して、使うときに
-//     startAccessingSecurityScopedResource() / stopAccessing... で一時的に権限を開く
-//
+//  Role: iCloud Drive など外部フォルダの URL を「ブックマーク化」して永続保存する。
+//  Dependencies: @AppStorage（UserDefaults）・FileManager・セキュリティスコープ付き URL。
+//  Threading: 主に Main スレッドで UI 状態を扱い、ファイル操作は短時間で完結させる想定。
 
 import Foundation
 import SwiftUI
@@ -35,8 +31,12 @@ extension Notification.Name {
 
 
 final class FolderBookmark: ObservableObject {
+    /// UserDefaults/AppStorage に保存するキーを一箇所で管理。互換性を保つため既存文字列を維持する。
+    private enum Keys {
+        static let sharedFolderBookmark = "sharedFolder.bookmark"
+    }
     // UserDefaults に生の bookmarkData を保存（小サイズなので AppStorage でOK）
-    @AppStorage("sharedFolder.bookmark") private var bookmarkData: Data?
+    @AppStorage(Keys.sharedFolderBookmark) private var bookmarkData: Data?
 
 
     

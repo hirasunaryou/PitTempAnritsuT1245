@@ -1,3 +1,9 @@
+//  PreviewFixtures.swift
+//  PitTemp
+//  Role: SwiftUI プレビュー用の依存関係をまとめて立ち上げるセットアップ。
+//  Dependencies: SettingsStore・SessionViewModel などアプリ主要コンポーネント。
+//  Threading: MainActor で UI ステートを扱い、プレビューでも実アプリ同等の挙動を再現。
+
 import Foundation
 import SwiftUI
 
@@ -49,7 +55,7 @@ struct MeasureViewPreviewFixtures {
         bluetooth.notifyCountUI = 512
         bluetooth.latestTemperature = 84.1
 
-        viewModel.ingestBLESample(
+        viewModel.ingestBluetoothSample(
             TemperatureSample(time: Date(), value: 84.1)
         )
     }

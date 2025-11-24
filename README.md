@@ -109,7 +109,7 @@ AnritsuM (BLE)
         ├─ parseFrames() → TemperatureFrame(value ℃, time, deviceID?, status?)
         ├─ publish latestTemperature / notifyHz / counters
         └─ temperatureFrames.send(TemperatureFrame)
-               └─ map to SessionViewModel.ingestBLESample()
+               └─ map to SessionViewModel.ingestBluetoothSample()
                       ├─ live配列更新（グラフ）
                       └─ peak/結果反映（UIセル）
 ```

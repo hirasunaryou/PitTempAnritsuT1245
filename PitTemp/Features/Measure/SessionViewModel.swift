@@ -1,12 +1,8 @@
-//
 //  SessionViewModel.swift
 //  PitTemp
-//
-//  役割: 測定ロジック一式（HID入力→ライブ更新→確定→CSV出力）
-//  初心者向けメモ:
-//   - SwiftUIの画面からは「状態変更リクエスト」だけ投げる（MVVM）
-//   - HID(=キーボード)の“行確定”と“途中バッファ”の扱いを分離
-//
+//  Role: 中心となる測定VMとして HID/BLE 入力を集約し、CSV/ログへ流す。
+//  Dependencies: Combine・SwiftUI・SettingsStore（MainActor で UI と連動）。
+//  Threading: MainActor で UI 状態を守りつつ、タイマーと BLE は安全に hop させる。
 import Combine
 import Foundation
 import SwiftUI
@@ -162,12 +158,12 @@ final class SessionViewModel: ObservableObject {
                 guard let self else { return }
                 // 履歴表示中はライブサンプルを無視し、ViewModel側で判定を一元化する。
                 guard self.loadedHistorySummary == nil else { return }
-                self.ingestBLESample(sample)
+                self.ingestBluetoothSample(sample)
             }
     }
 
     // BLEからのサンプルをUI更新系に反映
-    func ingestBLESample(_ s: TemperatureSample) {
+    func ingestBluetoothSample(_ s: TemperatureSample) {
         // ライブ表示
         latestValueText = String(format: "%.1f", s.value)
         liveTemperatureC = s.value.isFinite ? s.value : nil

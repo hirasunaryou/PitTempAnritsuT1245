@@ -1,6 +1,8 @@
-//
 //  DeviceRegistry.swift
 //  PitTemp
+//  Role: 既知 BLE デバイスの登録・別名・自動再接続設定を司るストア。
+//  Dependencies: Codable/JSONEncoder・UserDefaults・DispatchQueue.main（UI と整合）。
+//  Threading: 公開状態は @Published＋Main 更新とし、ストア実装はスレッドセーフなプロトコルで差し替え。
 
 import Foundation
 
@@ -17,16 +19,20 @@ protocol DeviceRegistryStore {
 
 /// UserDefaults を使った既定の保存先。
 final class UserDefaultsDeviceRegistryStore: DeviceRegistryStore {
-    private let storeKey = "ble.deviceRegistry.v1"
+    /// 保存キーは将来のマイグレーションに備え enum で一元管理。
+    /// - Note: `.deviceRegistry` は v1 形式の JSON 配列を指し、互換性維持のため名称を変えない。
+    private enum Keys {
+        static let deviceRegistry = "ble.deviceRegistry.v1"
+    }
 
     func loadRecords() -> [DeviceRecord] {
-        guard let data = UserDefaults.standard.data(forKey: storeKey) else { return [] }
+        guard let data = UserDefaults.standard.data(forKey: Keys.deviceRegistry) else { return [] }
         return (try? JSONDecoder().decode([DeviceRecord].self, from: data)) ?? []
     }
 
     func saveRecords(_ records: [DeviceRecord]) {
         if let data = try? JSONEncoder().encode(records) {
-            UserDefaults.standard.set(data, forKey: storeKey)
+            UserDefaults.standard.set(data, forKey: Keys.deviceRegistry)
         }
     }
 }

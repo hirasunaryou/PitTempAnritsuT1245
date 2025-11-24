@@ -1,9 +1,8 @@
-//
 //  SettingsStore.swift
 //  Core/Settings
-//
-//  目的: 画面やVMに散らばった設定保存を一元管理し、保存先を切り替えやすくする。
-//
+//  Role: 画面やVMに散らばった設定保存を一元管理し、保存先を切り替えやすくする。
+//  Dependencies: UserDefaults/AppStorage 経由の SettingsStoreBacking（@MainActor で UI と同期）。
+//  Threading: @MainActor で @Published を更新し、保存は Keys を用いてスレッドセーフに委譲。
 
 import Foundation
 import SwiftUI
@@ -44,6 +43,7 @@ struct UserDefaultsSettingsStore: SettingsStoreBacking {
 
 @MainActor
 final class SettingsStore: ObservableObject {
+    /// UserDefaults / AppStorage のキーを集約。既存利用者との互換性を守るため名前は慎重に変更する。
     private enum Keys {
         static let autoStopLimitSec = "pref.durationSec"
         static let chartWindowSec = "pref.chartWindowSec"

@@ -4,7 +4,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
     let fileURL: URL
     let createdAt: Date
     let sessionBeganAt: Date?
-    let sessionID: UUID
+    let sessionID: SessionID
     let track: String
     let date: String
     let car: String
@@ -85,7 +85,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
             checker,
             tyre,
             lap,
-            sessionID.uuidString,
+            sessionID.rawValue,
             originDeviceID,
             originDeviceName,
             SessionHistorySummary.searchDateFormatter.string(from: createdAt),
@@ -147,7 +147,7 @@ struct SessionHistorySummary: Identifiable, Equatable {
 
     static func makeLiveSummary(from snapshot: SessionSnapshot, isFromCurrentDevice: Bool = true) -> SessionHistorySummary {
         let placeholderDirectory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        let filename = "pittemp-live-\(snapshot.sessionID.uuidString).json"
+        let filename = "pittemp-live-\(snapshot.sessionID.rawValue.safeFileToken()).json"
         let placeholderURL = placeholderDirectory.appendingPathComponent(filename, isDirectory: false)
 
         return SessionHistorySummary(
@@ -350,7 +350,7 @@ private extension SessionHistoryStore {
         }
 
         let destination = dayDirectory
-            .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+            .appendingPathComponent("session-\(snapshot.sessionID.rawValue.safeFileToken())")
             .appendingPathExtension("json")
 
         if fileManager.fileExists(atPath: destination.path) {

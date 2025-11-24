@@ -242,7 +242,7 @@ struct SessionReportView: View {
             ])
             fieldRow(metrics: metrics, fields: [
                 .init(label: localized("Session ID", "セッション ID"),
-                      value: snapshot.sessionID.uuidString,
+                      value: snapshot.sessionID.rawValue,
                       style: .monospaced,
                       maxLines: 1,
                       weight: .regular)

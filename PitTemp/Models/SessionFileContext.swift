@@ -4,7 +4,7 @@ import Foundation
 /// Google Drive / iCloud とやり取りする際に必要なメタ情報を一塊にした DTO。
 /// ViewModel からは `SessionFileContext.driveMetadata` を呼ぶだけで埋まるようにする。
 struct DriveCSVMetadata: Codable, Equatable {
-    var sessionID: UUID
+    var sessionID: SessionID
     var driver: String
     var track: String
     var car: String
@@ -22,7 +22,7 @@ struct DriveCSVMetadata: Codable, Equatable {
 /// `SessionFileCoordinator` と組み合わせることで、呼び出し側は DTO の生成だけに専念できる。
 struct SessionFileContext {
     var meta: MeasureMeta
-    var sessionID: UUID
+    var sessionID: SessionID
     var sessionBeganAt: Date
     var deviceIdentity: DeviceIdentity
     var deviceName: String?

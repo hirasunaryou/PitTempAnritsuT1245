@@ -9,6 +9,7 @@
 
 * **対象機器**: `AnritsuM-*` の広告名で検出される試作温度計
 * **主機能**: リアルタイム温度表示（ライブグラフ）、メタ情報（サーキット等）入力（キーボード/音声）、CSVエクスポート、iCloudアップロード
+* **セッションID**: 「Op-ISO8601-Device-Context-Rand-vRev-Sync」形式。オフライン→クラウド同期で衝突を避けるための運用指針は `Docs/SessionIDDesign.md` / `Docs/SessionIDImpact.md` を参照。
 * **BLE仕様（抜粋）**:
 
   * Service UUID: `ADA98080-888B-4E9F-9A7F-07DDC240F3CE`

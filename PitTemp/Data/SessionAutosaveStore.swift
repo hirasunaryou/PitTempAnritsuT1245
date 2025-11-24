@@ -22,7 +22,7 @@ struct SessionSnapshot: Codable {
     var wheelMemos: [WheelPos: String]
     var wheelPressures: [WheelPos: Double]
     var sessionBeganAt: Date?
-    var sessionID: UUID
+    var sessionID: SessionID
     var originDeviceID: String
     var originDeviceName: String
     var createdAt: Date
@@ -44,7 +44,7 @@ struct SessionSnapshot: Codable {
          wheelMemos: [WheelPos: String],
          wheelPressures: [WheelPos: Double] = [:],
          sessionBeganAt: Date?,
-         sessionID: UUID,
+         sessionID: SessionID,
          originDeviceID: String,
          originDeviceName: String,
          createdAt: Date = Date()) {
@@ -64,7 +64,14 @@ struct SessionSnapshot: Codable {
         meta = try container.decode(MeasureMeta.self, forKey: .meta)
         results = try container.decode([MeasureResult].self, forKey: .results)
         sessionBeganAt = try container.decodeIfPresent(Date.self, forKey: .sessionBeganAt)
-        sessionID = try container.decodeIfPresent(UUID.self, forKey: .sessionID) ?? UUID()
+        if let encoded = try container.decodeIfPresent(String.self, forKey: .sessionID) {
+            // 旧データ（UUID文字列）を含め、新仕様のSessionIDに巻き取る
+            sessionID = SessionID(rawValue: encoded)
+        } else if let uuid = try container.decodeIfPresent(UUID.self, forKey: .sessionID) {
+            sessionID = SessionID.fromUUID(uuid)
+        } else {
+            sessionID = SessionID.generate(op: .measure, deviceAbbrev: "MIGRATED", context: "legacy")
+        }
         originDeviceID = try container.decodeIfPresent(String.self, forKey: .originDeviceID) ?? ""
         originDeviceName = try container.decodeIfPresent(String.self, forKey: .originDeviceName) ?? ""
         createdAt = try container.decode(Date.self, forKey: .createdAt)
@@ -88,7 +95,7 @@ struct SessionSnapshot: Codable {
         try container.encode(meta, forKey: .meta)
         try container.encode(results, forKey: .results)
         try container.encodeIfPresent(sessionBeganAt, forKey: .sessionBeganAt)
-        try container.encode(sessionID, forKey: .sessionID)
+        try container.encode(sessionID.rawValue, forKey: .sessionID)
         try container.encode(originDeviceID, forKey: .originDeviceID)
         try container.encode(originDeviceName, forKey: .originDeviceName)
         try container.encode(createdAt, forKey: .createdAt)
@@ -200,11 +207,12 @@ final class SessionAutosaveStore: SessionAutosaveHandling {
                 try fileManager.createDirectory(at: dayDirectory, withIntermediateDirectories: true)
             }
 
+            let safeID = snapshot.sessionID.rawValue.safeFileToken()
             let destination = dayDirectory
-                .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+                .appendingPathComponent("session-\(safeID)")
                 .appendingPathExtension("json")
             let destinationCSV = dayDirectory
-                .appendingPathComponent("session-\(snapshot.sessionID.uuidString)")
+                .appendingPathComponent("session-\(safeID)")
                 .appendingPathExtension("csv")
 
             if fileManager.fileExists(atPath: destination.path) {

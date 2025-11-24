@@ -316,7 +316,7 @@ final class GoogleDriveService: ObservableObject {
         let webViewLink: URL?
         let properties: [String: String]
 
-        var sessionID: UUID? { properties["sessionID"].flatMap(UUID.init) }
+        var sessionID: SessionID? { properties["sessionID"].map(SessionID.init(rawValue:)) }
         var driver: String { properties["driver"] ?? "" }
         var track: String { properties["track"] ?? "" }
         var car: String { properties["car"] ?? "" }
@@ -568,7 +568,7 @@ final class GoogleDriveService: ObservableObject {
             "mimeType": "text/csv",
             "parents": [folderID],
             "properties": [
-                "sessionID": metadata.sessionID.uuidString,
+                "sessionID": metadata.sessionID.rawValue,
                 "driver": metadata.driver,
                 "track": metadata.track,
                 "car": metadata.car,

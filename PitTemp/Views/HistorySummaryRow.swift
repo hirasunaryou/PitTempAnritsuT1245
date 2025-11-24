@@ -33,7 +33,7 @@ struct HistorySummaryRow: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text(String(summary.sessionID.uuidString.prefix(8)))
+                Text(String(summary.sessionID.rawValue.prefix(8)))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
@@ -128,7 +128,7 @@ struct HistorySummaryRow_Previews: PreviewProvider {
             wheelMemos: [:],
             wheelPressures: [.FL: 195.0],
             sessionBeganAt: Date().addingTimeInterval(-600),
-            sessionID: UUID(),
+            sessionID: SessionID.generate(op: .measure, deviceAbbrev: "PREVIEW", context: "preview"),
             originDeviceID: "SAMPLE-DEVICE-ID",
             originDeviceName: "PitTemp iPhone",
             createdAt: Date()

@@ -131,7 +131,7 @@ struct HistoryDetailView: View {
             )
             metaRow(
                 title: "Session ID",
-                value: summary.sessionID.uuidString
+                value: summary.sessionID.rawValue
             )
             metaRow(
                 title: "Device",

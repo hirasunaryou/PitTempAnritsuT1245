@@ -10,7 +10,7 @@ protocol CSVExporting {
         wheelPressures: [WheelPos: Double],
         sessionStart: Date,
         deviceName: String?,
-        sessionID: UUID,
+        sessionID: SessionID,
         deviceIdentity: DeviceIdentity
     ) throws -> URL
 

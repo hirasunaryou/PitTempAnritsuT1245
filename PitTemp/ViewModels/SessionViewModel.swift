@@ -28,7 +28,7 @@ final class SessionViewModel: ObservableObject {
     private let deviceIdentity: DeviceIdentity
     private var autosaveWorkItem: DispatchWorkItem?
     private var isRestoringAutosave = false
-    private var currentSessionID = UUID()
+    private var currentSessionID: SessionID
     private var bluetoothCancellable: AnyCancellable?
 
     init(exporter: CSVExporting = CSVExporter(),
@@ -46,6 +46,12 @@ final class SessionViewModel: ObservableObject {
         } else {
             self.settings = SettingsStore()
         }
+        self.currentSessionID = SessionID.generate(
+            op: .measure,
+            timestamp: Date(),
+            deviceAbbrev: deviceAbbreviation(),
+            context: contextToken()
+        )
         restoreAutosaveIfAvailable()
     }
 
@@ -95,6 +101,32 @@ final class SessionViewModel: ObservableObject {
     private var minAdvanceSec: Double { settings.minAdvanceSec }
     private var autofillDateTime: Bool { settings.autofillDateTime }
     private var enableICloudUpload: Bool { settings.enableICloudUpload }
+
+    // MARK: - セッションID組み立てヘルパー
+    /// デバイス名とIDから短い略号を作る（空白除去＋末尾ID4桁）。
+    private func deviceAbbreviation() -> String {
+        let nameToken = deviceIdentity.name.replacingOccurrences(of: " ", with: "").prefix(6)
+        let idToken = deviceIdentity.id.suffix(4)
+        return "\(nameToken)-\(idToken)"
+    }
+
+    /// メタ情報からコンテキスト文字列を抽出。空なら安全なプレースホルダを返す。
+    private func contextToken(from meta: MeasureMeta? = nil) -> String {
+        let source = meta ?? self.meta
+        let candidates = [source.track, source.carNo, source.car]
+        let token = candidates.first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } ?? "CTX"
+        return token.replacingOccurrences(of: " ", with: "_").prefix(16).description
+    }
+
+    /// 新仕様フォーマットでセッションIDを払い出す。生成処理は純粋関数なのでテストで差し替えやすい。
+    private func makeSessionID(op: SessionID.Operation = .measure) -> SessionID {
+        SessionID.generate(
+            op: op,
+            timestamp: Date(),
+            deviceAbbrev: deviceAbbreviation(),
+            context: contextToken()
+        )
+    }
 
       
     // タイマ
@@ -158,7 +190,7 @@ final class SessionViewModel: ObservableObject {
         if hadResults {
             persistAutosaveNow()
             autosaveStore.archiveLatest()
-            archiveMessage = "前の計測セッション (\(currentSessionID.uuidString)) をアーカイブしました。\nArchived previous session before starting a new one."
+            archiveMessage = "前の計測セッション (\(currentSessionID.rawValue)) をアーカイブしました。\nArchived previous session before starting a new one."
         }
 
         let preservedMeta: MeasureMeta
@@ -196,7 +228,7 @@ final class SessionViewModel: ObservableObject {
 
         loadedHistorySummary = nil
 
-        currentSessionID = UUID()
+        currentSessionID = makeSessionID(op: .measure)
         persistAutosaveNow()
 
         sessionResetID = UUID()
@@ -602,6 +634,6 @@ final class SessionViewModel: ObservableObject {
         case .resetEverything:
             base = "計測結果とメタ情報をすべて初期化しました。\nReset results and meta for the next vehicle."
         }
-        return base + "\n\nSession ID: \(currentSessionID.uuidString)"
+        return base + "\n\nSession ID: \(currentSessionID.rawValue)"
     }
 }

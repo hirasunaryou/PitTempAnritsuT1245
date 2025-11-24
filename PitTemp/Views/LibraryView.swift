@@ -1452,7 +1452,7 @@ struct DriveBrowserView: View {
                     file.car,
                     file.deviceID,
                     file.deviceName,
-                    file.sessionID?.uuidString ?? "",
+                    file.sessionID?.rawValue ?? "",
                     file.dayFolder
                 ].map { $0.lowercased() }
                 let needle = trimmed.lowercased()
@@ -1473,7 +1473,7 @@ struct DriveBrowserView: View {
             case .car:
                 return lhs.car.localizedCaseInsensitiveCompare(rhs.car) == .orderedAscending
             case .sessionID:
-                return (lhs.sessionID?.uuidString ?? "") < (rhs.sessionID?.uuidString ?? "")
+                return (lhs.sessionID?.rawValue ?? "") < (rhs.sessionID?.rawValue ?? "")
             case .device:
                 return lhs.deviceID.localizedCaseInsensitiveCompare(rhs.deviceID) == .orderedAscending
             }
@@ -1529,7 +1529,7 @@ struct DriveBrowserView: View {
                                 Text("Session")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
-                                Text(sessionID.uuidString)
+                                Text(sessionID.rawValue)
                                     .font(.caption.monospacedDigit())
                             }
                         }

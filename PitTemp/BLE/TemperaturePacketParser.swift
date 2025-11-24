@@ -69,9 +69,7 @@ final class TemperaturePacketParser {
         return [TemperatureFrame(time: Date(), deviceID: deviceID, value: valueC, status: status)]
     }
 
-    // 単発要求/時刻設定コマンド（簡易）
-    func buildDATARequest() -> Data { Data("DATA".utf8) }
-
+    // 時刻設定コマンドだけを公開。DATA 取得は通知購読に集約したため残さない。
     func buildTIMESet(date: Date) -> Data {
         let iso = ISO8601DateFormatter().string(from: date)
         return Data("TIME=\(iso)".utf8)

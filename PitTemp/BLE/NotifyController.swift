@@ -1,10 +1,10 @@
 import Foundation
-import Combine
 
 /// Notify受信処理とメトリクス計測を担当
 final class NotifyController {
     private let parser: TemperaturePacketParser
     private let emit: (TemperatureFrame) -> Void
+    // Combine なしでもメインスレッドへ戻せるように、シンプルに DispatchQueue を保持する。
     private let mainQueue: DispatchQueue
 
     private var notifyCountBG: Int = 0

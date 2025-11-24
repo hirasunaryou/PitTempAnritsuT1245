@@ -2056,6 +2056,7 @@ struct MeasureView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     bleHeader
                     captureStatusRow
+                    sessionIdentifierRow
                 }
 
                 Spacer(minLength: 0)
@@ -2222,6 +2223,35 @@ struct MeasureView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
+        }
+    }
+
+    // 計測者が「いま編集しているセッション」をさっと確認できる控えめな表示。
+    // 履歴モードで過去データを開いているときも即時で切り替わるよう、
+    // ViewModel 側の @Published プロパティを監視している。
+    private var sessionIdentifierRow: some View {
+        let readable = vm.sessionReadableIDForUI
+        let uuidPrefix = vm.sessionUUIDForUI.uuidString.prefix(8)
+
+        return VStack(alignment: .leading, spacing: 2) {
+            Label("Session ID / 現在のセッション", systemImage: "barcode.viewfinder")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(readable.isEmpty ? "--" : readable)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.primary)
+                Text("UUID: \(uuidPrefix)…")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if vm.loadedHistorySummary != nil {
+                Text("閲覧/編集モードで過去セッションを開いています。\nYou are viewing an archived session.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 

@@ -33,9 +33,14 @@ struct HistorySummaryRow: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Text(String(summary.sessionID.uuidString.prefix(8)))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.tertiary)
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(summary.displaySessionID)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                    Text(String(summary.sessionID.uuidString.prefix(8)))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             if !summary.date.isEmpty {
@@ -129,6 +134,7 @@ struct HistorySummaryRow_Previews: PreviewProvider {
             wheelPressures: [.FL: 195.0],
             sessionBeganAt: Date().addingTimeInterval(-600),
             sessionID: UUID(),
+            sessionReadableID: "20240605-120000_IPHONE-DEMO_XYZ1",
             originDeviceID: "SAMPLE-DEVICE-ID",
             originDeviceName: "PitTemp iPhone",
             createdAt: Date()
@@ -144,6 +150,7 @@ struct HistorySummaryRow_Previews: PreviewProvider {
             createdAt: snapshot.createdAt,
             sessionBeganAt: snapshot.sessionBeganAt,
             sessionID: snapshot.sessionID,
+            sessionReadableID: snapshot.sessionReadableID,
             track: snapshot.meta.track,
             date: snapshot.meta.date,
             car: snapshot.meta.car,

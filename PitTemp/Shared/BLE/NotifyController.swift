@@ -1,3 +1,9 @@
+//  NotifyController.swift
+//  PitTemp
+//  Role: BLE Notify をパースしてドメイン層へ橋渡しし、通知頻度メトリクスも計測。
+//  Dependencies: TemperatureIngesting ユースケースと DispatchQueue（main を注入）。
+//  Threading: BLE キューで受信しつつ、UI フィードバックは mainQueue へ hop して安全に更新。
+
 import Foundation
 
 /// Notify受信処理とメトリクス計測を担当

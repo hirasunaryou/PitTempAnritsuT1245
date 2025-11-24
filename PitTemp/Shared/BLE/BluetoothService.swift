@@ -1,5 +1,8 @@
 //  BluetoothService.swift
 //  PitTemp
+//  Role: CoreBluetooth 経由で BLE 温度センサーと接続し、UI/BLE ユースケースへ橋渡しする窓口。
+//  Dependencies: CoreBluetooth, Combine, NotifyController（TemperatureIngestUseCase を注入）。
+//  Threading: 専用 bleQueue でコールバックを受け、UI 更新は DispatchQueue.main へ hop。
 
 import Foundation
 import CoreBluetooth

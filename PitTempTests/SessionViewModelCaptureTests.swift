@@ -1,3 +1,9 @@
+//  SessionViewModelCaptureTests.swift
+//  PitTempTests
+//  Role: SessionViewModel の基本挙動（タップ遷移・ライブ値更新）を検証するユニットテスト。
+//  Dependencies: Swift concurrency の MainActor とプレビュー用フィクスチャ。
+//  Threading: MainActor で UI ステートを読むため、テストメソッドも @MainActor 指定。
+
 import XCTest
 @testable import PitTemp
 
@@ -54,7 +60,7 @@ final class SessionViewModelCaptureTests: XCTestCase {
         XCTAssertNil(viewModel.liveTemperatureC)
 
         let sample = TemperatureSample(time: Date(), value: 83.4)
-        viewModel.ingestBLESample(sample)
+        viewModel.ingestBluetoothSample(sample)
 
         XCTAssertEqual(viewModel.liveTemperatureC, 83.4, accuracy: 0.0001)
     }

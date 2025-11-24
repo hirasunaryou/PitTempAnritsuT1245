@@ -3,7 +3,9 @@ import Foundation
 
 /// Google Drive / iCloud とやり取りする際に必要なメタ情報を一塊にした DTO。
 /// ViewModel からは `SessionFileContext.driveMetadata` を呼ぶだけで埋まるようにする。
-struct DriveCSVMetadata: Codable, Equatable {
+// Hashable を追加して、待ち行列の重複防止などで集合系の API にそのまま載せられるようにする。
+// Date や UUID は Hashable に準拠しているので、派生するハッシュ実装も安全に自動生成される。
+struct DriveCSVMetadata: Codable, Equatable, Hashable {
     var sessionID: UUID
     var sessionReadableID: String
     var driver: String

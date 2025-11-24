@@ -2048,6 +2048,8 @@ struct MeasureView: View {
     }
 
     /// Saveボタンに紐づく処理をまとめる。保存先の説明やアップロードの扱いもここで一元化。
+    /// - Note: ここで生成する `SaveStatusBanner` は「ローカルの保存先」と「クラウドの転送状況」を
+    ///         1 つのポップアップに集約し、ユーザーが 1 タップで全体像を把握できるようにする。
     private func handleSaveTapped() {
         // 1) CSV を生成
         guard let export = vm.exportCSV(deviceName: bluetooth.deviceName) else {
@@ -2055,18 +2057,45 @@ struct MeasureView: View {
             return
         }
 
-        var lines: [String] = []
-        lines.append(saveLocationDescription(for: export.url))
+        // どこに保存・転送されるのかを視覚的に分けた行リストとして構築する。
+        // UI 行ごとにアイコンと色を持たせ、ぱっと見でローカル／クラウドを見分けられるようにする。
+        var destinations: [SaveDestinationDetail] = []
+        let deviceLocation = saveLocationDescription(for: export.url)
+        destinations.append(
+            SaveDestinationDetail(
+                iconName: "internaldrive",
+                title: deviceLocation.label,
+                description: deviceLocation.path,
+                tint: .primary
+            )
+        )
 
-        // 2) iCloud 共有フォルダへのコピーは既存ロジックに任せるが、UI には案内を出す
+        // iCloud 共有フォルダへのコピーは既存ロジックに任せるが、UI には具体的なラベルを表示する。
         if settings.enableICloudUpload {
-            lines.append("iCloud: 共有フォルダへコピーし、同期は iCloud の状態に追随します。")
+            destinations.append(
+                SaveDestinationDetail(
+                    iconName: "icloud.and.arrow.up.fill",
+                    title: "iCloud Drive (shared)",
+                    description: iCloudDestinationDescription(for: export.url),
+                    tint: .blue
+                )
+            )
         }
 
         // 3) Google Drive アップロードを条件付きで実施 or キューに積む
+        var subtitleHint: String? = nil
+
         if settings.uploadAfterSave, settings.enableGoogleDriveUpload, let metadata = vm.lastCSVMetadata {
             if connectivity.isOnline {
-                lines.append("Google Drive: アップロードを開始しました。")
+                destinations.append(
+                    SaveDestinationDetail(
+                        iconName: "arrow.up.doc.fill",
+                        title: "Google Drive (uploading)",
+                        description: driveDestinationDescription(for: metadata),
+                        tint: .green
+                    )
+                )
+                subtitleHint = "Uploading to Google Drive. Keep the app online to finish."
                 Task { await driveService.upload(csvURL: export.url, metadata: metadata) }
                 Task { await driveService.flushPendingUploadsIfPossible(isOnline: true) }
             } else {
@@ -2075,28 +2104,71 @@ struct MeasureView: View {
                 Task { @MainActor in
                     driveService.enqueueForUpload(export.url, metadata: metadata)
                 }
-                lines.append("Google Drive: オフラインのためキューに追加 (残り \(nextCount))。")
+                destinations.append(
+                    SaveDestinationDetail(
+                        iconName: "tray.and.arrow.up.fill",
+                        title: "Google Drive (queued)",
+                        description: driveDestinationDescription(for: metadata),
+                        tint: .orange
+                    )
+                )
+                subtitleHint = "Offline right now: upload queued (pending \(nextCount))."
             }
         } else if settings.enableGoogleDriveUpload {
             // 利用者が「クラウドに上げない」を選んだケース
-            lines.append("Google Drive: 今回はアップロードしません (Settings > Export で切替)。")
+            destinations.append(
+                SaveDestinationDetail(
+                    iconName: "xmark.doc.fill",
+                    title: "Google Drive (skipped)",
+                    description: "Uploads are off for this save. Toggle in Settings > Export.",
+                    tint: .gray
+                )
+            )
         }
 
-        presentSaveStatus(title: "Save complete", message: lines.joined(separator: "\n"))
+        let banner = SaveStatusBanner(
+            title: "Save complete",
+            subtitle: subtitleHint,
+            destinations: destinations
+        )
+        presentSaveStatus(banner)
     }
 
     /// ユーザーに「どこへ保存されたか」を短く伝えるための整形。
-    private func saveLocationDescription(for url: URL) -> String {
+    /// - Returns: ローカル保存先の表示用ラベルとパス（最後の 3 階層のみ抜粋）。
+    private func saveLocationDescription(for url: URL) -> (label: String, path: String) {
         let folder = url.deletingLastPathComponent()
         // 末尾 3 階層程度を抜き出して、人間が読めるパスにする
         let components = folder.pathComponents.suffix(3).joined(separator: "/")
         let baseLabel = folder.path.contains("Mobile Documents") ? "iCloud Drive" : "On My iPhone"
-        return "保存先: \(baseLabel) / \(components)"
+        return (baseLabel, components)
+    }
+
+    /// iCloud へのコピー先を表示する説明文を生成する。
+    /// - Note: 端末に保存されたパスと区別できるように「shared」などのキーワードを含める。
+    private func iCloudDestinationDescription(for url: URL) -> String {
+        let folder = url.deletingLastPathComponent()
+        let components = folder.pathComponents.suffix(2).joined(separator: "/")
+        return "Shared folder • \(components)"
+    }
+
+    /// Google Drive への保存先を説明するための短いテキスト。
+    /// - Note: Drive 側は日付フォルダ配下にセッション ID を置く設計なので、その構造を
+    ///         そのまま伝えることで「どこを開けばいいか」を思い出しやすくする。
+    private func driveDestinationDescription(for metadata: DriveCSVMetadata) -> String {
+        "Day \(metadata.dayFolderName) / Session \(metadata.sessionReadableID)"
     }
 
     /// ポップアップ表示をまとめて制御。最新のバナーだけを残し、一定時間で自動的に消す。
     private func presentSaveStatus(title: String, message: String) {
-        let banner = SaveStatusBanner(title: title, message: message)
+        let banner = SaveStatusBanner(title: title, subtitle: message, destinations: [])
+        presentSaveStatus(banner)
+    }
+
+    /// よりリッチな Save ステータス用のポップアップを表示する版。
+    /// - Parameter banner: タイトル＋行リストをまとめたモデル。`destinations` が空の場合は
+    ///                     従来通りのシンプルなメッセージのみを表示する。
+    private func presentSaveStatus(_ banner: SaveStatusBanner) {
         saveStatusBanner = banner
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
             if saveStatusBanner?.id == banner.id {
@@ -2265,11 +2337,29 @@ struct MeasureView: View {
         }
     }
 
-    // Save ステータスのモデル。Identifiable にすることで SwiftUI の animation/transition が扱いやすくなる。
+    /// Save ステータスのモデル。Identifiable にすることで SwiftUI の animation/transition が扱いやすくなる。
     private struct SaveStatusBanner: Identifiable, Equatable {
         let id = UUID()
         let title: String
-        let message: String
+        let subtitle: String?
+        let destinations: [SaveDestinationDetail]
+
+        static func == (lhs: SaveStatusBanner, rhs: SaveStatusBanner) -> Bool {
+            lhs.title == rhs.title && lhs.subtitle == rhs.subtitle && lhs.destinations == rhs.destinations
+        }
+    }
+
+    /// 保存先を 1 行で表すサブモデル。`Color` は Equatable ではないため、必要な文字列だけ比較する。
+    private struct SaveDestinationDetail: Identifiable, Equatable {
+        let id = UUID()
+        let iconName: String
+        let title: String
+        let description: String
+        let tint: Color
+
+        static func == (lhs: SaveDestinationDetail, rhs: SaveDestinationDetail) -> Bool {
+            lhs.iconName == rhs.iconName && lhs.title == rhs.title && lhs.description == rhs.description
+        }
     }
 
     // Save ステータスをポップアップ表示するための小さなビュー。
@@ -2277,7 +2367,7 @@ struct MeasureView: View {
         let banner: SaveStatusBanner
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         // ShapeStyle に直接 .accentColor は存在しないので、Color.accentColor を明示して前景色を設定する
@@ -2285,10 +2375,28 @@ struct MeasureView: View {
                     Text(banner.title)
                         .font(.headline)
                 }
-                Text(banner.message)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.leading)
+
+                if let subtitle = banner.subtitle {
+                    Text(subtitle)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.leading)
+                }
+
+                ForEach(banner.destinations) { destination in
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: destination.iconName)
+                            .foregroundStyle(destination.tint)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(destination.title)
+                                .font(.subheadline.weight(.semibold))
+                            Text(destination.description)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.leading)
+                        }
+                    }
+                }
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

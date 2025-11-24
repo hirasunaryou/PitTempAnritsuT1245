@@ -135,7 +135,11 @@ final class CSVExporter: CSVExporting {
         // UUID の先頭 8 文字だけ抜き出して短いままでも識別できるようにする。
         let shortID = deviceIdentity.id.sanitizedPathComponent(limit: 8)
         // 端末名がある場合は最大 24 文字に抑えて読みやすさを優先。
-        let readableName = (deviceName ?? deviceIdentity.name).sanitizedPathComponent(limit: 24)
+        // "\s+" を一気に削っておくことで、Finder などでの視認性を確保しつつ
+        // 「空白混じりで余計なバグを生む」リスクを減らしている。
+        let readableName = (deviceName ?? deviceIdentity.name)
+            .replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+            .sanitizedPathComponent(limit: 24)
         // 機種名などは 16 文字程度に抑えて補助情報として添える。
         let modelLabel = (deviceModelLabel ?? "").sanitizedPathComponent(limit: 16)
 

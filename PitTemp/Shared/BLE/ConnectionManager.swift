@@ -44,11 +44,17 @@ final class ConnectionManager {
         // 期待する UUID を優先しつつ、プロパティに notify/write が含まれる別の characteristic があればフェールバックする。
         let characteristics = service.characteristics ?? []
 
-        let preferredRead = characteristics.first { $0.uuid == profile.notifyCharUUID }
+        // UUID一致を優先しつつ、通知/書き込みビットが無ければプロパティ優先で安全な characteristic を選ぶ。
+        // TR45 の環境によっては DataLine UUID が複数あり、必ずしも notify/write ビットを持っていないものが先に見つかるため。
+        let preferredRead = characteristics.first {
+            $0.uuid == profile.notifyCharUUID && ($0.properties.contains(.notify) || $0.properties.contains(.indicate))
+        }
         let fallbackRead = characteristics.first { $0.properties.contains(.notify) || $0.properties.contains(.indicate) }
         let readChar = preferredRead ?? fallbackRead
 
-        let preferredWrite = characteristics.first { $0.uuid == profile.writeCharUUID }
+        let preferredWrite = characteristics.first {
+            $0.uuid == profile.writeCharUUID && ($0.properties.contains(.writeWithoutResponse) || $0.properties.contains(.write))
+        }
         let fallbackWrite = characteristics.first {
             $0.properties.contains(.writeWithoutResponse) || $0.properties.contains(.write)
         }
@@ -65,14 +71,8 @@ final class ConnectionManager {
             return
         }
 
-        // プロパティが不足している characteristic に対して notify を有効化しようとすると iOS 側で "request is not supported"
-        // になるため、対応ビットを持つことを確認したうえで設定する。
-        guard finalRead.properties.contains(.notify) || finalRead.properties.contains(.indicate) else {
-            let props = finalRead.properties
-            onFailed?("Char discovery: read characteristic lacks notify/indicate (props=\(props))")
-            return
-        }
-
+        // setNotifyValue は notify/indicate ビットが無い characteristic へ投げると iOS 側がエラーを返す。
+        // 上の選択処理でビットを確認済みだが、ここでも安全のためチェックしてから登録する。
         if finalRead.properties.contains(.notify) || finalRead.properties.contains(.indicate) {
             peripheral.setNotifyValue(true, for: finalRead)
         }

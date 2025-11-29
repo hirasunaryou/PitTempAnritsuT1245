@@ -12,6 +12,7 @@ final class BluetoothViewModel: ObservableObject {
     @Published private(set) var deviceName: String?
     @Published private(set) var autoConnectOnDiscover: Bool
     @Published private(set) var latestTemperature: Double?
+    @Published private(set) var isTR4AConnected: Bool
     // Debug metrics that were previously formatted inside the View.
     @Published private(set) var notifyHzText: String = "Hz: --"
     @Published private(set) var notifyCountText: String = "N: --"
@@ -29,6 +30,7 @@ final class BluetoothViewModel: ObservableObject {
         deviceName = service.deviceName
         autoConnectOnDiscover = service.autoConnectOnDiscover
         latestTemperature = service.latestTemperature
+        isTR4AConnected = service.activeProfileKey == BLEDeviceProfile.tr4a.key
 
         bindServiceState()
     }
@@ -109,6 +111,20 @@ final class BluetoothViewModel: ObservableObject {
         service.setPreferredIDs(preferred)
     }
 
+    /// TR45/TR4A専用: 記録間隔(サンプリング周波数)を変更する。
+    func updateTR4ARecordInterval(seconds: UInt16, completion: @escaping (Result<Void, Error>) -> Void) {
+        service.updateTR4ARecordInterval(seconds: seconds) { result in
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
+    /// TR45/TR4A専用: 記録停止（実質的な節電=電源オフ代わり）。
+    func powerOffTR4A(completion: @escaping (Result<Void, Error>) -> Void) {
+        service.powerOffTR4A { result in
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
     // MARK: - Private
 
     /// Subscribe to BluetoothService so views receive MainActor updates only from here.
@@ -138,6 +154,13 @@ final class BluetoothViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] temperature in
                 self?.latestTemperature = temperature
+            }
+            .store(in: &cancellables)
+
+        service.activeProfilePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] key in
+                self?.isTR4AConnected = (key == BLEDeviceProfile.tr4a.key)
             }
             .store(in: &cancellables)
 

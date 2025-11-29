@@ -20,6 +20,7 @@ final class NotifyController {
 
     var onCountUpdate: ((Int) -> Void)?
     var onHzUpdate: ((Double) -> Void)?
+    var onRawData: ((Data) -> Void)?
 
     init(ingestor: TemperatureIngesting,
          mainQueue: DispatchQueue = .main,
@@ -30,6 +31,9 @@ final class NotifyController {
     }
 
     func handleNotification(_ data: Data) {
+        // TR4A の設定レスポンスなど、温度フレーム化しない通知も転送できるように生のDataも渡す。
+        onRawData?(data)
+
         notifyCountBG &+= 1
         mainQueue.async { self.onCountUpdate?(self.notifyCountBG) }
 

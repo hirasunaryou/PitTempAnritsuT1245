@@ -10,6 +10,9 @@ import SwiftUI
 struct ConnectView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var bluetooth: BluetoothViewModel
+    @State private var intervalText: String = "2"
+    @State private var actionMessage: String?
+    @State private var showingActionAlert = false
 
     var body: some View {
         NavigationStack {
@@ -53,6 +56,10 @@ struct ConnectView: View {
                         }
                     }
                 }
+
+                if bluetooth.isTR4AConnected {
+                    tr4aControlSection
+                }
             }
             .navigationTitle("Devices")
             .toolbar {
@@ -67,6 +74,9 @@ struct ConnectView: View {
                     }
                 }
             }
+            .alert("TR45 control", isPresented: $showingActionAlert, actions: { Button("OK", role: .cancel) { } }, message: {
+                Text(actionMessage ?? "")
+            })
         }
     }
 
@@ -80,6 +90,51 @@ struct ConnectView: View {
             ))
             .labelsHidden()
             .help("Connect automatically to the first matching device")
+        }
+    }
+
+    private var tr4aControlSection: some View {
+        Section("TR45 controls") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Sampling interval (seconds)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                HStack {
+                    TextField("2", text: $intervalText)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 80)
+                    Button("Apply") {
+                        let seconds = UInt16(intervalText) ?? 2
+                        bluetooth.updateTR4ARecordInterval(seconds: seconds) { result in
+                            actionMessage = resultMessage(result, success: "記録間隔を\(seconds)sに更新しました")
+                            showingActionAlert = true
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                Text("TR45は本体にボタンが無いため、BLE経由で記録間隔を変更します。設定テーブルを読み出してから書き戻す安全策を入れています。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Button("Record stop / power save") {
+                bluetooth.powerOffTR4A { result in
+                    actionMessage = resultMessage(result, success: "記録を停止しました（ソフト電源OFF）")
+                    showingActionAlert = true
+                }
+            }
+            .buttonStyle(.bordered)
+            Text("TR45には物理スイッチが無いので、0x32 記録停止コマンドを電源OFF代わりに送信します。")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func resultMessage(_ result: Result<Void, Error>, success: String) -> String {
+        switch result {
+        case .success: return success
+        case .failure(let err): return err.localizedDescription
         }
     }
 }

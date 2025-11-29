@@ -116,7 +116,8 @@ private extension TemperaturePacketParser {
         let channel = Int(payload[payload.startIndex + 1])
         let raw = Int16(bitPattern: UInt16(payload[payload.startIndex + 2])
                         | (UInt16(payload[payload.startIndex + 3]) << 8))
-        let valueC = Double(raw) / 100.0
+        // TR45/4A 仕様書の式: (値 - 1000) / 10 で ℃ に変換する。
+        let valueC = (Double(raw) - 1000.0) / 10.0
 
         var frameStatus: TemperatureFrame.Status?
         if payload.count > 4 {

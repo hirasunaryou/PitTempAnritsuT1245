@@ -15,6 +15,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     @Published var connectionState: ConnectionState = .idle
     @Published var latestTemperature: Double?
     @Published var deviceName: String?
+    @Published private(set) var activeProfileKey: String = BLEDeviceProfile.anritsu.key
     @Published var scanned: [ScannedDevice] = []
 
     // ストリーム（TemperatureFrame で統一）
@@ -32,6 +33,9 @@ final class BluetoothService: NSObject, BluetoothServicing {
         didSet {
             // UUIDを差し替えても接続済みインスタンスを再利用できるよう、ConnectionManagerにも伝搬する。
             connectionManager.updateProfile(activeProfile)
+            DispatchQueue.main.async { [weak self] in
+                self?.activeProfileKey = self?.activeProfile.key ?? BLEDeviceProfile.anritsu.key
+            }
         }
     }
     private var scannedProfiles: [String: BLEDeviceProfile] = [:] // peripheralID→profile
@@ -47,6 +51,30 @@ final class BluetoothService: NSObject, BluetoothServicing {
 
     // TR4A向けのポーリングタイマー（現在値取得を1秒ごとに送信）
     private var tr4aPollTimer: DispatchSourceTimer?
+    private let tr4aRouter = TR4ACommandRouter()
+
+    enum TR4AControlError: LocalizedError {
+        case notTR4A
+        case notReady
+        case invalidPayload
+        case commandFailed(status: UInt8)
+        case timeout
+
+        var errorDescription: String? {
+            switch self {
+            case .notTR4A:
+                return "TR45/TR4A以外では実行できません"
+            case .notReady:
+                return "書き込みキャラクタリスティックが未接続です"
+            case .invalidPayload:
+                return "設定ペイロードが取得できませんでした"
+            case .commandFailed(let status):
+                return String(format: "TR4Aコマンドが失敗しました (status=0x%02X)", status)
+            case .timeout:
+                return "TR4A応答がタイムアウトしました"
+            }
+        }
+    }
 
     // Parser / UseCase
     private let temperatureUseCase: TemperatureIngesting
@@ -64,6 +92,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     var scannedPublisher: AnyPublisher<[ScannedDevice], Never> { $scanned.eraseToAnyPublisher() }
     var deviceNamePublisher: AnyPublisher<String?, Never> { $deviceName.eraseToAnyPublisher() }
     var latestTemperaturePublisher: AnyPublisher<Double?, Never> { $latestTemperature.eraseToAnyPublisher() }
+    var activeProfilePublisher: AnyPublisher<String, Never> { $activeProfileKey.eraseToAnyPublisher() }
     var autoConnectPublisher: AnyPublisher<Bool, Never> { $autoConnectOnDiscover.eraseToAnyPublisher() }
     var notifyHzPublisher: AnyPublisher<Double, Never> { $notifyHz.eraseToAnyPublisher() }
     var notifyCountPublisher: AnyPublisher<Int, Never> { $notifyCountUI.eraseToAnyPublisher() }
@@ -82,6 +111,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
         super.init()
         central = CBCentralManager(delegate: self, queue: bleQueue)
         setupCallbacks()
+        // TR4A 設定系のレスポンスを横取りできるよう、Rawデータのフックを生やす。
+        notifyController.onRawData = { [weak self] data in self?.tr4aRouter.handle(data) }
     }
 
     // MARK: - Public API
@@ -102,6 +133,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil; readChar = nil; writeChar = nil
         stopTR4APolling()
+        tr4aRouter.clear()
         DispatchQueue.main.async { self.connectionState = .idle }
     }
 
@@ -134,6 +166,63 @@ final class BluetoothService: NSObject, BluetoothServicing {
     func setPreferredIDs(_ ids: Set<String>) {
         // UIスレッドから来るのでそのまま代入でOK
         preferredIDs = ids
+    }
+
+    /// TR45/TR4Aの記録間隔(サンプリング周波数)をBLE越しに更新する。
+    /// 1) 0x85で現行設定テーブルを取得 → 2) 先頭2B(記録間隔秒)を書き換え → 3) 0x3Cで書き戻し。
+    func updateTR4ARecordInterval(seconds: UInt16, completion: @escaping (Result<Void, Error>) -> Void) {
+        bleQueue.async {
+            guard self.activeProfile.requiresPollingForRealtime else { completion(.failure(TR4AControlError.notTR4A)); return }
+            guard let peripheral = self.peripheral, let writeChar = self.writeChar else { completion(.failure(TR4AControlError.notReady)); return }
+
+            // 先に設定読み出しを待ち受けてからコマンド送信する。
+            self.tr4aRouter.waitFor(command: 0x85) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .failure(let err):
+                    completion(.failure(self.translate(err)))
+                case .success(let resp):
+                    guard resp.status == 0x00, resp.payload.count >= 64 else {
+                        completion(.failure(TR4AControlError.invalidPayload));
+                        return
+                    }
+
+                    // 仕様上、記録間隔は先頭2バイト（リトルエンディアン想定）。
+                    var table = Data(resp.payload.prefix(64))
+                    table[0] = UInt8(seconds & 0xFF)
+                    table[1] = UInt8((seconds >> 8) & 0xFF)
+                    self.writeTR4ASettings(table, peripheral: peripheral, writeChar: writeChar, completion: completion)
+                }
+            }
+
+            let frame = self.buildTR4ACommand(command: 0x85, payload: Data([0x00, 0x00, 0x00, 0x00]))
+            self.sendTR4AFrameWithBreak(frame, to: peripheral, write: writeChar)
+        }
+    }
+
+    /// TR45/TR4Aの記録停止（節電目的の“ソフト電源OFF”扱い）。
+    func powerOffTR4A(completion: @escaping (Result<Void, Error>) -> Void) {
+        bleQueue.async {
+            guard self.activeProfile.requiresPollingForRealtime else { completion(.failure(TR4AControlError.notTR4A)); return }
+            guard let peripheral = self.peripheral, let writeChar = self.writeChar else { completion(.failure(TR4AControlError.notReady)); return }
+
+            self.tr4aRouter.waitFor(command: 0x32) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .failure(let err): completion(.failure(self.translate(err)))
+                case .success(let resp):
+                    guard resp.status == 0x00 else {
+                        completion(.failure(TR4AControlError.commandFailed(status: resp.status)))
+                        return
+                    }
+                    self.stopTR4APolling()
+                    completion(.success(()))
+                }
+            }
+
+            let frame = self.buildTR4ACommand(command: 0x32, payload: Data())
+            self.sendTR4AFrameWithBreak(frame, to: peripheral, write: writeChar)
+        }
     }
 }
 
@@ -196,8 +285,8 @@ private extension BluetoothService {
     }
 
     /// TR4Aの現在値取得（0x33-0x01コマンド）を1秒周期で発行し、Notify経由で値を受け取る。
-    /// - Note: T&Dの仕様書にある「SOH直前の0x00(ブレーク信号)→20〜100ms後コマンド送信」を
-    ///   一続きのWriteWithoutResponseでまとめ、1秒以上間隔を空けることで実機負荷を抑える。
+    /// - Note: T&Dの仕様書にある「SOH直前の0x00(ブレーク信号)→20〜100ms後コマンド送信」に合わせ、
+    ///   50msのギャップを空けて2回の write を行う。1秒以上の間隔を空けて実機負荷と切断リスクを抑える。
     func startTR4APollingIfNeeded(peripheral: CBPeripheral, write: CBCharacteristic?) {
         stopTR4APolling()
         guard activeProfile.requiresPollingForRealtime, let write else { return }
@@ -207,8 +296,7 @@ private extension BluetoothService {
         timer.setEventHandler { [weak self, weak peripheral] in
             guard let self, let p = peripheral else { return }
             let cmd = self.buildTR4ACurrentValueCommand()
-            // TR4AはData Line特性にWriteWithoutResponseで流し込む。
-            p.writeValue(cmd, for: write, type: .withoutResponse)
+            self.sendTR4AFrameWithBreak(cmd, to: p, write: write)
         }
         timer.resume()
         tr4aPollTimer = timer
@@ -220,20 +308,12 @@ private extension BluetoothService {
     }
 
     /// TR4A「現在値取得(0x33/サブコマンド0x00)」SOHコマンドフレームを組み立てる。
-    /// - Structure: 0x00(ブレーク) + SOH(0x01) + CMD + SUB(0x00) + DataSize(BE=0x0004) + "0000"(4B) + CRC16-BE。
+    /// - Structure: SOH(0x01) + CMD + SUB(0x00) + DataSize(BE=0x0004) + "0000"(4B) + CRC16-BE。
     /// - Point: 仕様書の送信例 `01 33 00 04 00 00 00 00` はデータ長が **ビッグエンディアン** で4バイトを伴う。
     ///          ここを誤ると TR45 は応答を返さないため、スマホ側に温度が届かない。
     /// - CRC は SOH 以降を CCITT 初期値 0xFFFF で計算し、ビッグエンディアンで後続に付与する。
     func buildTR4ACurrentValueCommand() -> Data {
-        // サブコマンド0x00 + データ長0x0004(BE) + 4Bゼロペイロード
-        var frame = Data([0x01, 0x33, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00])
-        let crc = crc16CCITT(frame)
-        frame.append(UInt8((crc >> 8) & 0xFF))
-        frame.append(UInt8(crc & 0xFF))
-
-        var packet = Data([0x00])
-        packet.append(frame)
-        return packet
+        buildTR4ACommand(command: 0x33, payload: Data([0x00, 0x00, 0x00, 0x00]))
     }
 
     /// TR4A仕様書に従い、SOH〜データまでを対象にCRC16-CCITT(0x1021)を計算する。
@@ -250,6 +330,54 @@ private extension BluetoothService {
             }
         }
         return crc
+    }
+
+    /// TR4AのSOHコマンドを組み立てる共通ユーティリティ。データ長はビッグエンディアンで格納する。
+    func buildTR4ACommand(command: UInt8, payload: Data, subcommand: UInt8 = 0x00) -> Data {
+        var frame = Data([0x01, command, subcommand, 0x00, 0x00])
+        let length = UInt16(payload.count)
+        frame[3] = UInt8((length >> 8) & 0xFF)
+        frame[4] = UInt8(length & 0xFF)
+        frame.append(payload)
+        let crc = crc16CCITT(frame)
+        frame.append(UInt8((crc >> 8) & 0xFF))
+        frame.append(UInt8(crc & 0xFF))
+        return frame
+    }
+
+    /// TR4Aのコマンド送信手順（0x00ブレーク→20〜100ms→SOHフレーム送信）を1か所にまとめる。
+    func sendTR4AFrameWithBreak(_ frame: Data, to peripheral: CBPeripheral, write: CBCharacteristic, delayMs: Int = 50) {
+        let breakSignal = Data([0x00])
+        peripheral.writeValue(breakSignal, for: write, type: .withoutResponse)
+        bleQueue.asyncAfter(deadline: .now() + .milliseconds(delayMs)) { [weak peripheral] in
+            peripheral?.writeValue(frame, for: write, type: .withoutResponse)
+        }
+    }
+
+    /// 取得した64B設定テーブルを書き戻す（0x3C）。
+    func writeTR4ASettings(_ table: Data, peripheral: CBPeripheral, writeChar: CBCharacteristic, completion: @escaping (Result<Void, Error>) -> Void) {
+        tr4aRouter.waitFor(command: 0x3C) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .failure(let err): completion(.failure(self.translate(err)))
+            case .success(let resp):
+                guard resp.status == 0x00 else {
+                    completion(.failure(TR4AControlError.commandFailed(status: resp.status)))
+                    return
+                }
+                completion(.success(()))
+            }
+        }
+
+        let frame = buildTR4ACommand(command: 0x3C, payload: table)
+        sendTR4AFrameWithBreak(frame, to: peripheral, write: writeChar)
+    }
+
+    func translate(_ error: TR4ACommandRouter.CommandError) -> TR4AControlError {
+        switch error {
+        case .invalidFrame: return .invalidPayload
+        case .timeout: return .timeout
+        }
     }
 }
 

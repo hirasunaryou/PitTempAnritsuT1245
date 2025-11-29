@@ -53,8 +53,9 @@ final class BluetoothService: NSObject, BluetoothServicing {
     private var tr4aLatestSettingsTable: Data?
     private var tr4aPendingIntervalUpdateSeconds: UInt16?
 
-    // Parser / UseCase
+    // Parser / UseCase（TR4AかAnritsuかでパースルートを変える。ログ連携のためParser参照も保持）
     private let temperatureUseCase: TemperatureIngesting
+    private var parserForLogging: TemperaturePacketParser?
 
     // その他
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
@@ -85,8 +86,20 @@ final class BluetoothService: NSObject, BluetoothServicing {
     }
 
     init(temperatureUseCase: TemperatureIngesting = TemperatureIngestUseCase()) {
+        // 既定の UseCase が TemperaturePacketParser を使っている場合、後でロガーを差し込めるよう参照を保持する。
+        if let parserBacked = temperatureUseCase as? TemperatureIngestUseCase,
+           let parser = parserBacked.parser as? TemperaturePacketParser {
+            self.parserForLogging = parser
+        } else if let parser = temperatureUseCase as? TemperaturePacketParser {
+            // テストなどで直に parser を注入したケース。
+            self.parserForLogging = parser
+        }
+
         self.temperatureUseCase = temperatureUseCase
         super.init()
+        parserForLogging?.logger = { [weak self] message in
+            self?.appendBLELog("Parse: \(message)")
+        }
         central = CBCentralManager(delegate: self, queue: bleQueue)
         setupCallbacks()
     }
@@ -285,6 +298,7 @@ private extension BluetoothService {
     /// プロファイル切替のユーティリティ。すでに同じプロファイルなら何もしない。
     func switchProfile(to profile: BLEDeviceProfile) {
         guard profile != activeProfile else { return }
+        appendBLELog("Switch active profile → \(profile.key)")
         activeProfile = profile
         if !profile.requiresPollingForRealtime { stopTR4APolling() }
     }

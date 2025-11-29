@@ -15,6 +15,9 @@ protocol TemperaturePacketParsing {
 /// BLE の Notify(最大20B)から温度フレームを安全に取り出す既定実装。
 /// 例: HEX ... → ASCII="001+00243"（ID=001, 温度=24.3℃）
 final class TemperaturePacketParser: TemperaturePacketParsing {
+    /// 任意のデバッグログ出力先。BluetoothService から差し込んで、受信データの解釈過程を記録できる。
+    /// - Important: BLEログと一緒に確認できるよう、Human readable な文字列を渡すことを想定。
+    var logger: ((String) -> Void)?
 
     /// 1パケット(～20B)から取り出せるだけのフレームを返す（通常は1件）
     func parseFrames(_ data: Data) -> [TemperatureFrame] {
@@ -22,10 +25,15 @@ final class TemperaturePacketParser: TemperaturePacketParsing {
 
         // 先にTR4AのSOHレスポンス(0x33/0x00 系)かどうかを判定。合致したらそちらを返す。
         if let tr4a = parseTR4AFrame(data) {
+            logger?("TR4A 0x33 frame parsed → \(String(format: \"%.1f℃\", tr4a.value))")
             return [tr4a]
         }
 
-        return parseAnritsuASCII(data)
+        let frames = parseAnritsuASCII(data)
+        if let first = frames.first {
+            logger?("Anritsu ASCII parsed → id=\(first.deviceID ?? -1) value=\(String(format: \"%.1f℃\", first.value))")
+        }
+        return frames
     }
 
     // 時刻設定コマンドだけを公開。DATA 取得は通知購読に集約したため残さない。
@@ -38,6 +46,8 @@ final class TemperaturePacketParser: TemperaturePacketParsing {
 private extension TemperaturePacketParser {
     /// 既存Anritsu ASCIIフレームを分解する処理を切り出し（符号位置からID/温度を抽出）。
     func parseAnritsuASCII(_ data: Data) -> [TemperatureFrame] {
+        logger?("ASCII candidate: \(describeBytes(data))")
+
         // 可視ASCIIのみ取り出し
         var asciiBytes: [UInt8] = []
         asciiBytes.reserveCapacity(data.count)
@@ -109,11 +119,19 @@ private extension TemperaturePacketParser {
         let totalNeeded = payloadStart + Int(sizeLE) + 2 // CRC16 2byte を含めた必要長
         guard data.count >= totalNeeded, sizeLE >= 4 else { return nil }
 
+        logger?("TR4A candidate: \(describeBytes(data))")
+
         let rawLE = UInt16(data[payloadStart]) | (UInt16(data[payloadStart + 1]) << 8)
         let raw = Int16(bitPattern: rawLE)
         // 仕様書の式: (Int16値 - 1000) / 10 で ℃ を得る
         let valueC = (Double(raw) - 1000.0) / 10.0
 
         return TemperatureFrame(time: Date(), deviceID: 1, value: valueC, status: nil)
+    }
+
+    /// 受信データをログしやすい Hex 文字列に整形するユーティリティ。
+    /// - Note: 20byte超えでも全体を表示し、デバッグビューで生パケットの確認ができるようにする。
+    func describeBytes(_ data: Data) -> String {
+        data.map { String(format: "%02X", $0) }.joined(separator: " ")
     }
 }

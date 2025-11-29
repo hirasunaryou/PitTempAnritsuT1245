@@ -46,23 +46,52 @@ final class ConnectionManager {
         }
         onCharacteristicSnapshot?(service, service.characteristics ?? [])
         // 期待する UUID を優先しつつ、プロパティに notify/write が含まれる別の characteristic があればフェールバックする。
+        // - TR45 では Data Line が 0x0002/0x0004/0x0007 など複数 advertise されるため、公式サンプルと同じ
+        //   notify/write の組み合わせを優先しながらもプロパティを見て安全な候補へ落とす。
         let characteristics = service.characteristics ?? []
 
-        // UUID一致を優先しつつ、通知/書き込みビットが無ければプロパティ優先で安全な characteristic を選ぶ。
-        // TR45 の環境によっては DataLine UUID が複数あり、必ずしも notify/write ビットを持っていないものが先に見つかるため。
-        let preferredRead = characteristics.first {
-            $0.uuid == profile.notifyCharUUID && ($0.properties.contains(.notify) || $0.properties.contains(.indicate))
+        func firstMatch(in order: [CBUUID], where predicate: (CBCharacteristic) -> Bool) -> CBCharacteristic? {
+            for uuid in order {
+                if let hit = characteristics.first(where: { $0.uuid == uuid && predicate($0) }) {
+                    return hit
+                }
+            }
+            return nil
         }
-        let fallbackRead = characteristics.first { $0.properties.contains(.notify) || $0.properties.contains(.indicate) }
-        let readChar = preferredRead ?? fallbackRead
 
-        let preferredWrite = characteristics.first {
-            $0.uuid == profile.writeCharUUID && ($0.properties.contains(.writeWithoutResponse) || $0.properties.contains(.write))
+        // TR4A の実機では notify が 0x0004/0x0006、write が 0x0007（writeNR）や 0x0003（writeNR）が返ることがある。
+        // 公式サンプルが想定する 0x0004 (notify) + 0x0007 (writeNR) 優先の並びを用意し、最後にプロパティのみでフォールバックする。
+        let tr4aNotifyOrder: [CBUUID] = [
+            CBUUID(string: "6E400004-B5A3-F393-E0A9-E50E24DCCA42"),
+            CBUUID(string: "6E400006-B5A3-F393-E0A9-E50E24DCCA42"),
+            profile.notifyCharUUID
+        ]
+        let tr4aWriteOrder: [CBUUID] = [
+            CBUUID(string: "6E400007-B5A3-F393-E0A9-E50E24DCCA42"),
+            CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
+            profile.writeCharUUID
+        ]
+
+        let notifyPredicate: (CBCharacteristic) -> Bool = {
+            $0.properties.contains(.notify) || $0.properties.contains(.indicate)
         }
-        let fallbackWrite = characteristics.first {
+        let writePredicate: (CBCharacteristic) -> Bool = {
             $0.properties.contains(.writeWithoutResponse) || $0.properties.contains(.write)
         }
-        let writeChar = preferredWrite ?? fallbackWrite
+
+        let readChar: CBCharacteristic?
+        let writeChar: CBCharacteristic?
+
+        if profile == .tr4a {
+            readChar = firstMatch(in: tr4aNotifyOrder, where: notifyPredicate) ?? characteristics.first(where: notifyPredicate)
+            // WriteWithoutResponse を優先するため、writeNR を持つ characteristic を先に探す
+            writeChar = firstMatch(in: tr4aWriteOrder, where: writePredicate) ?? characteristics.first(where: writePredicate)
+        } else {
+            readChar = characteristics.first { $0.uuid == profile.notifyCharUUID && notifyPredicate($0) }
+                ?? characteristics.first(where: notifyPredicate)
+            writeChar = characteristics.first { $0.uuid == profile.writeCharUUID && writePredicate($0) }
+                ?? characteristics.first(where: writePredicate)
+        }
 
         // CBService.peripheral は weak/optional なので、通知設定や後続のコールバックに渡す前に安全に unwrap する。
         guard let peripheral = service.peripheral else {
@@ -79,6 +108,17 @@ final class ConnectionManager {
         // 上の選択処理でビットを確認済みだが、ここでも安全のためチェックしてから登録する。
         if finalRead.properties.contains(.notify) || finalRead.properties.contains(.indicate) {
             peripheral.setNotifyValue(true, for: finalRead)
+        }
+        // TR4A の場合は応答ラインが複数存在するので、すべて notify on しておく（どこにレスポンスが来ても拾うため）。
+        if profile == .tr4a {
+            let notifyPredicate: (CBCharacteristic) -> Bool = {
+                $0.properties.contains(.notify) || $0.properties.contains(.indicate)
+            }
+            (service.characteristics ?? []).filter(notifyPredicate).forEach { char in
+                if char != finalRead {
+                    peripheral.setNotifyValue(true, for: char)
+                }
+            }
         }
         onCharacteristicsReady?(peripheral, finalRead, finalWrite)
     }

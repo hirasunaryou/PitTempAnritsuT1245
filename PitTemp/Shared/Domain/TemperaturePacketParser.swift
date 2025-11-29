@@ -20,7 +20,7 @@ final class TemperaturePacketParser: TemperaturePacketParsing {
     func parseFrames(_ data: Data) -> [TemperatureFrame] {
         guard !data.isEmpty else { return [] }
 
-        // 先にTR4AのSOHレスポンス(0x33/0x81)かどうかを判定。合致したらそちらを返す。
+        // 先にTR4AのSOHレスポンス(0x33/0x00 系)かどうかを判定。合致したらそちらを返す。
         if let tr4a = parseTR4AFrame(data) {
             return [tr4a]
         }
@@ -94,35 +94,26 @@ private extension TemperaturePacketParser {
         return [TemperatureFrame(time: Date(), deviceID: deviceID, value: valueC, status: status)]
     }
 
-    /// TR4A「現在値取得(0x33/0x81)」の応答(最小24B)を簡易パースする。
-    /// - Assumption: データサイズ0x0018の先頭に[Type(0x00), CH数, 測定値(Int16 LE,0.01℃), 状態コード2...]が並ぶ。
-    ///   断線ビット(stateCode2 bit0)のみTemperatureFrame.Statusにマッピングし、温度は0.01℃→℃で返す。
+    /// TR4A「現在値取得(0x33/0x00)」の最小応答(11B)をパースする。
+    /// - Specification: オフセット5のInt16(LE)が (値-1000)/10 ℃ で表され、CH2は7-8byte目に格納される。
+    ///   TR45は1ch温度のみなのでCH1のみ返す。CRCは受信元（BLEスタック）で検証済みとみなしここでは省略する。
     func parseTR4AFrame(_ data: Data) -> TemperatureFrame? {
-        guard data.count >= 9 else { return nil }
-        guard data[0] == 0x01, data[1] == 0x33, data[2] == 0x81 else { return nil }
+        guard data.count >= 11 else { return nil }
+        guard data[0] == 0x01, data[1] == 0x33 else { return nil }
+
+        let sub = data[2]
+        guard sub == 0x00 || sub == 0x80 else { return nil } // 0x80は成功応答の場合がある
 
         let sizeLE = UInt16(data[3]) | (UInt16(data[4]) << 8)
-        let payloadStart = 6 // status(1B)を飛ばした位置
-        let totalNeeded = payloadStart + Int(sizeLE) + 2 // CRC2B
-        guard data.count >= totalNeeded else { return nil }
+        let payloadStart = 5
+        let totalNeeded = payloadStart + Int(sizeLE) + 2 // CRC16 2byte を含めた必要長
+        guard data.count >= totalNeeded, sizeLE >= 4 else { return nil }
 
-        let status = data[5]
-        guard status == 0x00 else { return nil } // コマンド失敗時は温度を起こさない
+        let rawLE = UInt16(data[payloadStart]) | (UInt16(data[payloadStart + 1]) << 8)
+        let raw = Int16(bitPattern: rawLE)
+        // 仕様書の式: (Int16値 - 1000) / 10 で ℃ を得る
+        let valueC = (Double(raw) - 1000.0) / 10.0
 
-        let payload = data[payloadStart..<payloadStart + Int(sizeLE)]
-        guard payload.count >= 4 else { return nil }
-
-        let channel = Int(payload[payload.startIndex + 1])
-        let raw = Int16(bitPattern: UInt16(payload[payload.startIndex + 2])
-                        | (UInt16(payload[payload.startIndex + 3]) << 8))
-        let valueC = Double(raw) / 100.0
-
-        var frameStatus: TemperatureFrame.Status?
-        if payload.count > 4 {
-            let stateCode2 = payload[payload.startIndex + 4]
-            if stateCode2 & 0x01 == 1 { frameStatus = .bout }
-        }
-
-        return TemperatureFrame(time: Date(), deviceID: channel, value: valueC, status: frameStatus)
+        return TemperatureFrame(time: Date(), deviceID: 1, value: valueC, status: nil)
     }
 }

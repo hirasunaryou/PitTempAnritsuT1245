@@ -33,6 +33,8 @@ final class MockBluetoothService: BluetoothServicing {
     func disconnect() { didDisconnect = true }
     func setDeviceTime(to date: Date) { /* no-op for tests */ }
     func setPreferredIDs(_ ids: Set<String>) { /* record if needed */ }
+    func refreshTR4ASettings() { /* no-op in mock */ }
+    func updateTR4ARecordInterval(seconds: UInt16) { /* no-op in mock */ }
 
     /// テスト側から任意のフレームを流し込むためのヘルパー。
     func emit(frame: TemperatureFrame) { subject.send(frame) }

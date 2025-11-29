@@ -35,6 +35,8 @@ protocol BluetoothServicing: TemperatureSensorClient {
     var notifyCountPublisher: AnyPublisher<Int, Never> { get }
 
     func setPreferredIDs(_ ids: Set<String>)
+    func refreshTR4ASettings()
+    func updateTR4ARecordInterval(seconds: UInt16)
 }
 
 /// スキャンで見つけたデバイスを記録するレジストリのインターフェイス。

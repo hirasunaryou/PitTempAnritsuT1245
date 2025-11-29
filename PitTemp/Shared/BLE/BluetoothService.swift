@@ -47,6 +47,9 @@ final class BluetoothService: NSObject, BluetoothServicing {
 
     // TR4A向けのポーリングタイマー（現在値取得を1秒ごとに送信）
     private var tr4aPollTimer: DispatchSourceTimer?
+    // TR4A 記録設定のスナップショットと保留中の更新値
+    private var tr4aLatestSettingsTable: Data?
+    private var tr4aPendingIntervalUpdateSeconds: UInt16?
 
     // Parser / UseCase
     private let temperatureUseCase: TemperatureIngesting
@@ -102,6 +105,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil; readChar = nil; writeChar = nil
         stopTR4APolling()
+        tr4aLatestSettingsTable = nil
+        tr4aPendingIntervalUpdateSeconds = nil
         DispatchQueue.main.async { self.connectionState = .idle }
     }
 
@@ -128,6 +133,21 @@ final class BluetoothService: NSObject, BluetoothServicing {
         guard let p = peripheral, let w = writeChar else { return }
         let cmd = temperatureUseCase.makeTimeSyncPayload(for: date)
         p.writeValue(cmd, for: w, type: .withResponse)
+    }
+
+    /// TR4A の設定テーブル（64byte）を読み出す。アプリからサンプリング間隔を変更する前段として利用。
+    func refreshTR4ASettings() {
+        guard activeProfile.requiresPollingForRealtime, let p = peripheral, let w = writeChar else { return }
+        let frame = buildTR4ASettingsRequestCommand()
+        sendTR4ACommandWithBreak(frame, peripheral: p, write: w)
+    }
+
+    /// TR4A のサンプリング間隔（記録間隔）をアプリ側から更新する。
+    /// - Note: 仕様上、まず 0x85 で設定テーブルを取得し、その内容を上書きして 0x3C で書き戻す必要がある。
+    func updateTR4ARecordInterval(seconds: UInt16) {
+        guard activeProfile.requiresPollingForRealtime else { return }
+        tr4aPendingIntervalUpdateSeconds = seconds
+        refreshTR4ASettings()
     }
 
     // UI から設定するためのセッターを用意
@@ -195,9 +215,10 @@ private extension BluetoothService {
         if !profile.requiresPollingForRealtime { stopTR4APolling() }
     }
 
-    /// TR4Aの現在値取得（0x33-0x01コマンド）を1秒周期で発行し、Notify経由で値を受け取る。
-    /// - Note: T&Dの仕様書にある「SOH直前の0x00(ブレーク信号)→20〜100ms後コマンド送信」を
-    ///   一続きのWriteWithoutResponseでまとめ、1秒以上間隔を空けることで実機負荷を抑える。
+    /// TR4Aの現在値取得（0x33-0x00コマンド）を1秒周期で発行し、Notify経由で値を受け取る。
+    /// - Important: TR4Aシリーズは「0x00（ブレーク）送信→20〜100ms待機→SOHコマンド送信」の順で
+    ///   送らないと応答が返らない。BLEの書き込み制限を考慮して、ブレークとコマンドを分離し、
+    ///   専用キューでディレイを挟んで送信している。
     func startTR4APollingIfNeeded(peripheral: CBPeripheral, write: CBCharacteristic?) {
         stopTR4APolling()
         guard activeProfile.requiresPollingForRealtime, let write else { return }
@@ -206,9 +227,8 @@ private extension BluetoothService {
         timer.schedule(deadline: .now() + .milliseconds(200), repeating: .seconds(1))
         timer.setEventHandler { [weak self, weak peripheral] in
             guard let self, let p = peripheral else { return }
-            let cmd = self.buildTR4ACurrentValueCommand()
-            // TR4AはData Line特性にWriteWithoutResponseで流し込む。
-            p.writeValue(cmd, for: write, type: .withoutResponse)
+            let frame = self.buildTR4ACurrentValueCommand()
+            self.sendTR4ACommandWithBreak(frame, peripheral: p, write: write)
         }
         timer.resume()
         tr4aPollTimer = timer
@@ -219,18 +239,51 @@ private extension BluetoothService {
         tr4aPollTimer = nil
     }
 
-    /// TR4A「現在値取得(0x33/0x01)」SOHコマンドフレームを組み立てる。
-    /// - Structure: 0x00(ブレーク) + SOH(0x01) + CMD + SUB + DataSize(LE) + CRC16-BE。
-    /// - DataSizeは0（ペイロード無し）。CRCはSOH以降をCCITT初期値0xFFFFで計算。
+    /// TR4A「現在値取得(0x33/0x00)」SOHコマンドフレームを組み立てる。
+    /// - Structure: SOH(0x01) + CMD(0x33) + SUB(0x00) + DataSize(0x0400) + Data(0x00000000) + CRC16-BE。
+    /// - Note: ブレーク(0x00)は送信時に別 write として挟む。CRCはSOH以降を CCITT 初期値0xFFFF で計算。
     func buildTR4ACurrentValueCommand() -> Data {
-        var frame = Data([0x01, 0x33, 0x01, 0x00, 0x00])
+        // データ長はリトルエンディアン 0x0400（=4byte）
+        var frame = Data([0x01, 0x33, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00])
         let crc = crc16CCITT(frame)
         frame.append(UInt8((crc >> 8) & 0xFF))
         frame.append(UInt8(crc & 0xFF))
+        return frame
+    }
 
-        var packet = Data([0x00])
-        packet.append(frame)
-        return packet
+    /// TR4Aコマンド送信の共通ユーティリティ（ブレーク→所定のSOHフレーム）。
+    /// - Parameter delayMs: ブレーク後に挟むウェイト。仕様上20〜100msが推奨されるため、50msを既定値にしている。
+    func sendTR4ACommandWithBreak(_ frame: Data, peripheral: CBPeripheral, write: CBCharacteristic, delayMs: Int = 50) {
+        peripheral.writeValue(Data([0x00]), for: write, type: .withoutResponse)
+        bleQueue.asyncAfter(deadline: .now() + .milliseconds(delayMs)) {
+            peripheral.writeValue(frame, for: write, type: .withoutResponse)
+        }
+    }
+
+    /// TR4A 設定テーブル取得(0x85)の SOH コマンドを構築する。
+    /// - Note: Data Length=0x0400, Data=0x00000000 固定で CRC16 を付与する。
+    func buildTR4ASettingsRequestCommand() -> Data {
+        var frame = Data([0x01, 0x85, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00])
+        let crc = crc16CCITT(frame)
+        frame.append(UInt8((crc >> 8) & 0xFF))
+        frame.append(UInt8(crc & 0xFF))
+        return frame
+    }
+
+    /// TR4A 記録開始(0x3C)の SOH コマンドを構築する。
+    /// - Parameter settingsTable: 64byte の設定テーブル。先頭2byteが記録間隔(秒,LE)。
+    func buildTR4AStartCommand(settingsTable: Data) -> Data {
+        var table = settingsTable
+        if table.count < 64 {
+            table.append(Data(repeating: 0x00, count: 64 - table.count))
+        }
+
+        var frame = Data([0x01, 0x3C, 0x00, 0x40, 0x00])
+        frame.append(table.prefix(64))
+        let crc = crc16CCITT(frame)
+        frame.append(UInt8((crc >> 8) & 0xFF))
+        frame.append(UInt8(crc & 0xFF))
+        return frame
     }
 
     /// TR4A仕様書に従い、SOH〜データまでを対象にCRC16-CCITT(0x1021)を計算する。
@@ -247,6 +300,45 @@ private extension BluetoothService {
             }
         }
         return crc
+    }
+
+    /// 0x85 応答など TR4A 固有の制御レスポンスを横取りし、設定変更ワークフローに反映する。
+    func handleTR4AControlFramesIfNeeded(_ data: Data, peripheral: CBPeripheral) {
+        guard activeProfile.requiresPollingForRealtime else { return }
+        guard data.count >= 5, data[0] == 0x01 else { return }
+
+        let command = data[1]
+        let sub = data[2]
+        let sizeLE = UInt16(data[3]) | (UInt16(data[4]) << 8)
+        let payloadStart = 5
+        let totalNeeded = payloadStart + Int(sizeLE) + 2 // payload + CRC16
+        guard data.count >= totalNeeded else { return }
+
+        if command == 0x85, (sub == 0x00 || sub == 0x80) {
+            // 64byte の設定テーブルをキャッシュし、待機中の記録間隔更新があれば上書きする。
+            let payload = data[payloadStart..<payloadStart + Int(sizeLE)]
+            tr4aLatestSettingsTable = Data(payload.prefix(64))
+            if let pending = tr4aPendingIntervalUpdateSeconds {
+                applyTR4AIntervalUpdate(pending, using: peripheral)
+            }
+        }
+    }
+
+    /// 設定テーブルを使って記録間隔を書き換え、0x3C コマンドで TR4A に送信する。
+    func applyTR4AIntervalUpdate(_ seconds: UInt16, using peripheral: CBPeripheral) {
+        guard let write = writeChar else { return }
+
+        // 既存テーブルをベースに、先頭2byteを記録間隔（秒, LE）として書き換える。
+        var table = tr4aLatestSettingsTable ?? Data(repeating: 0x00, count: 64)
+        if table.count < 64 { table.append(Data(repeating: 0x00, count: 64 - table.count)) }
+        table[0] = UInt8(seconds & 0xFF)
+        table[1] = UInt8((seconds >> 8) & 0xFF)
+
+        let frame = buildTR4AStartCommand(settingsTable: table)
+        sendTR4ACommandWithBreak(frame, peripheral: peripheral, write: write)
+
+        tr4aPendingIntervalUpdateSeconds = nil
+        tr4aLatestSettingsTable = table
     }
 }
 
@@ -306,6 +398,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
+        handleTR4AControlFramesIfNeeded(data, peripheral: peripheral)
         notifyController.handleNotification(data)
     }
 }

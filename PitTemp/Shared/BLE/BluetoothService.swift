@@ -22,7 +22,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     var temperatureFrames: AnyPublisher<TemperatureFrame, Never> { temperatureFramesSubject.eraseToAnyPublisher() }
 
     // 外部レジストリ（App から注入）
-    weak var registry: DeviceRegistrying? {
+    weak var registry: (any DeviceRegistrying)? {
         didSet { scanner.registry = registry }
     }
 
@@ -213,7 +213,7 @@ private extension BluetoothService {
         scanner.onDiscovered = { [weak self] entry, peripheral in
             guard let self else { return }
             self.scannedProfiles[entry.id] = entry.profile
-            self.appendBLELog("Cache discovery: \(entry.name) profile=\(entry.profile.key) RSSI=\(entry.rssi ?? 0)")
+            self.appendBLELog("Cache discovery: \(entry.name) profile=\(entry.profile.key) RSSI=\(entry.rssi)")
             DispatchQueue.main.async {
                 if let idx = self.scanned.firstIndex(where: { $0.id == entry.id }) {
                     self.scanned[idx] = entry
@@ -259,7 +259,7 @@ private extension BluetoothService {
         connectionManager.onCharacteristicSnapshot = { [weak self] service, chars in
             guard let self else { return }
             let entries = chars.map { c in
-                let props = describeProperties(c.properties)
+                let props = self.describeProperties(c.properties)
                 return "\(c.uuid.uuidString) [\(props)]"
             }.joined(separator: ", ")
             appendBLELog("Characteristics under \(service.uuid.uuidString): \(entries)")

@@ -11,7 +11,7 @@ final class MockBluetoothService: BluetoothServicing {
     @Published var notifyCountUI: Int = 0
     @Published var notifyHz: Double = 0
     @Published var bleDebugLog: [BLEDebugLogEntry] = []
-    var registry: DeviceRegistrying?
+    var registry: (any DeviceRegistrying)?
     var connectionStatePublisher: AnyPublisher<ConnectionState, Never> { $connectionState.eraseToAnyPublisher() }
     var scannedPublisher: AnyPublisher<[ScannedDevice], Never> { $scanned.eraseToAnyPublisher() }
     var deviceNamePublisher: AnyPublisher<String?, Never> { $deviceName.eraseToAnyPublisher() }

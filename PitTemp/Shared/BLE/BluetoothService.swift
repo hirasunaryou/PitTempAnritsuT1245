@@ -465,6 +465,7 @@ private extension BluetoothService {
     }
 
     /// TR4A 通知チャンクを蓄積し、SOHフレーム単位で NotifyController へ橋渡しする。
+    /// - Note: 解析途中で破棄されると現場デバッグが困難になるため、CRC/長さが不正な場合も警告としてログを残す。
     func processTR4ANotification(chunk: Data, peripheral: CBPeripheral) {
         tr4aReceiveBuffer.append(chunk)
 
@@ -496,15 +497,36 @@ private extension BluetoothService {
 
     /// 1フレーム分の TR4A SOH 応答を解析し、設定処理とパースへ回す。
     func processTR4AFrame(_ frame: Data, peripheral: CBPeripheral) {
-        guard frame.count >= 5 else { return }
+        // フレーム最小サイズに届いていない場合は hex を残して復帰。環境依存で断片的な notify が混じることがあるため。
+        guard frame.count >= 5 else {
+            appendBLELog("TR4A frame too small (\(frame.count)B): \(hexString(frame))", level: .warning)
+            return
+        }
         let command = frame[1]
         let status = frame[2]
         let sizeLE = UInt16(frame[3]) | (UInt16(frame[4]) << 8)
         let payloadStart = 5
         let payloadEnd = payloadStart + Int(sizeLE)
-        guard frame.count >= payloadEnd + 2 else { return }
+        guard frame.count >= payloadEnd + 2 else {
+            appendBLELog(
+                "TR4A frame truncated cmd=0x\(String(format: "%02X", command)) status=0x\(String(format: "%02X", status)) len=\(sizeLE) hex=\(hexString(frame))",
+                level: .warning
+            )
+            return
+        }
 
         let payload = frame[payloadStart..<payloadEnd]
+        // CRC16-CCITT(0xFFFF init) を SOH〜payload までで検証する。CRC不一致でも hex を残し、現場で比較できるようにする。
+        let receivedCRC = UInt16(frame[payloadEnd]) << 8 | UInt16(frame[payloadEnd + 1])
+        let computedCRC = crc16CCITT(frame.prefix(payloadEnd))
+        if receivedCRC != computedCRC {
+            appendBLELog(
+                "TR4A frame CRC/len invalid cmd=0x\(String(format: "%02X", command)) status=0x\(String(format: "%02X", status)) len=\(sizeLE) receivedCRC=0x\(String(format: "%04X", receivedCRC)) expectedCRC=0x\(String(format: "%04X", computedCRC)) hex=\(hexString(frame))",
+                level: .warning
+            )
+            return
+        }
+
         appendBLELog("Parsed TR4A frame cmd=0x\(String(format: "%02X", command)) status=0x\(String(format: "%02X", status)) len=\(sizeLE) payload=\(hexString(Data(payload)))")
 
         handleTR4AControlFramesIfNeeded(command: command, status: status, payload: Data(payload), peripheral: peripheral)

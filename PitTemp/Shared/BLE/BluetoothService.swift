@@ -259,6 +259,9 @@ final class BluetoothService: NSObject, BluetoothServicing {
 // MARK: - Private
 private extension BluetoothService {
     func setupCallbacks() {
+        connectionManager.onLog = { [weak self] message, level in
+            self?.appendBLELog(message, level: level)
+        }
         scanner.onDiscovered = { [weak self] entry, peripheral in
             guard let self else { return }
             self.scannedProfiles[entry.id] = entry.profile
@@ -665,6 +668,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         print("[BLE] connected to \(p.name ?? "?")")
         appendBLELog("Connected to \(p.name ?? p.identifier.uuidString)")
         p.delegate = self
+        appendBLELog("TR4A: set delegate for \(p.identifier.uuidString) to \(String(describing: self))")
         connectionManager.didConnect(p)
     }
 
@@ -709,6 +713,13 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
+        if let error {
+            appendBLELog("didUpdateValue error for \(characteristic.uuid.uuidString) on \(peripheral.identifier.uuidString): \(error.localizedDescription)", level: .error)
+        }
+        let length = characteristic.value?.count ?? 0
+        let hex = characteristic.value.map { hexString($0) } ?? "<nil>"
+        appendBLELog("didUpdateValueFor uuid=\(characteristic.uuid.uuidString) service=\(characteristic.service?.uuid.uuidString ?? "nil") len=\(length) hex=\(hex)")
+
         guard error == nil, let data = characteristic.value else { return }
         appendBLELog("← Notify \(characteristic.uuid) (\(data.count) bytes): \(hexString(data))")
 

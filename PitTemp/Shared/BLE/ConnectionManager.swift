@@ -1,9 +1,14 @@
 import Foundation
 import CoreBluetooth
 
+/// 外部からログ出力を注入するためのシンプルなフック。
+typealias ConnectionManagerLog = (String, BLEDebugLogEntry.Level) -> Void
+
 /// サービス/キャラクタリスティック探索を担当
 final class ConnectionManager {
     private var profile: BLEDeviceProfile
+
+    var onLog: ConnectionManagerLog?
 
     var onCharacteristicsReady: ((CBPeripheral, CBCharacteristic?, CBCharacteristic?) -> Void)?
     var onFailed: ((String) -> Void)?
@@ -107,6 +112,7 @@ final class ConnectionManager {
         // setNotifyValue は notify/indicate ビットが無い characteristic へ投げると iOS 側がエラーを返す。
         // 上の選択処理でビットを確認済みだが、ここでも安全のためチェックしてから登録する。
         if finalRead.properties.contains(.notify) || finalRead.properties.contains(.indicate) {
+            onLog?("TR4A: setNotifyValue true for \(finalRead.uuid.uuidString) on \(peripheral.identifier.uuidString)", .info)
             peripheral.setNotifyValue(true, for: finalRead)
         }
         // TR4A の場合は応答ラインが複数存在するので、すべて notify on しておく（どこにレスポンスが来ても拾うため）。
@@ -116,6 +122,7 @@ final class ConnectionManager {
             }
             (service.characteristics ?? []).filter(notifyPredicate).forEach { char in
                 if char != finalRead {
+                    onLog?("TR4A: setNotifyValue true for \(char.uuid.uuidString) on \(peripheral.identifier.uuidString) (extra notify line)", .info)
                     peripheral.setNotifyValue(true, for: char)
                 }
             }

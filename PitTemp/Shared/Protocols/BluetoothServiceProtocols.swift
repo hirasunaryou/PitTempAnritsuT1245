@@ -40,6 +40,7 @@ protocol BluetoothServicing: TemperatureSensorClient {
     func refreshTR4ASettings()
     func updateTR4ARecordInterval(seconds: UInt16)
     func setTR4APollingInterval(seconds: TimeInterval)
+    func setTR4ARegistrationCode(_ code: String)
     func clearDebugLog()
 }
 

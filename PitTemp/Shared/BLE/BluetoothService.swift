@@ -52,6 +52,12 @@ final class BluetoothService: NSObject, BluetoothServicing {
     // TR4A 記録設定のスナップショットと保留中の更新値
     private var tr4aLatestSettingsTable: Data?
     private var tr4aPendingIntervalUpdateSeconds: UInt16?
+    // TR4A 受信組み立て用バッファ（20byte刻みで飛んでくる notify を1フレームにまとめる）。
+    private var tr4aReceiveBuffer = Data()
+    // TR4A の登録コード（パスコード）。REFUSE(0x0F) 応答時に 0x76 で投げる。UInt32 を保持してビルド時のエンディアンミスを避ける。
+    private var tr4aRegistrationCode: UInt32?
+    private var tr4aAuthInFlight = false
+    private var tr4aAuthSucceeded = false
 
     // Parser / UseCase（TR4AかAnritsuかでパースルートを変える。ログ連携のためParser参照も保持）
     private let temperatureUseCase: TemperatureIngesting
@@ -213,6 +219,31 @@ final class BluetoothService: NSObject, BluetoothServicing {
         preferredIDs = ids
     }
 
+    /// TR4A の登録コード（パスコード）を設定する。空文字や変換失敗時は解除として扱う。
+    func setTR4ARegistrationCode(_ code: String) {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            tr4aRegistrationCode = nil
+            tr4aAuthSucceeded = false
+            appendBLELog("TR4A registration code cleared")
+            return
+        }
+
+        // 「0x」付きは16進、それ以外は10進として受け付ける。UInt32 に収まらなければ無効。
+        let normalized = trimmed.lowercased()
+        let radix: Int = normalized.hasPrefix("0x") ? 16 : 10
+        let digits = normalized.replacingOccurrences(of: "0x", with: "")
+
+        guard let value = UInt32(digits, radix: radix) else {
+            appendBLELog("Invalid TR4A registration code input: \(code)", level: .warning)
+            return
+        }
+
+        tr4aRegistrationCode = value
+        tr4aAuthSucceeded = false
+        appendBLELog("TR4A registration code stored (radix=\(radix), digits=\(digits.count))")
+    }
+
     /// 内部デバッグログに追加するユーティリティ。BLEキューから呼ばれるため Main へ hop する。
     func appendBLELog(_ message: String, level: BLEDebugLogEntry.Level = .info) {
         DispatchQueue.main.async { [weak self] in
@@ -268,6 +299,11 @@ private extension BluetoothService {
                 self.setDeviceTime()
             }
             self.appendBLELog("Notify=\(read?.uuid.uuidString ?? "nil"), Write=\(write?.uuid.uuidString ?? "nil") selected")
+
+            // 登録コードが設定されている場合、TR4A では最初に認証を飛ばしておくと REFUSE(0x0F) で足踏みしない。
+            if self.activeProfile.requiresPollingForRealtime, let write, let pCode = self.tr4aRegistrationCode {
+                self.sendTR4APasscodeIfNeeded(code: pCode, peripheral: peripheral, write: write, reason: "on-ready")
+            }
             startTR4APollingIfNeeded(peripheral: peripheral, write: write)
         }
         connectionManager.onFailed = { [weak self] message in
@@ -358,12 +394,32 @@ private extension BluetoothService {
         guard peripheral.state == .connected else { return }
 
         let writeType = preferredWriteType(for: write)
-        appendBLELog("→ BREAK 0x00 then command (delay=\(delayMs)ms, type=\(writeType == .withoutResponse ? "no-rsp" : "with-rsp"))")
+        appendBLELog("→ BREAK 0x00 then command (delay=\(delayMs)ms, type=\(writeType == .withoutResponse ? "no-rsp" : "with-rsp")) frame=\(hexString(frame))")
         peripheral.writeValue(Data([0x00]), for: write, type: writeType)
         bleQueue.asyncAfter(deadline: .now() + .milliseconds(delayMs)) {
             guard peripheral.state == .connected else { return }
             peripheral.writeValue(frame, for: write, type: writeType)
         }
+    }
+
+    /// 0x76 パスコード認証フレームを構築して送信する。UInt32 を LE で埋め込み、CRC16 はビッグエンディアン。
+    func sendTR4APasscodeIfNeeded(code: UInt32, peripheral: CBPeripheral, write: CBCharacteristic, reason: String) {
+        guard peripheral.state == .connected else { return }
+        guard !tr4aAuthInFlight else { return }
+        guard !tr4aAuthSucceeded else { return }
+
+        var frame = Data([0x01, 0x76, 0x00, 0x04, 0x00])
+        frame.append(UInt8(code & 0xFF))
+        frame.append(UInt8((code >> 8) & 0xFF))
+        frame.append(UInt8((code >> 16) & 0xFF))
+        frame.append(UInt8((code >> 24) & 0xFF))
+        let crc = crc16CCITT(frame)
+        frame.append(UInt8((crc >> 8) & 0xFF))
+        frame.append(UInt8(crc & 0xFF))
+
+        tr4aAuthInFlight = true
+        appendBLELog("→ Send 0x76 passcode (reason=\(reason))")
+        sendTR4ACommandWithBreak(frame, peripheral: peripheral, write: write)
     }
 
     /// TR4A 設定テーブル取得(0x85)の SOH コマンドを構築する。
@@ -408,21 +464,80 @@ private extension BluetoothService {
         return crc
     }
 
-    /// 0x85 応答など TR4A 固有の制御レスポンスを横取りし、設定変更ワークフローに反映する。
-    func handleTR4AControlFramesIfNeeded(_ data: Data, peripheral: CBPeripheral) {
-        guard activeProfile.requiresPollingForRealtime else { return }
-        guard data.count >= 5, data[0] == 0x01 else { return }
+    /// TR4A 通知チャンクを蓄積し、SOHフレーム単位で NotifyController へ橋渡しする。
+    func processTR4ANotification(chunk: Data, peripheral: CBPeripheral) {
+        tr4aReceiveBuffer.append(chunk)
 
-        let command = data[1]
-        let sub = data[2]
-        let sizeLE = UInt16(data[3]) | (UInt16(data[4]) << 8)
+        // SOH(0x01) が先頭に来るまで捨てる（初期ゴミ対策）。
+        if let sohIndex = tr4aReceiveBuffer.firstIndex(of: 0x01), sohIndex > 0 {
+            appendBLELog("Drop leading \(sohIndex)B before SOH: \(hexString(tr4aReceiveBuffer.prefix(sohIndex)))", level: .warning)
+            tr4aReceiveBuffer.removeFirst(sohIndex)
+        } else if tr4aReceiveBuffer.first != 0x01 {
+            return
+        }
+
+        while tr4aReceiveBuffer.count >= 5 {
+            let sizeLE = UInt16(tr4aReceiveBuffer[3]) | (UInt16(tr4aReceiveBuffer[4]) << 8)
+            let totalNeeded = 5 + Int(sizeLE) + 2 // payload + CRC16
+
+            if totalNeeded <= 0 || totalNeeded > 256 {
+                appendBLELog("TR4A frame length invalid (len=\(sizeLE)); clearing buffer", level: .warning)
+                tr4aReceiveBuffer.removeAll()
+                return
+            }
+
+            guard tr4aReceiveBuffer.count >= totalNeeded else { return }
+
+            let frame = tr4aReceiveBuffer.prefix(totalNeeded)
+            tr4aReceiveBuffer.removeFirst(totalNeeded)
+            processTR4AFrame(Data(frame), peripheral: peripheral)
+        }
+    }
+
+    /// 1フレーム分の TR4A SOH 応答を解析し、設定処理とパースへ回す。
+    func processTR4AFrame(_ frame: Data, peripheral: CBPeripheral) {
+        guard frame.count >= 5 else { return }
+        let command = frame[1]
+        let status = frame[2]
+        let sizeLE = UInt16(frame[3]) | (UInt16(frame[4]) << 8)
         let payloadStart = 5
-        let totalNeeded = payloadStart + Int(sizeLE) + 2 // payload + CRC16
-        guard data.count >= totalNeeded else { return }
+        let payloadEnd = payloadStart + Int(sizeLE)
+        guard frame.count >= payloadEnd + 2 else { return }
 
-        if command == 0x85, (sub == 0x00 || sub == 0x80) {
+        let payload = frame[payloadStart..<payloadEnd]
+        appendBLELog("Parsed TR4A frame cmd=0x\(String(format: "%02X", command)) status=0x\(String(format: "%02X", status)) len=\(sizeLE) payload=\(hexString(Data(payload)))")
+
+        handleTR4AControlFramesIfNeeded(command: command, status: status, payload: Data(payload), peripheral: peripheral)
+        notifyController.handleNotification(frame)
+    }
+
+    /// 0x85/0x3C など TR4A 固有の制御レスポンスを横取りし、設定変更ワークフローに反映する。
+    func handleTR4AControlFramesIfNeeded(command: UInt8, status: UInt8, payload: Data, peripheral: CBPeripheral) {
+        guard activeProfile.requiresPollingForRealtime else { return }
+
+        if command == 0x33, status == 0x0F {
+            appendBLELog("TR4A 0x33 REFUSE (status=0x0F). Registration code likely required.", level: .warning)
+            tr4aAuthInFlight = false // 応答が返らず inFlight が張り付いた場合も再送できるようにする。
+            if let write = writeChar, let code = tr4aRegistrationCode {
+                sendTR4APasscodeIfNeeded(code: code, peripheral: peripheral, write: write, reason: "0x33 refused")
+            } else {
+                appendBLELog("Registration code not set; waiting for user input in Settings > Bluetooth", level: .warning)
+            }
+        }
+
+        if command == 0x76 {
+            tr4aAuthInFlight = false
+            if status == 0x06 {
+                tr4aAuthSucceeded = true
+                appendBLELog("TR4A passcode accepted (0x76 ACK)")
+            } else {
+                tr4aAuthSucceeded = false
+                appendBLELog("TR4A passcode rejected (status=0x\(String(format: "%02X", status)))", level: .warning)
+            }
+        }
+
+        if command == 0x85, status == 0x06 {
             // 64byte の設定テーブルをキャッシュし、待機中の記録間隔更新があれば上書きする。
-            let payload = data[payloadStart..<payloadStart + Int(sizeLE)]
             tr4aLatestSettingsTable = Data(payload.prefix(64))
             appendBLELog("← 0x85 settings table received (\(payload.count) bytes)")
             if let pending = tr4aPendingIntervalUpdateSeconds {
@@ -473,6 +588,11 @@ private extension BluetoothService {
         return flags.isEmpty ? "-" : flags.joined(separator: "/")
     }
 
+    /// デバッグ用に Data を16進文字列へ展開する簡易ユーティリティ。
+    func hexString(_ data: Data) -> String {
+        data.map { String(format: "%02X", $0) }.joined(separator: " ")
+    }
+
     /// 接続が切断されたときの共通リセット処理。
     /// - Parameters:
     ///   - resetState: true の場合は connectionState を idle へ戻す。外部が再接続を試みる際に利用。
@@ -485,6 +605,9 @@ private extension BluetoothService {
         stopTR4APolling()
         tr4aLatestSettingsTable = nil
         tr4aPendingIntervalUpdateSeconds = nil
+        tr4aReceiveBuffer.removeAll()
+        tr4aAuthInFlight = false
+        tr4aAuthSucceeded = false
         if resetState {
             DispatchQueue.main.async { self.connectionState = .idle }
         }
@@ -565,8 +688,14 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
-        appendBLELog("← Notify \(characteristic.uuid) (\(data.count) bytes)")
-        handleTR4AControlFramesIfNeeded(data, peripheral: peripheral)
+        appendBLELog("← Notify \(characteristic.uuid) (\(data.count) bytes): \(hexString(data))")
+
+        // TR4A 系は20Bチャンクをまとめる必要があるため、専用バッファで組み立てる。
+        if activeProfile.requiresPollingForRealtime {
+            processTR4ANotification(chunk: data, peripheral: peripheral)
+            return
+        }
+
         notifyController.handleNotification(data)
     }
 }

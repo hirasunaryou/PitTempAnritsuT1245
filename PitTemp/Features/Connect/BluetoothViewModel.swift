@@ -101,6 +101,9 @@ final class BluetoothViewModel: ObservableObject {
     /// Clear the BLE debug log so the next repro is easier to read.
     func clearDebugLog() { service.clearDebugLog() }
 
+    /// Update TR4A registration code (パスコード) for passcode-locked devices.
+    func updateTR4ARegistrationCode(_ code: String) { service.setTR4ARegistrationCode(code) }
+
     /// Update the auto-connect flag from Settings or a Toggle.
     func updateAutoConnect(isEnabled: Bool) {
         service.autoConnectOnDiscover = isEnabled

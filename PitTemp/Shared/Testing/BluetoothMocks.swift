@@ -38,6 +38,7 @@ final class MockBluetoothService: BluetoothServicing {
     func refreshTR4ASettings() { /* no-op in mock */ }
     func updateTR4ARecordInterval(seconds: UInt16) { /* no-op in mock */ }
     func setTR4APollingInterval(seconds: TimeInterval) { /* no-op in mock */ }
+    func setTR4ARegistrationCode(_ code: String) { /* no-op in mock */ }
     func clearDebugLog() { bleDebugLog.removeAll() }
 
     /// テスト側から任意のフレームを流し込むためのヘルパー。

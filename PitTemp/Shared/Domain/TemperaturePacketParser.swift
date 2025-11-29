@@ -112,15 +112,15 @@ private extension TemperaturePacketParser {
         guard data.count >= 11 else { return nil }
         guard data[0] == 0x01, data[1] == 0x33 else { return nil }
 
-        let sub = data[2]
-        guard sub == 0x00 || sub == 0x80 else { return nil } // 0x80は成功応答の場合がある
+        let status = data[2]
+        // 0x06 = ACK, 0x0F = REFUSE。ステータスをログに残し、ACK のみ温度に反映する。
+        logger?("TR4A candidate: status=0x\(String(format: "%02X", status)) bytes=\(describeBytes(data))")
+        guard status == 0x06 else { return nil }
 
         let sizeLE = UInt16(data[3]) | (UInt16(data[4]) << 8)
         let payloadStart = 5
         let totalNeeded = payloadStart + Int(sizeLE) + 2 // CRC16 2byte を含めた必要長
         guard data.count >= totalNeeded, sizeLE >= 4 else { return nil }
-
-        logger?("TR4A candidate: \(describeBytes(data))")
 
         let rawLE = UInt16(data[payloadStart]) | (UInt16(data[payloadStart + 1]) << 8)
         let raw = Int16(bitPattern: rawLE)

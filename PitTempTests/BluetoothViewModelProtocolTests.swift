@@ -30,7 +30,7 @@ final class BluetoothViewModelProtocolTests: XCTestCase {
         let registry = MockDeviceRegistry()
         registry.known = [DeviceRecord(id: "abc", name: "AnritsuM-01", alias: "Phoenix", autoConnect: false, lastSeenAt: Date(), lastRSSI: nil)]
         let vm = BluetoothViewModel(service: service, registry: registry)
-        let scanned = ScannedDevice(id: "abc", name: "AnritsuM-01", rssi: -50, lastSeenAt: Date())
+        let scanned = ScannedDevice(id: "abc", name: "AnritsuM-01", rssi: -50, lastSeenAt: Date(), profile: .anritsu)
 
         XCTAssertEqual(vm.displayName(for: scanned), "Phoenix (AnritsuM-01)")
     }

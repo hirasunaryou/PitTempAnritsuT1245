@@ -3,17 +3,18 @@ import CoreBluetooth
 
 /// サービス/キャラクタリスティック探索を担当
 final class ConnectionManager {
-    private let serviceUUID: CBUUID
-    private let readCharUUID: CBUUID
-    private let writeCharUUID: CBUUID
+    private var profile: BLEDeviceProfile
 
     var onCharacteristicsReady: ((CBPeripheral, CBCharacteristic?, CBCharacteristic?) -> Void)?
     var onFailed: ((String) -> Void)?
 
-    init(serviceUUID: CBUUID, readCharUUID: CBUUID, writeCharUUID: CBUUID) {
-        self.serviceUUID = serviceUUID
-        self.readCharUUID = readCharUUID
-        self.writeCharUUID = writeCharUUID
+    init(profile: BLEDeviceProfile) {
+        self.profile = profile
+    }
+
+    /// 接続先プロファイルを切り替える（Anritsu/TR4AでUUIDが異なるため）。
+    func updateProfile(_ profile: BLEDeviceProfile) {
+        self.profile = profile
     }
 
     func didConnect(_ peripheral: CBPeripheral) {
@@ -25,11 +26,11 @@ final class ConnectionManager {
             onFailed?("Service discovery: \(e.localizedDescription)")
             return
         }
-        guard let service = peripheral.services?.first(where: { $0.uuid == serviceUUID }) else {
+        guard let service = peripheral.services?.first(where: { $0.uuid == profile.serviceUUID }) else {
             print("[BLE] target service not found yet")
             return
         }
-        peripheral.discoverCharacteristics([readCharUUID, writeCharUUID], for: service)
+        peripheral.discoverCharacteristics([profile.notifyCharUUID, profile.writeCharUUID], for: service)
     }
 
     func didDiscoverCharacteristics(for service: CBService, error: Error?) {
@@ -40,8 +41,8 @@ final class ConnectionManager {
         var readChar: CBCharacteristic?
         var writeChar: CBCharacteristic?
         service.characteristics?.forEach { ch in
-            if ch.uuid == readCharUUID { readChar = ch }
-            if ch.uuid == writeCharUUID { writeChar = ch }
+            if ch.uuid == profile.notifyCharUUID { readChar = ch }
+            if ch.uuid == profile.writeCharUUID { writeChar = ch }
         }
         // CBService.peripheral は weak/optional なので、通知設定や後続のコールバックに渡す前に安全に unwrap する。
         guard let peripheral = service.peripheral else {

@@ -20,6 +20,24 @@ final class TemperaturePacketParser: TemperaturePacketParsing {
     func parseFrames(_ data: Data) -> [TemperatureFrame] {
         guard !data.isEmpty else { return [] }
 
+        // 先にTR4AのSOHレスポンス(0x33/0x81)かどうかを判定。合致したらそちらを返す。
+        if let tr4a = parseTR4AFrame(data) {
+            return [tr4a]
+        }
+
+        return parseAnritsuASCII(data)
+    }
+
+    // 時刻設定コマンドだけを公開。DATA 取得は通知購読に集約したため残さない。
+    func buildTIMESet(date: Date) -> Data {
+        let iso = ISO8601DateFormatter().string(from: date)
+        return Data("TIME=\(iso)".utf8)
+    }
+}
+
+private extension TemperaturePacketParser {
+    /// 既存Anritsu ASCIIフレームを分解する処理を切り出し（符号位置からID/温度を抽出）。
+    func parseAnritsuASCII(_ data: Data) -> [TemperatureFrame] {
         // 可視ASCIIのみ取り出し
         var asciiBytes: [UInt8] = []
         asciiBytes.reserveCapacity(data.count)
@@ -76,9 +94,35 @@ final class TemperaturePacketParser: TemperaturePacketParsing {
         return [TemperatureFrame(time: Date(), deviceID: deviceID, value: valueC, status: status)]
     }
 
-    // 時刻設定コマンドだけを公開。DATA 取得は通知購読に集約したため残さない。
-    func buildTIMESet(date: Date) -> Data {
-        let iso = ISO8601DateFormatter().string(from: date)
-        return Data("TIME=\(iso)".utf8)
+    /// TR4A「現在値取得(0x33/0x81)」の応答(最小24B)を簡易パースする。
+    /// - Assumption: データサイズ0x0018の先頭に[Type(0x00), CH数, 測定値(Int16 LE,0.01℃), 状態コード2...]が並ぶ。
+    ///   断線ビット(stateCode2 bit0)のみTemperatureFrame.Statusにマッピングし、温度は0.01℃→℃で返す。
+    func parseTR4AFrame(_ data: Data) -> TemperatureFrame? {
+        guard data.count >= 9 else { return nil }
+        guard data[0] == 0x01, data[1] == 0x33, data[2] == 0x81 else { return nil }
+
+        let sizeLE = UInt16(data[3]) | (UInt16(data[4]) << 8)
+        let payloadStart = 6 // status(1B)を飛ばした位置
+        let totalNeeded = payloadStart + Int(sizeLE) + 2 // CRC2B
+        guard data.count >= totalNeeded else { return nil }
+
+        let status = data[5]
+        guard status == 0x00 else { return nil } // コマンド失敗時は温度を起こさない
+
+        let payload = data[payloadStart..<payloadStart + Int(sizeLE)]
+        guard payload.count >= 4 else { return nil }
+
+        let channel = Int(payload[payload.startIndex + 1])
+        let raw = Int16(bitPattern: UInt16(payload[payload.startIndex + 2])
+                        | (UInt16(payload[payload.startIndex + 3]) << 8))
+        let valueC = Double(raw) / 100.0
+
+        var frameStatus: TemperatureFrame.Status?
+        if payload.count > 4 {
+            let stateCode2 = payload[payload.startIndex + 4]
+            if stateCode2 & 0x01 == 1 { frameStatus = .bout }
+        }
+
+        return TemperatureFrame(time: Date(), deviceID: channel, value: valueC, status: frameStatus)
     }
 }

@@ -25,13 +25,14 @@ final class TemperaturePacketParser: TemperaturePacketParsing {
 
         // 先にTR4AのSOHレスポンス(0x33/0x00 系)かどうかを判定。合致したらそちらを返す。
         if let tr4a = parseTR4AFrame(data) {
-            logger?("TR4A 0x33 frame parsed → \(String(format: \"%.1f℃\", tr4a.value))")
+            // 文字列整形でのエスケープミスを避けるため、String(format:) 側でメッセージまで組み立てる。
+            logger?(String(format: "TR4A 0x33 frame parsed → %.1f℃", tr4a.value))
             return [tr4a]
         }
 
         let frames = parseAnritsuASCII(data)
         if let first = frames.first {
-            logger?("Anritsu ASCII parsed → id=\(first.deviceID ?? -1) value=\(String(format: \"%.1f℃\", first.value))")
+            logger?(String(format: "Anritsu ASCII parsed → id=%ld value=%.1f℃", first.deviceID ?? -1, first.value))
         }
         return frames
     }

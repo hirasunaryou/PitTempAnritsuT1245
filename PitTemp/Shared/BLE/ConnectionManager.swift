@@ -30,7 +30,10 @@ final class ConnectionManager {
             print("[BLE] target service not found yet")
             return
         }
-        peripheral.discoverCharacteristics([profile.notifyCharUUID, profile.writeCharUUID], for: service)
+        // TR45 のサービスには複数の DataLine が存在し、環境によって notify/write プロパティが異なるケースがある。
+        // 期待する UUID があってもプロパティが欠けていると setNotifyValue で "request is not supported" になるため、
+        // いったんサービス内の全 characteristic を取得してからプロパティを見て最適なものを選ぶ。
+        peripheral.discoverCharacteristics(nil, for: service)
     }
 
     func didDiscoverCharacteristics(for service: CBService, error: Error?) {
@@ -38,24 +41,41 @@ final class ConnectionManager {
             onFailed?("Char discovery: \(e.localizedDescription)")
             return
         }
-        var readChar: CBCharacteristic?
-        var writeChar: CBCharacteristic?
-        service.characteristics?.forEach { ch in
-            if ch.uuid == profile.notifyCharUUID { readChar = ch }
-            if ch.uuid == profile.writeCharUUID { writeChar = ch }
+        // 期待する UUID を優先しつつ、プロパティに notify/write が含まれる別の characteristic があればフェールバックする。
+        let characteristics = service.characteristics ?? []
+
+        let preferredRead = characteristics.first { $0.uuid == profile.notifyCharUUID }
+        let fallbackRead = characteristics.first { $0.properties.contains(.notify) || $0.properties.contains(.indicate) }
+        let readChar = preferredRead ?? fallbackRead
+
+        let preferredWrite = characteristics.first { $0.uuid == profile.writeCharUUID }
+        let fallbackWrite = characteristics.first {
+            $0.properties.contains(.writeWithoutResponse) || $0.properties.contains(.write)
         }
+        let writeChar = preferredWrite ?? fallbackWrite
+
         // CBService.peripheral は weak/optional なので、通知設定や後続のコールバックに渡す前に安全に unwrap する。
         guard let peripheral = service.peripheral else {
             onFailed?("Char discovery: missing peripheral reference")
             return
         }
-        // TR45系では Read/Write が異なる UUID に分かれているため、どちらか欠けると温度は上がらない。
+
         guard let finalRead = readChar, let finalWrite = writeChar else {
             onFailed?("Char discovery: TR4A data characteristics not found")
             return
         }
-        // 実際にデバイスからの通知を受け取れるように通知フラグを有効化する。
-        peripheral.setNotifyValue(true, for: finalRead)
+
+        // プロパティが不足している characteristic に対して notify を有効化しようとすると iOS 側で "request is not supported"
+        // になるため、対応ビットを持つことを確認したうえで設定する。
+        guard finalRead.properties.contains(.notify) || finalRead.properties.contains(.indicate) else {
+            let props = finalRead.properties
+            onFailed?("Char discovery: read characteristic lacks notify/indicate (props=\(props))")
+            return
+        }
+
+        if finalRead.properties.contains(.notify) || finalRead.properties.contains(.indicate) {
+            peripheral.setNotifyValue(true, for: finalRead)
+        }
         onCharacteristicsReady?(peripheral, finalRead, finalWrite)
     }
 }

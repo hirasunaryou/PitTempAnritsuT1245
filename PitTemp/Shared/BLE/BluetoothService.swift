@@ -104,12 +104,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     func stopScan() { scanner.stop(using: central) }
 
     func disconnect() {
-        if let p = peripheral { central.cancelPeripheralConnection(p) }
-        peripheral = nil; readChar = nil; writeChar = nil
-        stopTR4APolling()
-        tr4aLatestSettingsTable = nil
-        tr4aPendingIntervalUpdateSeconds = nil
-        DispatchQueue.main.async { self.connectionState = .idle }
+        handleDisconnection(resetState: true, reason: "Disconnected by user")
     }
 
     /// 明示的に接続（デバイスピッカーから呼ぶ想定）
@@ -132,14 +127,14 @@ final class BluetoothService: NSObject, BluetoothServicing {
 
     // 時刻設定
     func setDeviceTime(to date: Date = Date()) {
-        guard let p = peripheral, let w = writeChar else { return }
+        guard let p = peripheral, p.state == .connected, let w = writeChar else { return }
         let cmd = temperatureUseCase.makeTimeSyncPayload(for: date)
-        p.writeValue(cmd, for: w, type: .withResponse)
+        p.writeValue(cmd, for: w, type: preferredWriteType(for: w))
     }
 
     /// TR4A の設定テーブル（64byte）を読み出す。アプリからサンプリング間隔を変更する前段として利用。
     func refreshTR4ASettings() {
-        guard activeProfile.requiresPollingForRealtime, let p = peripheral, let w = writeChar else { return }
+        guard activeProfile.requiresPollingForRealtime, let p = peripheral, p.state == .connected, let w = writeChar else { return }
         let frame = buildTR4ASettingsRequestCommand()
         sendTR4ACommandWithBreak(frame, peripheral: p, write: w)
     }
@@ -162,7 +157,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
             self.tr4aPollingIntervalSeconds = clamped
 
             // 接続済みなら即座に反映。0秒の場合はポーリング停止のみ実施。
-            guard let p = self.peripheral, let w = self.writeChar, self.activeProfile.requiresPollingForRealtime else {
+            guard let p = self.peripheral, p.state == .connected, let w = self.writeChar, self.activeProfile.requiresPollingForRealtime else {
                 return
             }
             if clamped == 0 {
@@ -244,7 +239,7 @@ private extension BluetoothService {
     ///   専用キューでディレイを挟んで送信している。
     func startTR4APollingIfNeeded(peripheral: CBPeripheral, write: CBCharacteristic?, intervalSeconds: TimeInterval? = nil) {
         stopTR4APolling()
-        guard activeProfile.requiresPollingForRealtime, let write else { return }
+        guard activeProfile.requiresPollingForRealtime, let write, peripheral.state == .connected else { return }
 
         // 接続維持のため最低1秒周期、0なら停止。UIから渡された値を優先し、未指定なら保存値を利用。
         let interval = max(intervalSeconds ?? tr4aPollingIntervalSeconds, 0)
@@ -255,6 +250,11 @@ private extension BluetoothService {
         timer.schedule(deadline: .now() + .milliseconds(200), repeating: .milliseconds(repeatMs))
         timer.setEventHandler { [weak self, weak peripheral] in
             guard let self, let p = peripheral else { return }
+            // CBPeripheral の接続状態はタイマー発火時に変化していることがあるため、毎回確認する。
+            guard p.state == .connected else {
+                self.stopTR4APolling()
+                return
+            }
             let frame = self.buildTR4ACurrentValueCommand()
             self.sendTR4ACommandWithBreak(frame, peripheral: p, write: write)
         }
@@ -282,9 +282,13 @@ private extension BluetoothService {
     /// TR4Aコマンド送信の共通ユーティリティ（ブレーク→所定のSOHフレーム）。
     /// - Parameter delayMs: ブレーク後に挟むウェイト。仕様上20〜100msが推奨されるため、50msを既定値にしている。
     func sendTR4ACommandWithBreak(_ frame: Data, peripheral: CBPeripheral, write: CBCharacteristic, delayMs: Int = 50) {
-        peripheral.writeValue(Data([0x00]), for: write, type: .withoutResponse)
+        guard peripheral.state == .connected else { return }
+
+        let writeType = preferredWriteType(for: write)
+        peripheral.writeValue(Data([0x00]), for: write, type: writeType)
         bleQueue.asyncAfter(deadline: .now() + .milliseconds(delayMs)) {
-            peripheral.writeValue(frame, for: write, type: .withoutResponse)
+            guard peripheral.state == .connected else { return }
+            peripheral.writeValue(frame, for: write, type: writeType)
         }
     }
 
@@ -354,7 +358,7 @@ private extension BluetoothService {
 
     /// 設定テーブルを使って記録間隔を書き換え、0x3C コマンドで TR4A に送信する。
     func applyTR4AIntervalUpdate(_ seconds: UInt16, using peripheral: CBPeripheral) {
-        guard let write = writeChar else { return }
+        guard let write = writeChar, peripheral.state == .connected else { return }
 
         // 既存テーブルをベースに、先頭2byteを記録間隔（秒, LE）として書き換える。
         var table = tr4aLatestSettingsTable ?? Data(repeating: 0x00, count: 64)
@@ -367,6 +371,36 @@ private extension BluetoothService {
 
         tr4aPendingIntervalUpdateSeconds = nil
         tr4aLatestSettingsTable = table
+    }
+
+    /// 書き込み可能な CBCharacteristic から、応答付き/なしのどちらで送信するかを選ぶ。
+    /// - Note: TR4A の環境では iOS が properties に WriteWithoutResponse を広告しないケースがあるため、
+    ///         応答なしを前提にすると「プロパティに含まれないため無視された」という警告が出る。
+    ///         ここでは WriteWithoutResponse を優先しつつ、無い場合は withResponse へフェールバックする。
+    func preferredWriteType(for characteristic: CBCharacteristic) -> CBCharacteristicWriteType {
+        if characteristic.properties.contains(.writeWithoutResponse) {
+            return .withoutResponse
+        }
+        // 安立機や一部の TR45 では応答付きのみ広告する場合があるため、withResponse で確実に送信する。
+        return .withResponse
+    }
+
+    /// 接続が切断されたときの共通リセット処理。
+    /// - Parameters:
+    ///   - resetState: true の場合は connectionState を idle へ戻す。外部が再接続を試みる際に利用。
+    ///   - reason: UI ログ用の説明。
+    func handleDisconnection(resetState: Bool, reason: String) {
+        if let p = peripheral, p.state != .disconnected {
+            central.cancelPeripheralConnection(p)
+        }
+        peripheral = nil; readChar = nil; writeChar = nil
+        stopTR4APolling()
+        tr4aLatestSettingsTable = nil
+        tr4aPendingIntervalUpdateSeconds = nil
+        if resetState {
+            DispatchQueue.main.async { self.connectionState = .idle }
+        }
+        print("[BLE] disconnected: \(reason)")
     }
 }
 
@@ -393,6 +427,13 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         print("[BLE] connected to \(p.name ?? "?")")
         p.delegate = self
         connectionManager.didConnect(p)
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        // タイマーからのAPI MISUSEを防ぐため、CBPeripheral.state を確認して停止・掃除する。
+        let message = error?.localizedDescription ?? "Disconnected"
+        handleDisconnection(resetState: true, reason: message)
+        DispatchQueue.main.async { self.connectionState = .failed(message) }
     }
 
     func centralManager(_ central: CBCentralManager,

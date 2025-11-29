@@ -101,15 +101,16 @@ private extension TemperaturePacketParser {
         guard data.count >= 9 else { return nil }
         guard data[0] == 0x01, data[1] == 0x33, data[2] == 0x81 else { return nil }
 
-        let sizeLE = UInt16(data[3]) | (UInt16(data[4]) << 8)
+        // データ長は仕様書通りビッグエンディアンで解釈する（0x0018 などが素直に24Bとして扱える）。
+        let sizeBE = (UInt16(data[3]) << 8) | UInt16(data[4])
         let payloadStart = 6 // status(1B)を飛ばした位置
-        let totalNeeded = payloadStart + Int(sizeLE) + 2 // CRC2B
+        let totalNeeded = payloadStart + Int(sizeBE) + 2 // CRC2B
         guard data.count >= totalNeeded else { return nil }
 
         let status = data[5]
         guard status == 0x00 else { return nil } // コマンド失敗時は温度を起こさない
 
-        let payload = data[payloadStart..<payloadStart + Int(sizeLE)]
+        let payload = data[payloadStart..<payloadStart + Int(sizeBE)]
         guard payload.count >= 4 else { return nil }
 
         let channel = Int(payload[payload.startIndex + 1])

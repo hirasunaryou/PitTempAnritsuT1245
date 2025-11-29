@@ -219,11 +219,14 @@ private extension BluetoothService {
         tr4aPollTimer = nil
     }
 
-    /// TR4A「現在値取得(0x33/0x01)」SOHコマンドフレームを組み立てる。
-    /// - Structure: 0x00(ブレーク) + SOH(0x01) + CMD + SUB + DataSize(LE) + CRC16-BE。
-    /// - DataSizeは0（ペイロード無し）。CRCはSOH以降をCCITT初期値0xFFFFで計算。
+    /// TR4A「現在値取得(0x33/サブコマンド0x00)」SOHコマンドフレームを組み立てる。
+    /// - Structure: 0x00(ブレーク) + SOH(0x01) + CMD + SUB(0x00) + DataSize(BE=0x0004) + "0000"(4B) + CRC16-BE。
+    /// - Point: 仕様書の送信例 `01 33 00 04 00 00 00 00` はデータ長が **ビッグエンディアン** で4バイトを伴う。
+    ///          ここを誤ると TR45 は応答を返さないため、スマホ側に温度が届かない。
+    /// - CRC は SOH 以降を CCITT 初期値 0xFFFF で計算し、ビッグエンディアンで後続に付与する。
     func buildTR4ACurrentValueCommand() -> Data {
-        var frame = Data([0x01, 0x33, 0x01, 0x00, 0x00])
+        // サブコマンド0x00 + データ長0x0004(BE) + 4Bゼロペイロード
+        var frame = Data([0x01, 0x33, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00])
         let crc = crc16CCITT(frame)
         frame.append(UInt8((crc >> 8) & 0xFF))
         frame.append(UInt8(crc & 0xFF))

@@ -242,6 +242,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
         tr4aRegistrationCode = value
         tr4aAuthSucceeded = false
         appendBLELog("TR4A registration code stored (radix=\(radix), digits=\(digits.count))")
+        appendBLELog("TR4A registration code UInt32 value=\(value)")
     }
 
     /// 内部デバッグログに追加するユーティリティ。BLEキューから呼ばれるため Main へ hop する。
@@ -421,7 +422,7 @@ private extension BluetoothService {
         frame.append(UInt8(crc & 0xFF))
 
         tr4aAuthInFlight = true
-        appendBLELog("→ Send 0x76 passcode (reason=\(reason))")
+        appendBLELog("→ Send 0x76 passcode (reason=\(reason)) frame=\(hexString(frame))")
         sendTR4ACommandWithBreak(frame, peripheral: peripheral, write: write)
     }
 

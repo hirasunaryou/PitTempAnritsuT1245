@@ -59,6 +59,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     // その他
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
     @Published var notifyHz: Double = 0
+    @Published private(set) var bleDebugLog: [BLEDebugLogEntry] = []  // BLEイベントの簡易ログ（上限付き）
 
     // Auto-connect の実装
     @Published var autoConnectOnDiscover: Bool = false
@@ -72,6 +73,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     var autoConnectPublisher: AnyPublisher<Bool, Never> { $autoConnectOnDiscover.eraseToAnyPublisher() }
     var notifyHzPublisher: AnyPublisher<Double, Never> { $notifyHz.eraseToAnyPublisher() }
     var notifyCountPublisher: AnyPublisher<Int, Never> { $notifyCountUI.eraseToAnyPublisher() }
+    var bleDebugLogPublisher: AnyPublisher<[BLEDebugLogEntry], Never> { $bleDebugLog.eraseToAnyPublisher() }
 
     // コンポーネント
     private lazy var scanner = DeviceScanner(profiles: profiles, registry: registry)
@@ -92,7 +94,11 @@ final class BluetoothService: NSObject, BluetoothServicing {
     // MARK: - Public API
 
     func startScan() {
-        guard central.state == .poweredOn else { return }
+        guard central.state == .poweredOn else {
+            appendBLELog("Scan skipped because Bluetooth state = \(central.state.rawValue)", level: .warning)
+            return
+        }
+        appendBLELog("Starting scan for known thermometer profiles…")
         scannedProfiles.removeAll()
         DispatchQueue.main.async {
             self.connectionState = .scanning
@@ -101,10 +107,18 @@ final class BluetoothService: NSObject, BluetoothServicing {
         scanner.start(using: central)
     }
 
-    func stopScan() { scanner.stop(using: central) }
+    func stopScan() {
+        appendBLELog("Scan stopped (manual or connect path)")
+        scanner.stop(using: central)
+    }
 
     func disconnect() {
         handleDisconnection(resetState: true, reason: "Disconnected by user")
+    }
+
+    /// BLEログを手動でクリアするための窓口。デバッグ画面から呼び出される。
+    func clearDebugLog() {
+        DispatchQueue.main.async { [weak self] in self?.bleDebugLog.removeAll() }
     }
 
     /// 明示的に接続（デバイスピッカーから呼ぶ想定）
@@ -118,10 +132,12 @@ final class BluetoothService: NSObject, BluetoothServicing {
                 self.deviceName = found.name ?? "Unknown"
                 self.connectionState = .connecting
             }
+            appendBLELog("Connecting to \(found.name ?? deviceID) [retrieved peripheral]")
             central.connect(found, options: nil)
             return
         }
         // 2) 未取得なら、一度スキャン開始（UI側は “Scan→Connect” ボタン連携を想定）
+        appendBLELog("Requested connect to \(deviceID) but not cached; restarting scan")
         startScan()
     }
 
@@ -129,6 +145,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     func setDeviceTime(to date: Date = Date()) {
         guard let p = peripheral, p.state == .connected, let w = writeChar else { return }
         let cmd = temperatureUseCase.makeTimeSyncPayload(for: date)
+        appendBLELog("Sending time sync (size=\(cmd.count) bytes)")
         p.writeValue(cmd, for: w, type: preferredWriteType(for: w))
     }
 
@@ -136,6 +153,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     func refreshTR4ASettings() {
         guard activeProfile.requiresPollingForRealtime, let p = peripheral, p.state == .connected, let w = writeChar else { return }
         let frame = buildTR4ASettingsRequestCommand()
+        appendBLELog("Requesting TR4A settings table (0x85, \(frame.count) bytes)")
         sendTR4ACommandWithBreak(frame, peripheral: p, write: w)
     }
 
@@ -144,6 +162,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     func updateTR4ARecordInterval(seconds: UInt16) {
         guard activeProfile.requiresPollingForRealtime else { return }
         tr4aPendingIntervalUpdateSeconds = seconds
+        appendBLELog("Queued TR4A interval update to \(seconds)s (will apply after 0x85 response)")
         refreshTR4ASettings()
     }
 
@@ -161,8 +180,10 @@ final class BluetoothService: NSObject, BluetoothServicing {
                 return
             }
             if clamped == 0 {
+                self.appendBLELog("TR4A polling stopped (interval set to 0s)")
                 self.stopTR4APolling()
             } else {
+                self.appendBLELog("TR4A polling interval updated to \(String(format: "%.1f", clamped))s")
                 self.startTR4APollingIfNeeded(peripheral: p, write: w, intervalSeconds: clamped)
             }
         }
@@ -173,6 +194,17 @@ final class BluetoothService: NSObject, BluetoothServicing {
         // UIスレッドから来るのでそのまま代入でOK
         preferredIDs = ids
     }
+
+    /// 内部デバッグログに追加するユーティリティ。BLEキューから呼ばれるため Main へ hop する。
+    func appendBLELog(_ message: String, level: BLEDebugLogEntry.Level = .info) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            bleDebugLog.append(BLEDebugLogEntry(message: message, level: level))
+            if bleDebugLog.count > 200 { bleDebugLog.removeFirst(bleDebugLog.count - 200) }
+        }
+        // Xcode コンソールにも残しておくと、実機デバッグ時に時系列を追いやすい。
+        print("[BLE-DEBUG]", message)
+    }
 }
 
 // MARK: - Private
@@ -181,6 +213,7 @@ private extension BluetoothService {
         scanner.onDiscovered = { [weak self] entry, peripheral in
             guard let self else { return }
             self.scannedProfiles[entry.id] = entry.profile
+            self.appendBLELog("Cache discovery: \(entry.name) profile=\(entry.profile.key) RSSI=\(entry.rssi ?? 0)")
             DispatchQueue.main.async {
                 if let idx = self.scanned.firstIndex(where: { $0.id == entry.id }) {
                     self.scanned[idx] = entry
@@ -212,10 +245,24 @@ private extension BluetoothService {
             DispatchQueue.main.async { self.connectionState = .ready }
             // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
             self.setDeviceTime()
+            self.appendBLELog("Notify=\(read?.uuid.uuidString ?? "nil"), Write=\(write?.uuid.uuidString ?? "nil") selected")
             startTR4APollingIfNeeded(peripheral: peripheral, write: write)
         }
         connectionManager.onFailed = { [weak self] message in
             DispatchQueue.main.async { self?.connectionState = .failed(message) }
+            self?.appendBLELog("Characteristic discovery failed: \(message)", level: .error)
+        }
+        connectionManager.onServiceSnapshot = { [weak self] services in
+            let list = services.map { $0.uuid.uuidString }.joined(separator: ", ")
+            self?.appendBLELog("Service discovery returned: [\(list)]")
+        }
+        connectionManager.onCharacteristicSnapshot = { [weak self] service, chars in
+            guard let self else { return }
+            let entries = chars.map { c in
+                let props = describeProperties(c.properties)
+                return "\(c.uuid.uuidString) [\(props)]"
+            }.joined(separator: ", ")
+            appendBLELog("Characteristics under \(service.uuid.uuidString): \(entries)")
         }
 
         notifyController.onCountUpdate = { [weak self] count in
@@ -245,6 +292,7 @@ private extension BluetoothService {
         let interval = max(intervalSeconds ?? tr4aPollingIntervalSeconds, 0)
         guard interval > 0 else { return }
         let repeatMs = max(1000, Int(interval * 1000))
+        appendBLELog("TR4A polling timer armed: every \(repeatMs) ms on \(peripheral.name ?? "?")")
 
         let timer = DispatchSource.makeTimerSource(queue: bleQueue)
         timer.schedule(deadline: .now() + .milliseconds(200), repeating: .milliseconds(repeatMs))
@@ -256,6 +304,7 @@ private extension BluetoothService {
                 return
             }
             let frame = self.buildTR4ACurrentValueCommand()
+            self.appendBLELog("→ Send 0x33 current-value request (size=\(frame.count))")
             self.sendTR4ACommandWithBreak(frame, peripheral: p, write: write)
         }
         timer.resume()
@@ -265,6 +314,7 @@ private extension BluetoothService {
     func stopTR4APolling() {
         tr4aPollTimer?.cancel()
         tr4aPollTimer = nil
+        appendBLELog("TR4A polling timer cancelled")
     }
 
     /// TR4A「現在値取得(0x33/0x00)」SOHコマンドフレームを組み立てる。
@@ -285,6 +335,7 @@ private extension BluetoothService {
         guard peripheral.state == .connected else { return }
 
         let writeType = preferredWriteType(for: write)
+        appendBLELog("→ BREAK 0x00 then command (delay=\(delayMs)ms, type=\(writeType == .withoutResponse ? "no-rsp" : "with-rsp"))")
         peripheral.writeValue(Data([0x00]), for: write, type: writeType)
         bleQueue.asyncAfter(deadline: .now() + .milliseconds(delayMs)) {
             guard peripheral.state == .connected else { return }
@@ -350,6 +401,7 @@ private extension BluetoothService {
             // 64byte の設定テーブルをキャッシュし、待機中の記録間隔更新があれば上書きする。
             let payload = data[payloadStart..<payloadStart + Int(sizeLE)]
             tr4aLatestSettingsTable = Data(payload.prefix(64))
+            appendBLELog("← 0x85 settings table received (\(payload.count) bytes)")
             if let pending = tr4aPendingIntervalUpdateSeconds {
                 applyTR4AIntervalUpdate(pending, using: peripheral)
             }
@@ -367,6 +419,7 @@ private extension BluetoothService {
         table[1] = UInt8((seconds >> 8) & 0xFF)
 
         let frame = buildTR4AStartCommand(settingsTable: table)
+        appendBLELog("→ Send 0x3C start w/interval=\(seconds)s (frame \(frame.count) bytes)")
         sendTR4ACommandWithBreak(frame, peripheral: peripheral, write: write)
 
         tr4aPendingIntervalUpdateSeconds = nil
@@ -385,6 +438,18 @@ private extension BluetoothService {
         return .withResponse
     }
 
+    /// CBCharacteristicProperties のビットを読みやすい文字列へ変換するデバッグ用ユーティリティ。
+    func describeProperties(_ properties: CBCharacteristicProperties) -> String {
+        var flags: [String] = []
+        if properties.contains(.notify) { flags.append("notify") }
+        if properties.contains(.indicate) { flags.append("indicate") }
+        if properties.contains(.write) { flags.append("write") }
+        if properties.contains(.writeWithoutResponse) { flags.append("writeNR") }
+        if properties.contains(.read) { flags.append("read") }
+        if properties.contains(.authenticatedSignedWrites) { flags.append("signed") }
+        return flags.isEmpty ? "-" : flags.joined(separator: "/")
+    }
+
     /// 接続が切断されたときの共通リセット処理。
     /// - Parameters:
     ///   - resetState: true の場合は connectionState を idle へ戻す。外部が再接続を試みる際に利用。
@@ -400,6 +465,7 @@ private extension BluetoothService {
         if resetState {
             DispatchQueue.main.async { self.connectionState = .idle }
         }
+        appendBLELog("Disconnected: \(reason)", level: .warning)
         print("[BLE] disconnected: \(reason)")
     }
 }
@@ -409,9 +475,12 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         switch central.state {
-        case .poweredOn: startScan()
+        case .poweredOn:
+            appendBLELog("Central powered on; auto-start scanning")
+            startScan()
         case .unauthorized:
             DispatchQueue.main.async { self.connectionState = .failed("Bluetooth permission denied") }
+            appendBLELog("Bluetooth unauthorized", level: .error)
         default: break
         }
     }
@@ -420,11 +489,13 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                         didDiscover p: CBPeripheral,
                         advertisementData: [String : Any],
                         rssi RSSI: NSNumber) {
+        appendBLELog("Discovered \(p.name ?? "?") RSSI=\(RSSI)")
         scanner.handleDiscovery(peripheral: p, advertisementData: advertisementData, rssi: RSSI)
     }
 
     func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {
         print("[BLE] connected to \(p.name ?? "?")")
+        appendBLELog("Connected to \(p.name ?? p.identifier.uuidString)")
         p.delegate = self
         connectionManager.didConnect(p)
     }
@@ -434,6 +505,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         let message = error?.localizedDescription ?? "Disconnected"
         handleDisconnection(resetState: true, reason: message)
         DispatchQueue.main.async { self.connectionState = .failed(message) }
+        appendBLELog("Did disconnect callback: \(message)", level: .warning)
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -442,6 +514,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         DispatchQueue.main.async {
             self.connectionState = .failed("Connect failed: \(error?.localizedDescription ?? "unknown")")
         }
+        appendBLELog("Failed to connect: \(error?.localizedDescription ?? "unknown")", level: .error)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
@@ -458,15 +531,18 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                     didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         if let e = error {
             print("[BLE] notify state error:", e.localizedDescription)
+            appendBLELog("Notify error on \(characteristic.uuid): \(e.localizedDescription)", level: .error)
             return
         }
         print("[BLE] notify state \(characteristic.uuid): \(characteristic.isNotifying)")
+        appendBLELog("Notify state \(characteristic.uuid) = \(characteristic.isNotifying)")
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
+        appendBLELog("← Notify \(characteristic.uuid) (\(data.count) bytes)")
         handleTR4AControlFramesIfNeeded(data, peripheral: peripheral)
         notifyController.handleNotification(data)
     }

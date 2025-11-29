@@ -12,6 +12,7 @@ final class BluetoothViewModel: ObservableObject {
     @Published private(set) var deviceName: String?
     @Published private(set) var autoConnectOnDiscover: Bool
     @Published private(set) var latestTemperature: Double?
+    @Published private(set) var bleDebugLog: [BLEDebugLogEntry]
     // Debug metrics that were previously formatted inside the View.
     @Published private(set) var notifyHzText: String = "Hz: --"
     @Published private(set) var notifyCountText: String = "N: --"
@@ -29,6 +30,7 @@ final class BluetoothViewModel: ObservableObject {
         deviceName = service.deviceName
         autoConnectOnDiscover = service.autoConnectOnDiscover
         latestTemperature = service.latestTemperature
+        bleDebugLog = service.bleDebugLog
 
         bindServiceState()
     }
@@ -96,6 +98,9 @@ final class BluetoothViewModel: ObservableObject {
         service.disconnect()
     }
 
+    /// Clear the BLE debug log so the next repro is easier to read.
+    func clearDebugLog() { service.clearDebugLog() }
+
     /// Update the auto-connect flag from Settings or a Toggle.
     func updateAutoConnect(isEnabled: Bool) {
         service.autoConnectOnDiscover = isEnabled
@@ -160,6 +165,13 @@ final class BluetoothViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] count in
                 self?.notifyCountText = "N: \(count)"
+            }
+            .store(in: &cancellables)
+
+        service.bleDebugLogPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] entries in
+                self?.bleDebugLog = entries
             }
             .store(in: &cancellables)
     }

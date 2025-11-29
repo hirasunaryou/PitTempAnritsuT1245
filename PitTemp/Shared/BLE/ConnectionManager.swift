@@ -7,6 +7,8 @@ final class ConnectionManager {
 
     var onCharacteristicsReady: ((CBPeripheral, CBCharacteristic?, CBCharacteristic?) -> Void)?
     var onFailed: ((String) -> Void)?
+    var onServiceSnapshot: (([CBService]) -> Void)?
+    var onCharacteristicSnapshot: ((CBService, [CBCharacteristic]) -> Void)?
 
     init(profile: BLEDeviceProfile) {
         self.profile = profile
@@ -26,6 +28,7 @@ final class ConnectionManager {
             onFailed?("Service discovery: \(e.localizedDescription)")
             return
         }
+        onServiceSnapshot?(peripheral.services ?? [])
         guard let service = peripheral.services?.first(where: { $0.uuid == profile.serviceUUID }) else {
             print("[BLE] target service not found yet")
             return
@@ -41,6 +44,7 @@ final class ConnectionManager {
             onFailed?("Char discovery: \(e.localizedDescription)")
             return
         }
+        onCharacteristicSnapshot?(service, service.characteristics ?? [])
         // 期待する UUID を優先しつつ、プロパティに notify/write が含まれる別の characteristic があればフェールバックする。
         let characteristics = service.characteristics ?? []
 

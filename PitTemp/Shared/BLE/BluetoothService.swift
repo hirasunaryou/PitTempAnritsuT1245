@@ -144,6 +144,11 @@ final class BluetoothService: NSObject, BluetoothServicing {
     // 時刻設定
     func setDeviceTime(to date: Date = Date()) {
         guard let p = peripheral, p.state == .connected, let w = writeChar else { return }
+        // TR4A/TD系では TIME コマンドの仕様が異なるため、Anritsu プロファイルのみで利用する。
+        guard activeProfile == .anritsu else {
+            appendBLELog("Skip time sync: not supported for profile \(activeProfile.key)")
+            return
+        }
         let cmd = temperatureUseCase.makeTimeSyncPayload(for: date)
         appendBLELog("Sending time sync (size=\(cmd.count) bytes)")
         p.writeValue(cmd, for: w, type: preferredWriteType(for: w))
@@ -243,8 +248,12 @@ private extension BluetoothService {
             self.readChar = read
             self.writeChar = write
             DispatchQueue.main.async { self.connectionState = .ready }
-            // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
-            self.setDeviceTime()
+            // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）。
+            // TR4A 系は TIME コマンド仕様が異なり、MTU 23 で 25Byte を一括送ると分割処理が必要になるため
+            // 現段階では Anritsu プロファイルのみに限定する。TR4A に対応する場合は専用フォーマットで再実装すること。
+            if self.activeProfile == .anritsu {
+                self.setDeviceTime()
+            }
             self.appendBLELog("Notify=\(read?.uuid.uuidString ?? "nil"), Write=\(write?.uuid.uuidString ?? "nil") selected")
             startTR4APollingIfNeeded(peripheral: peripheral, write: write)
         }

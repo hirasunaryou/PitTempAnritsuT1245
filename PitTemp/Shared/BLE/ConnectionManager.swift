@@ -44,6 +44,18 @@ final class ConnectionManager {
             if ch.uuid == profile.notifyCharUUID { readChar = ch }
             if ch.uuid == profile.writeCharUUID { writeChar = ch }
         }
+
+        // TR4A 実機では仕様書通りのUUID(6e400008...)が来ない場合があり、
+        // キャラリスティック一覧から writeWithoutResponse/notify を持つものを
+        // 探してフォールバックする。これにより「未接続」アラートを避ける。
+        if profile.requiresPollingForRealtime {
+            if writeChar == nil {
+                writeChar = service.characteristics?.first { $0.properties.contains(.writeWithoutResponse) || $0.properties.contains(.write) }
+            }
+            if readChar == nil {
+                readChar = service.characteristics?.first { $0.properties.contains(.notify) }
+            }
+        }
         // CBService.peripheral は weak/optional なので、通知設定や後続のコールバックに渡す前に安全に unwrap する。
         guard let peripheral = service.peripheral else {
             onFailed?("Char discovery: missing peripheral reference")

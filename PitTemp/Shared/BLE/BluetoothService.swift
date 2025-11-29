@@ -47,6 +47,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
 
     // TR4A向けのポーリングタイマー（現在値取得を1秒ごとに送信）
     private var tr4aPollTimer: DispatchSourceTimer?
+    // TR4A ポーリング間隔（節電モードやログ間隔に合わせて可変にできるよう公開）。
+    private var tr4aPollingIntervalSeconds: TimeInterval = 1.0
     // TR4A 記録設定のスナップショットと保留中の更新値
     private var tr4aLatestSettingsTable: Data?
     private var tr4aPendingIntervalUpdateSeconds: UInt16?
@@ -150,6 +152,27 @@ final class BluetoothService: NSObject, BluetoothServicing {
         refreshTR4ASettings()
     }
 
+    /// TR4A の現在値ポーリング周期を動的に変更する（0で停止）。
+    /// - Important: TR45 には物理スイッチがないため、アプリ側でこの値を長くするとコマンド送信頻度が下がり、節電モード相当の挙動になる。
+    func setTR4APollingInterval(seconds: TimeInterval) {
+        let clamped = max(0.0, seconds)
+        // BLEキュー上でタイマーを組み立て直す（UIスレッドから呼ばれても安全）。
+        bleQueue.async { [weak self] in
+            guard let self else { return }
+            self.tr4aPollingIntervalSeconds = clamped
+
+            // 接続済みなら即座に反映。0秒の場合はポーリング停止のみ実施。
+            guard let p = self.peripheral, let w = self.writeChar, self.activeProfile.requiresPollingForRealtime else {
+                return
+            }
+            if clamped == 0 {
+                self.stopTR4APolling()
+            } else {
+                self.startTR4APollingIfNeeded(peripheral: p, write: w, intervalSeconds: clamped)
+            }
+        }
+    }
+
     // UI から設定するためのセッターを用意
     func setPreferredIDs(_ ids: Set<String>) {
         // UIスレッドから来るのでそのまま代入でOK
@@ -219,12 +242,17 @@ private extension BluetoothService {
     /// - Important: TR4Aシリーズは「0x00（ブレーク）送信→20〜100ms待機→SOHコマンド送信」の順で
     ///   送らないと応答が返らない。BLEの書き込み制限を考慮して、ブレークとコマンドを分離し、
     ///   専用キューでディレイを挟んで送信している。
-    func startTR4APollingIfNeeded(peripheral: CBPeripheral, write: CBCharacteristic?) {
+    func startTR4APollingIfNeeded(peripheral: CBPeripheral, write: CBCharacteristic?, intervalSeconds: TimeInterval? = nil) {
         stopTR4APolling()
         guard activeProfile.requiresPollingForRealtime, let write else { return }
 
+        // 接続維持のため最低1秒周期、0なら停止。UIから渡された値を優先し、未指定なら保存値を利用。
+        let interval = max(intervalSeconds ?? tr4aPollingIntervalSeconds, 0)
+        guard interval > 0 else { return }
+        let repeatMs = max(1000, Int(interval * 1000))
+
         let timer = DispatchSource.makeTimerSource(queue: bleQueue)
-        timer.schedule(deadline: .now() + .milliseconds(200), repeating: .seconds(1))
+        timer.schedule(deadline: .now() + .milliseconds(200), repeating: .milliseconds(repeatMs))
         timer.setEventHandler { [weak self, weak peripheral] in
             guard let self, let p = peripheral else { return }
             let frame = self.buildTR4ACurrentValueCommand()

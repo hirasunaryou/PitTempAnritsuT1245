@@ -49,10 +49,13 @@ final class ConnectionManager {
             onFailed?("Char discovery: missing peripheral reference")
             return
         }
-        if let ch = readChar {
-            // 実際にデバイスからの通知を受け取れるように通知フラグを有効化する。
-            peripheral.setNotifyValue(true, for: ch)
+        // TR45系では Read/Write が異なる UUID に分かれているため、どちらか欠けると温度は上がらない。
+        guard let finalRead = readChar, let finalWrite = writeChar else {
+            onFailed?("Char discovery: TR4A data characteristics not found")
+            return
         }
-        onCharacteristicsReady?(peripheral, readChar, writeChar)
+        // 実際にデバイスからの通知を受け取れるように通知フラグを有効化する。
+        peripheral.setNotifyValue(true, for: finalRead)
+        onCharacteristicsReady?(peripheral, finalRead, finalWrite)
     }
 }

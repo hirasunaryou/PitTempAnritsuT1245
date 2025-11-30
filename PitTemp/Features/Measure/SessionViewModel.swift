@@ -149,7 +149,7 @@ final class SessionViewModel: ObservableObject {
     private var timer: Timer? = nil
 
     /// Bind Bluetooth samples once so the View does not manage cancellation.
-    func bindBluetooth(service: TemperatureSensorClient) {
+    func bindBluetooth(service: any TemperatureSensorClient) {
         bluetoothCancellable?.cancel()
         bluetoothCancellable = service.temperatureFrames
             .map { TemperatureSample(time: $0.time, value: $0.value) }

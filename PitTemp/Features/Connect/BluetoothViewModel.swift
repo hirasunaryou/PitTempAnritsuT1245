@@ -12,15 +12,16 @@ final class BluetoothViewModel: ObservableObject {
     @Published private(set) var deviceName: String?
     @Published private(set) var autoConnectOnDiscover: Bool
     @Published private(set) var latestTemperature: Double?
+    @Published private(set) var bleDebugLog: [BLEDebugLogEntry]
     // Debug metrics that were previously formatted inside the View.
     @Published private(set) var notifyHzText: String = "Hz: --"
     @Published private(set) var notifyCountText: String = "N: --"
 
-    private let service: BluetoothServicing
-    private let registry: DeviceRegistrying
+    private let service: any BluetoothServicing
+    private let registry: any DeviceRegistrying
     private var cancellables: Set<AnyCancellable> = []
 
-    init(service: BluetoothServicing, registry: DeviceRegistrying) {
+    init(service: any BluetoothServicing, registry: any DeviceRegistrying) {
         self.service = service
         self.registry = registry
         // Seed with the current service state so the UI renders instantly.
@@ -29,6 +30,7 @@ final class BluetoothViewModel: ObservableObject {
         deviceName = service.deviceName
         autoConnectOnDiscover = service.autoConnectOnDiscover
         latestTemperature = service.latestTemperature
+        bleDebugLog = service.bleDebugLog
 
         bindServiceState()
     }
@@ -96,6 +98,12 @@ final class BluetoothViewModel: ObservableObject {
         service.disconnect()
     }
 
+    /// Clear the BLE debug log so the next repro is easier to read.
+    func clearDebugLog() { service.clearDebugLog() }
+
+    /// Update TR4A registration code (パスコード) for passcode-locked devices.
+    func updateTR4ARegistrationCode(_ code: String) { service.setTR4ARegistrationCode(code) }
+
     /// Update the auto-connect flag from Settings or a Toggle.
     func updateAutoConnect(isEnabled: Bool) {
         service.autoConnectOnDiscover = isEnabled
@@ -160,6 +168,13 @@ final class BluetoothViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] count in
                 self?.notifyCountText = "N: \(count)"
+            }
+            .store(in: &cancellables)
+
+        service.bleDebugLogPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] entries in
+                self?.bleDebugLog = entries
             }
             .store(in: &cancellables)
     }

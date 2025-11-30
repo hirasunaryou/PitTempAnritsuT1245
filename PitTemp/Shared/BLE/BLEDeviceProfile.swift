@@ -11,10 +11,14 @@ struct BLEDeviceProfile: Equatable, Codable {
     let notifyCharUUIDString: String
     let writeCharUUIDString: String
     let requiresPollingForRealtime: Bool
+    let additionalNotifyUUIDStrings: [String]
+    let additionalWriteUUIDStrings: [String]
 
     var serviceUUID: CBUUID { CBUUID(string: serviceUUIDString) }
     var notifyCharUUID: CBUUID { CBUUID(string: notifyCharUUIDString) }
     var writeCharUUID: CBUUID { CBUUID(string: writeCharUUIDString) }
+    var notifyUUIDs: [CBUUID] { [notifyCharUUID] + additionalNotifyUUIDStrings.map(CBUUID.init) }
+    var writeUUIDs: [CBUUID] { [writeCharUUID] + additionalWriteUUIDStrings.map(CBUUID.init) }
 
     /// 広告に含まれるローカルネームからプロファイルを推定するシンプルなフィルタ。
     func matches(name: String) -> Bool {
@@ -30,17 +34,20 @@ extension BLEDeviceProfile {
         serviceUUIDString: "ada98080-888b-4e9f-9a7f-07ddc240f3ce",
         notifyCharUUIDString: "ada98081-888b-4e9f-9a7f-07ddc240f3ce",
         writeCharUUIDString: "ada98082-888b-4e9f-9a7f-07ddc240f3ce",
-        requiresPollingForRealtime: false
+        requiresPollingForRealtime: false,
+        additionalNotifyUUIDStrings: [],
+        additionalWriteUUIDStrings: []
     )
 
-    /// TR4A(TR41/42/43/45)のT&D SPPサービス向けプロファイル。
-    /// - Note: Data Line特性はWriteWithoutResponse/Notify兼用なので同一UUIDを設定する。
-    static let tr4a = BLEDeviceProfile(
-        key: "tr4a",
+    /// TR45 (TR4 シリーズ) 専用の SPP 拡張サービス向けプロファイル。
+    static let tr4 = BLEDeviceProfile(
+        key: "tr4",
         allowedNamePrefixes: ["TR45", "TR44", "TR43", "TR42", "TR41", "TR4"],
         serviceUUIDString: "6e400001-b5a3-f393-e0a9-e50e24dcca42",
-        notifyCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
-        writeCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
-        requiresPollingForRealtime: true
+        notifyCharUUIDString: "6e400005-b5a3-f393-e0a9-e50e24dcca42",
+        writeCharUUIDString: "6e400002-b5a3-f393-e0a9-e50e24dcca42",
+        requiresPollingForRealtime: true,
+        additionalNotifyUUIDStrings: ["6e400006-b5a3-f393-e0a9-e50e24dcca42"],
+        additionalWriteUUIDStrings: ["6e400003-b5a3-f393-e0a9-e50e24dcca42", "6e400007-b5a3-f393-e0a9-e50e24dcca42"]
     )
 }

@@ -18,6 +18,7 @@ struct SettingsView: View {
     @EnvironmentObject var registry: DeviceRegistry
     @EnvironmentObject var uiLog: UILogStore
     @State private var driveAlertMessage: String? = nil
+    @State private var showLogViewer = false
 
     
     var body: some View {
@@ -372,6 +373,17 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("Debug") {
+                    Button {
+                        showLogViewer = true
+                    } label: {
+                        Label("View Debug Logs", systemImage: "list.bullet.rectangle")
+                    }
+                    Text("通信トラブル時はこのログをコピー/共有してもらうと解析が早くなります。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 
                 // デバイス & ロケーション
                 Section("Device & Location") {
@@ -438,6 +450,9 @@ struct SettingsView: View {
             case .failure(let error):
                 print("Folder pick failed:", error)
             }
+        }
+        .sheet(isPresented: $showLogViewer) {
+            LogViewerView()
         }
         .alert("Google Drive", isPresented: Binding(
             get: { driveAlertMessage != nil },

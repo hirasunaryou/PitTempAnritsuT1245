@@ -18,6 +18,7 @@ struct SettingsView: View {
     @EnvironmentObject var registry: DeviceRegistry
     @EnvironmentObject var uiLog: UILogStore
     @State private var driveAlertMessage: String? = nil
+    @State private var showBLELog = false
 
     
     var body: some View {
@@ -424,6 +425,19 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section("Debug") {
+                    Button {
+                        showBLELog = true
+                        Logger.shared.log("Opened BLE log viewer", category: .ui)
+                    } label: {
+                        Label("Open BLE debug log", systemImage: "antenna.radiowaves.left.and.right")
+                    }
+                    Text("通信トラブル時はここからログをコピーまたは共有してください。最新500行までを保存しています。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .navigationTitle("Settings")
         }
@@ -447,6 +461,7 @@ struct SettingsView: View {
         } message: {
             Text(driveAlertMessage ?? "")
         }
+        .sheet(isPresented: $showBLELog) { BLELogView() }
         .onChange(of: settings.enableGoogleDriveUpload) { _, newValue in
             if !newValue {
                 driveService.resetUIState()

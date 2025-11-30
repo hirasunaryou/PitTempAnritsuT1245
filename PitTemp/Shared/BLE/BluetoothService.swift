@@ -55,6 +55,9 @@ final class BluetoothService: NSObject, BluetoothServicing {
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
     @Published var notifyHz: Double = 0
 
+    // UI ログ（BLE デバッグ画面用）。PitTempApp から注入してもらう想定。
+    weak var uiLogger: UILogPublishing?
+
     // Auto-connect の実装
     @Published var autoConnectOnDiscover: Bool = false
     private(set) var preferredIDs: Set<String> = []  // ← registry から設定（空なら「最初に見つけた1台」）
@@ -77,6 +80,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
         self.temperatureFramesSubject.send(frame)
     }
 
+    private let sohCodec = TR4ASOHCodec() // TR45 support: SOH フレーム生成を統一
+
     init(temperatureUseCase: TemperatureIngesting = TemperatureIngestUseCase()) {
         self.temperatureUseCase = temperatureUseCase
         super.init()
@@ -93,6 +98,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
             self.connectionState = .scanning
             self.scanned.removeAll()
         }
+        logBLE("Start scan")
         scanner.start(using: central)
     }
 
@@ -103,6 +109,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
         peripheral = nil; readChar = nil; writeChar = nil
         stopTR4APolling()
         DispatchQueue.main.async { self.connectionState = .idle }
+        logBLE("Disconnected by user")
     }
 
     /// 明示的に接続（デバイスピッカーから呼ぶ想定）
@@ -116,6 +123,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
                 self.deviceName = found.name ?? "Unknown"
                 self.connectionState = .connecting
             }
+            logBLE("Connecting to known peripheral \(deviceID)")
             central.connect(found, options: nil)
             return
         }
@@ -127,6 +135,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     func setDeviceTime(to date: Date = Date()) {
         guard let p = peripheral, let w = writeChar else { return }
         let cmd = temperatureUseCase.makeTimeSyncPayload(for: date)
+        logBLE("Send time sync: \(cmd.hexString)")
         p.writeValue(cmd, for: w, type: .withResponse)
     }
 
@@ -172,6 +181,7 @@ private extension BluetoothService {
             self.readChar = read
             self.writeChar = write
             DispatchQueue.main.async { self.connectionState = .ready }
+            self.logBLE("Characteristics ready (notify: \(read?.uuid.uuidString ?? "nil"), write: \(write?.uuid.uuidString ?? "nil"))")
             // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
             self.setDeviceTime()
             startTR4APollingIfNeeded(peripheral: peripheral, write: write)
@@ -195,6 +205,12 @@ private extension BluetoothService {
         if !profile.requiresPollingForRealtime { stopTR4APolling() }
     }
 
+    /// BLE デバッグログを共通フォーマットで残す。UI でリアルタイム表示できるよう UILogStore へ流す。
+    func logBLE(_ message: String, level: UILogEntry.Level = .info) {
+        uiLogger?.publish(UILogEntry(message: message, level: level, category: .ble))
+        print("[BLE][UI]", message)
+    }
+
     /// TR4Aの現在値取得（0x33-0x01コマンド）を1秒周期で発行し、Notify経由で値を受け取る。
     /// - Note: T&Dの仕様書にある「SOH直前の0x00(ブレーク信号)→20〜100ms後コマンド送信」を
     ///   一続きのWriteWithoutResponseでまとめ、1秒以上間隔を空けることで実機負荷を抑える。
@@ -207,8 +223,10 @@ private extension BluetoothService {
         timer.setEventHandler { [weak self, weak peripheral] in
             guard let self, let p = peripheral else { return }
             let cmd = self.buildTR4ACurrentValueCommand()
-            // TR4AはData Line特性にWriteWithoutResponseで流し込む。
-            p.writeValue(cmd, for: write, type: .withoutResponse)
+            self.logBLE("Send TR4A current request: \(cmd.hexString)")
+            // TR4Aは Data Line 特性に WriteWithResponse で流し込むのが仕様に近いが、
+            // 既存実装との互換性を考慮しつつ応答が返るよう withResponse を優先する。
+            p.writeValue(cmd, for: write, type: .withResponse)
         }
         timer.resume()
         tr4aPollTimer = timer
@@ -219,34 +237,11 @@ private extension BluetoothService {
         tr4aPollTimer = nil
     }
 
-    /// TR4A「現在値取得(0x33/0x01)」SOHコマンドフレームを組み立てる。
-    /// - Structure: 0x00(ブレーク) + SOH(0x01) + CMD + SUB + DataSize(LE) + CRC16-BE。
-    /// - DataSizeは0（ペイロード無し）。CRCはSOH以降をCCITT初期値0xFFFFで計算。
+    /// TR4A「現在値取得(0x33/0x00)」SOHコマンドフレームを組み立てる。
+    /// - Note: データ長は仕様に合わせて 4 バイトの 0x00 を送る。TR45 support。
     func buildTR4ACurrentValueCommand() -> Data {
-        var frame = Data([0x01, 0x33, 0x01, 0x00, 0x00])
-        let crc = crc16CCITT(frame)
-        frame.append(UInt8((crc >> 8) & 0xFF))
-        frame.append(UInt8(crc & 0xFF))
-
-        var packet = Data([0x00])
-        packet.append(frame)
-        return packet
-    }
-
-    /// TR4A仕様書に従い、SOH〜データまでを対象にCRC16-CCITT(0x1021)を計算する。
-    func crc16CCITT(_ data: Data) -> UInt16 {
-        var crc: UInt16 = 0xFFFF
-        for byte in data {
-            crc ^= UInt16(byte) << 8
-            for _ in 0..<8 {
-                if crc & 0x8000 != 0 {
-                    crc = (crc << 1) ^ 0x1021
-                } else {
-                    crc = crc << 1
-                }
-            }
-        }
-        return crc
+        let payload = Data([0x00, 0x00, 0x00, 0x00])
+        return sohCodec.buildFrame(command: 0x33, subcommand: 0x00, payload: payload, includeBreak: true)
     }
 }
 
@@ -260,6 +255,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
             DispatchQueue.main.async { self.connectionState = .failed("Bluetooth permission denied") }
         default: break
         }
+        logBLE("Central state -> \(central.state.rawValue)")
     }
 
     func centralManager(_ central: CBCentralManager,
@@ -271,6 +267,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
 
     func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {
         print("[BLE] connected to \(p.name ?? "?")")
+        logBLE("Connected to \(p.identifier.uuidString)")
         p.delegate = self
         connectionManager.didConnect(p)
     }
@@ -281,6 +278,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         DispatchQueue.main.async {
             self.connectionState = .failed("Connect failed: \(error?.localizedDescription ?? "unknown")")
         }
+        logBLE("Connect failed: \(error?.localizedDescription ?? "unknown")", level: .error)
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
@@ -297,15 +295,18 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                     didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
         if let e = error {
             print("[BLE] notify state error:", e.localizedDescription)
+            logBLE("Notify state error: \(e.localizedDescription)", level: .error)
             return
         }
         print("[BLE] notify state \(characteristic.uuid): \(characteristic.isNotifying)")
+        logBLE("Notify state \(characteristic.uuid): \(characteristic.isNotifying)")
     }
 
     func peripheral(_ peripheral: CBPeripheral,
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
+        logBLE("Notify <- \(data.hexString)")
         notifyController.handleNotification(data)
     }
 }

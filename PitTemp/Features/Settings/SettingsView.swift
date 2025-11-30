@@ -367,6 +367,10 @@ struct SettingsView: View {
                             .environmentObject(registry) // MeasureView や App で注入済みなら OK
                     }
 
+                    NavigationLink("BLE Debug Log") {
+                        BleDebugLogView()
+                    }
+
                     Text("If ON, the app connects to the first matching device it discovers. Turn OFF to pick a device manually.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)

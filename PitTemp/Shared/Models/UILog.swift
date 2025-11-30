@@ -11,6 +11,8 @@ struct UILogEntry: Identifiable, Equatable {
     enum Category: String {
         case general
         case autosave
+        // BLE の通信確認ログをまとめるカテゴリ。TR45/TR4AのSOHフレームもここへ送る。
+        case ble
     }
 
     let id = UUID()

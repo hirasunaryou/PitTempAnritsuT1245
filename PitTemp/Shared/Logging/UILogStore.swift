@@ -25,4 +25,9 @@ final class UILogStore: ObservableObject, UILogPublishing {
     func clear() {
         entries.removeAll()
     }
+
+    /// カテゴリ単位でログを消したいときに使う。BLE デバッグビューから利用。
+    func clear(category: UILogEntry.Category) {
+        entries.removeAll { $0.category == category }
+    }
 }

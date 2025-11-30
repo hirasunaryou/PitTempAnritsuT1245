@@ -11,7 +11,7 @@
 ## 現在温度の取得（SOH 0x33/0x00）
 - `BluetoothService.startTR4APollingIfNeeded` が 1 秒以上の間隔でポーリング。
 - 送信フロー: `0x00` ブレーク → 20〜100ms 待機 → SOH フレーム送信。
-- コマンドフレーム: `01 33 00 04 00 00 00 00 00 CRC16`（CRC16-CCITT, Big Endian）。
+- コマンドフレーム: `01 33 00 04 00 00 00 00 00 CRC16`（CRC-16/XMODEM 初期値0x0000, Big Endian）。
 - 応答の 5-6 バイト目を Int16 として `(value - 1000) / 10` を温度[℃]に変換。
 
 ## 記録間隔の取得と更新

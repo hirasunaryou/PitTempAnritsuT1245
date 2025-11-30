@@ -382,11 +382,11 @@ private extension BluetoothService {
 
     /// TR4A「現在値取得(0x33/0x00)」SOHコマンドフレームを組み立てる。
     /// - Structure: SOH(0x01) + CMD(0x33) + SUB(0x00) + DataSize(0x0400) + Data(0x00000000) + CRC16-BE。
-    /// - Note: ブレーク(0x00)は送信時に別 write として挟む。CRCはSOH以降を CCITT 初期値0xFFFF で計算。
+    /// - Note: ブレーク(0x00)は送信時に別 write として挟む。CRCは TR4A 仕様通り CRC-16/XMODEM (init=0x0000) を採用。
     func buildTR4ACurrentValueCommand() -> Data {
         // データ長はリトルエンディアン 0x0400（=4byte）
         var frame = Data([0x01, 0x33, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let crc = crc16CCITT(frame)
+        let crc = TR4ACRC.xmodem(frame)
         frame.append(UInt8((crc >> 8) & 0xFF))
         frame.append(UInt8(crc & 0xFF))
         return frame
@@ -417,7 +417,7 @@ private extension BluetoothService {
         frame.append(UInt8((code >> 8) & 0xFF))
         frame.append(UInt8((code >> 16) & 0xFF))
         frame.append(UInt8((code >> 24) & 0xFF))
-        let crc = crc16CCITT(frame)
+        let crc = TR4ACRC.xmodem(frame)
         frame.append(UInt8((crc >> 8) & 0xFF))
         frame.append(UInt8(crc & 0xFF))
 
@@ -430,7 +430,7 @@ private extension BluetoothService {
     /// - Note: Data Length=0x0400, Data=0x00000000 固定で CRC16 を付与する。
     func buildTR4ASettingsRequestCommand() -> Data {
         var frame = Data([0x01, 0x85, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00])
-        let crc = crc16CCITT(frame)
+        let crc = TR4ACRC.xmodem(frame)
         frame.append(UInt8((crc >> 8) & 0xFF))
         frame.append(UInt8(crc & 0xFF))
         return frame
@@ -446,26 +446,10 @@ private extension BluetoothService {
 
         var frame = Data([0x01, 0x3C, 0x00, 0x40, 0x00])
         frame.append(table.prefix(64))
-        let crc = crc16CCITT(frame)
+        let crc = TR4ACRC.xmodem(frame)
         frame.append(UInt8((crc >> 8) & 0xFF))
         frame.append(UInt8(crc & 0xFF))
         return frame
-    }
-
-    /// TR4A仕様書に従い、SOH〜データまでを対象にCRC16-CCITT(0x1021)を計算する。
-    func crc16CCITT(_ data: Data) -> UInt16 {
-        var crc: UInt16 = 0xFFFF
-        for byte in data {
-            crc ^= UInt16(byte) << 8
-            for _ in 0..<8 {
-                if crc & 0x8000 != 0 {
-                    crc = (crc << 1) ^ 0x1021
-                } else {
-                    crc = crc << 1
-                }
-            }
-        }
-        return crc
     }
 
     /// TR4A 通知チャンクを蓄積し、SOHフレーム単位で NotifyController へ橋渡しする。
@@ -520,9 +504,9 @@ private extension BluetoothService {
         }
 
         let payload = frame[payloadStart..<payloadEnd]
-        // CRC16-CCITT(0xFFFF init) を SOH〜payload までで検証する。CRC不一致でも hex を残し、現場で比較できるようにする。
+        // CRC16/XMODEM(0x0000 init) を SOH〜payload までで検証する。CRC不一致でも hex を残し、現場で比較できるようにする。
         let receivedCRC = UInt16(frame[payloadEnd]) << 8 | UInt16(frame[payloadEnd + 1])
-        let computedCRC = crc16CCITT(frame.prefix(payloadEnd))
+        let computedCRC = TR4ACRC.xmodem(frame.prefix(payloadEnd))
         if receivedCRC != computedCRC {
             appendBLELog(
                 "TR4A frame CRC/len invalid cmd=0x\(String(format: "%02X", command)) status=0x\(String(format: "%02X", status)) len=\(sizeLE) receivedCRC=0x\(String(format: "%04X", receivedCRC)) expectedCRC=0x\(String(format: "%04X", computedCRC)) hex=\(hexString(frame))",

@@ -59,13 +59,16 @@ final class BluetoothService: NSObject, BluetoothServicing {
     private var tr4aAuthInFlight = false
     private var tr4aAuthSucceeded = false
     private var tr4aAuthTimeoutWorkItem: DispatchWorkItem?
-    // TR4A の書き込み characteristic は環境依存で 0x0002/0x0007 が使われることがあるため、接続ごとに優先インデックスを保持する。
+    // TR4A の書き込み characteristic は環境依存で 0x0002/0x0003/0x0007 が使われることがあるため、接続ごとに優先インデックスを保持する。
     private let tr4aWriteCandidates: [CBUUID] = [
+        // 0x0003 は writeWithoutResponse を持ち、実機でコマンドラインとして使われるケースがあるため最優先。
+        CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
         CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA42"),
         CBUUID(string: "6E400007-B5A3-F393-E0A9-E50E24DCCA42")
     ]
     private var tr4aWriteIndexForCurrentConnection: Int = 0
     private var tr4aDiscoveredCharacteristics: [CBUUID: CBCharacteristic] = [:]
+    private var tr4aPollsSinceResponse: Int = 0
 
     // Parser / UseCase（TR4AかAnritsuかでパースルートを変える。ログ連携のためParser参照も保持）
     private let temperatureUseCase: TemperatureIngesting
@@ -277,6 +280,23 @@ final class BluetoothService: NSObject, BluetoothServicing {
             .filter { $0.isNumber }
     }
 
+    /// TR4A の write characteristic を次候補へ切り替える。
+    /// - Returns: 切り替えに成功した場合は新しい characteristic を返す。
+    @discardableResult
+    func advanceTR4AWriteCharacteristicIfPossible(reason: String) -> CBCharacteristic? {
+        guard activeProfile.requiresPollingForRealtime else { return nil }
+        let nextIndex = tr4aWriteIndexForCurrentConnection + 1
+        guard nextIndex < tr4aWriteCandidates.count else { return nil }
+        let nextUUID = tr4aWriteCandidates[nextIndex]
+        guard let next = tr4aDiscoveredCharacteristics[nextUUID] else { return nil }
+
+        tr4aWriteIndexForCurrentConnection = nextIndex
+        writeChar = next
+        tr4aPollsSinceResponse = 0
+        appendBLELog("TR4A: switching write characteristic to \(next.uuid.uuidString) (reason=\(reason))")
+        return next
+    }
+
     /// 内部デバッグログに追加するユーティリティ。BLEキューから呼ばれるため Main へ hop する。
     func appendBLELog(_ message: String, level: BLEDebugLogEntry.Level = .info) {
         DispatchQueue.main.async { [weak self] in
@@ -389,6 +409,11 @@ private extension BluetoothService {
         // いったん常にポーリングを開始し、REFUSE(0x0F) を受け取った場合のみ
         // 0x76 を送る後追いフローに任せる。
 
+        tr4aPollsSinceResponse = 0
+        if let idx = tr4aWriteCandidates.firstIndex(of: write.uuid) {
+            tr4aWriteIndexForCurrentConnection = idx
+        }
+
         // 接続維持のため最低1秒周期、0なら停止。UIから渡された値を優先し、未指定なら保存値を利用。
         let interval = max(intervalSeconds ?? tr4aPollingIntervalSeconds, 0)
         guard interval > 0 else { return }
@@ -404,9 +429,16 @@ private extension BluetoothService {
                 self.stopTR4APolling()
                 return
             }
+            self.tr4aPollsSinceResponse += 1
             let frame = self.buildTR4ACurrentValueCommand()
             self.appendBLELog("→ Send 0x33 current-value request (size=\(frame.count))")
             self.sendTR4ACommandWithBreak(frame, peripheral: p, write: write)
+
+            // しばらく応答がない場合は書き込み characteristic を次候補へ切り替えて再トライする。
+            if self.tr4aPollsSinceResponse >= 3,
+               let next = self.advanceTR4AWriteCharacteristicIfPossible(reason: "no 0x33 response after \(self.tr4aPollsSinceResponse) polls") {
+                self.startTR4APollingIfNeeded(peripheral: p, write: next, intervalSeconds: interval)
+            }
         }
         timer.resume()
         tr4aPollTimer = timer
@@ -489,21 +521,14 @@ private extension BluetoothService {
                 self.tr4aAuthInFlight = false
                 let currentWriteUUID = write.uuid
                 if self.activeProfile.requiresPollingForRealtime,
-                   self.tr4aWriteIndexForCurrentConnection + 1 < self.tr4aWriteCandidates.count,
                    let peripheral = self.peripheral,
                    peripheral.state == .connected,
-                   let bcd = self.tr4aRegistrationCodeBCD {
-                    let nextIndex = self.tr4aWriteIndexForCurrentConnection + 1
-                    let nextUUID = self.tr4aWriteCandidates[nextIndex]
-                    if let nextWrite = self.tr4aDiscoveredCharacteristics[nextUUID] {
-                        self.tr4aWriteIndexForCurrentConnection = nextIndex
-                        self.writeChar = nextWrite
-                        self.appendBLELog(
-                            "TR4A: 0x76 handshake timed out on \(currentWriteUUID.uuidString); retrying 0x76 using \(nextUUID.uuidString)"
-                        )
-                        self.sendTR4APasscodeIfNeeded(passcodeBCD: bcd, peripheral: peripheral, write: nextWrite, reason: "retry-after-timeout")
-                        return
-                    }
+                   let bcd = self.tr4aRegistrationCodeBCD,
+                   let nextWrite = self.advanceTR4AWriteCharacteristicIfPossible(
+                        reason: "0x76 handshake timed out on \(currentWriteUUID.uuidString)"
+                   ) {
+                    self.sendTR4APasscodeIfNeeded(passcodeBCD: bcd, peripheral: peripheral, write: nextWrite, reason: "retry-after-timeout")
+                    return
                 }
                 self.appendBLELog("TR4A: 0x76 passcode handshake timed out; no response from device", level: .warning)
             }
@@ -602,6 +627,7 @@ private extension BluetoothService {
         }
 
         appendBLELog("Parsed TR4A frame cmd=0x\(String(format: "%02X", command)) status=0x\(String(format: "%02X", status)) len=\(sizeLE) payload=\(hexString(Data(payload)))")
+        tr4aPollsSinceResponse = 0
 
         handleTR4AControlFramesIfNeeded(command: command, status: status, payload: Data(payload), peripheral: peripheral)
         notifyController.handleNotification(frame)
@@ -713,6 +739,7 @@ private extension BluetoothService {
         tr4aAuthTimeoutWorkItem?.cancel()
         tr4aDiscoveredCharacteristics.removeAll()
         tr4aWriteIndexForCurrentConnection = 0
+        tr4aPollsSinceResponse = 0
         if resetState {
             DispatchQueue.main.async { self.connectionState = .idle }
         }

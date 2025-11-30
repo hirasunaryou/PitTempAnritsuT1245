@@ -64,19 +64,19 @@ final class ConnectionManager {
             return nil
         }
 
-        // 公式仕様では notify=0x0003, write=0x0002（WriteWithoutResponse）を想定。
-        // 実機では 0x0004/0x0006 (notify) や 0x0007/0x0003 (writeNR) が返る個体もあるため、
-        // まず仕様順で探し、なければ広いフェールバックへ落とす。
+        // 公式仕様では notify=0x0004/0x0006、write=0x0003(WriteNR)/0x0002(write) が混在する個体がある。
+        // 実機で writeWithoutResponse を持つ 0x0003 によく応答が集まるため write 順を 0x0003 → 0x0002 → 0x0007 に変更し、
+        // notify は実際に notify フラグを持つ 0x0004/0x0006/0x0005 を優先する。
         let tr4aNotifyOrder: [CBUUID] = [
-            CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400004-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400006-B5A3-F393-E0A9-E50E24DCCA42"),
+            CBUUID(string: "6E400005-B5A3-F393-E0A9-E50E24DCCA42"),
             profile.notifyCharUUID
         ]
         let tr4aWriteOrder: [CBUUID] = [
+            CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400007-B5A3-F393-E0A9-E50E24DCCA42"),
-            CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
             profile.writeCharUUID
         ]
 

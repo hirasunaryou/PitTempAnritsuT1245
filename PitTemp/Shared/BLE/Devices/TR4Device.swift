@@ -10,6 +10,8 @@ final class TR4Device: NSObject, ThermometerDevice {
         static let serviceUUID = CBUUID(string: "6e400001-b5a3-f393-e0a9-e50e24dcca42")
         static let headerWriteUUID = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca42")
         static let dataWriteUUID = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca42")
+        // D 側の応答 (dres) も TR4 仕様では Notification を受け取る必要がある。
+        static let dResponseUUID = CBUUID(string: "6e400004-b5a3-f393-e0a9-e50e24dcca42")
         static let headerNotifyUUID = CBUUID(string: "6e400005-b5a3-f393-e0a9-e50e24dcca42")
         static let dataNotifyUUID = CBUUID(string: "6e400006-b5a3-f393-e0a9-e50e24dcca42")
         static let responseUUID = CBUUID(string: "6e400007-b5a3-f393-e0a9-e50e24dcca42")
@@ -18,6 +20,8 @@ final class TR4Device: NSObject, ThermometerDevice {
     private var peripheral: CBPeripheral?
     private var headerWriteChar: CBCharacteristic?
     private var dataWriteChar: CBCharacteristic?
+    // 送信結果を知らせる D 側レスポンス用 characteristic。
+    private var dResponseChar: CBCharacteristic?
     private var headerNotifyChar: CBCharacteristic?
     private var dataNotifyChar: CBCharacteristic?
     private var responseChar: CBCharacteristic?
@@ -42,6 +46,7 @@ final class TR4Device: NSObject, ThermometerDevice {
     func discoverCharacteristics(on peripheral: CBPeripheral, service: CBService) {
         let uuids: [CBUUID] = [Constants.headerWriteUUID,
                                Constants.dataWriteUUID,
+                               Constants.dResponseUUID,
                                Constants.headerNotifyUUID,
                                Constants.dataNotifyUUID,
                                Constants.responseUUID]
@@ -56,6 +61,7 @@ final class TR4Device: NSObject, ThermometerDevice {
             switch ch.uuid {
             case Constants.headerWriteUUID: headerWriteChar = ch
             case Constants.dataWriteUUID: dataWriteChar = ch
+            case Constants.dResponseUUID: dResponseChar = ch
             case Constants.headerNotifyUUID: headerNotifyChar = ch
             case Constants.dataNotifyUUID: dataNotifyChar = ch
             case Constants.responseUUID: responseChar = ch
@@ -63,6 +69,8 @@ final class TR4Device: NSObject, ThermometerDevice {
             }
         }
 
+        // TR4 仕様に従い、D レスポンス / U コマンド / U データの全てで Notification を有効化する。
+        if let dres = dResponseChar { peripheral?.setNotifyValue(true, for: dres) }
         if let header = headerNotifyChar { peripheral?.setNotifyValue(true, for: header) }
         if let data = dataNotifyChar { peripheral?.setNotifyValue(true, for: data) }
         onReady?()
@@ -70,6 +78,13 @@ final class TR4Device: NSObject, ThermometerDevice {
 
     func didUpdateValue(for characteristic: CBCharacteristic, data: Data) {
         switch characteristic.uuid {
+        case Constants.dResponseUUID:
+            // D 側応答 (dres)。2 バイトでステータスを通知するので、成功時のみ静かに通過させる。
+            Logger.shared.log("TR4 RX dres ← \(data.hexString)", category: .bleReceive)
+            if !(data.count == 2 && data[0] == 0x01 && data[1] == 0x00) {
+                // 送信エラー相当。今はログで気付けるようにする。
+                Logger.shared.log("TR4 dres error status: \(data.hexString)", category: .bleReceive)
+            }
         case Constants.headerNotifyUUID:
             Logger.shared.log("TR4 RX header ← \(data.hexString)", category: .bleReceive)
             guard data.count >= 4, data[0] == 0x01, data[1] == 0x01 else { return }
@@ -93,7 +108,8 @@ final class TR4Device: NSObject, ThermometerDevice {
                 expectedLength = 0
             }
         default:
-            break
+            // 想定外の characteristic から通知された場合もデバッグできるよう残す。
+            Logger.shared.log("TR4 RX unknown (\(characteristic.uuid.uuidString)) ← \(data.hexString)", category: .bleReceive)
         }
     }
 
@@ -133,6 +149,7 @@ final class TR4Device: NSObject, ThermometerDevice {
         peripheral = nil
         headerWriteChar = nil
         dataWriteChar = nil
+        dResponseChar = nil
         headerNotifyChar = nil
         dataNotifyChar = nil
         responseChar = nil

@@ -30,6 +30,7 @@ struct RootView: View {
     let folder = FolderBookmark()
     let coordinator = SessionFileCoordinator(exporter: CSVExporter(), uploader: folder)
     let bluetooth = BluetoothService()
+    bluetooth.setTR4ARegistrationCode(settings.tr4aRegistrationCode)
     let registry = DeviceRegistry()
     let bluetoothVM = BluetoothViewModel(service: bluetooth, registry: registry)
     let vm = SessionViewModel(settings: settings,

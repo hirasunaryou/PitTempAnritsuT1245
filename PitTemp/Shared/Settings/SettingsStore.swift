@@ -52,6 +52,7 @@ final class SettingsStore: ObservableObject {
         static let advanceWithReturn = "pref.advanceWithReturn"
         static let minAdvanceSec = "pref.minAdvanceSec"
         static let bleAutoConnect = "ble.autoConnect"
+        static let tr4aRegistrationCode = "ble.tr4a.registrationCode"
         static let enableWheelVoiceInput = "pref.enableWheelVoiceInput"
         static let enableSeniorLayout = "pref.enableSeniorLayout"
         static let seniorZoneFontScale = "pref.senior.zoneFontScale"
@@ -86,6 +87,8 @@ final class SettingsStore: ObservableObject {
     @Published var advanceWithReturn: Bool { didSet { save(advanceWithReturn, key: Keys.advanceWithReturn) } }
     @Published var minAdvanceSec: Double { didSet { save(minAdvanceSec, key: Keys.minAdvanceSec) } }
     @Published var bleAutoConnect: Bool { didSet { save(bleAutoConnect, key: Keys.bleAutoConnect) } }
+    /// TR45/TR4A の登録コード（パスコード）。空文字は未設定扱い。
+    @Published var tr4aRegistrationCode: String { didSet { save(tr4aRegistrationCode, key: Keys.tr4aRegistrationCode) } }
     @Published var enableWheelVoiceInput: Bool { didSet { save(enableWheelVoiceInput, key: Keys.enableWheelVoiceInput) } }
     @Published var enableSeniorLayout: Bool { didSet { save(enableSeniorLayout, key: Keys.enableSeniorLayout) } }
     @Published private var seniorZoneFontScaleRaw: Double { didSet { save(seniorZoneFontScaleRaw, key: Keys.seniorZoneFontScale) } }
@@ -121,6 +124,7 @@ final class SettingsStore: ObservableObject {
         advanceWithReturn = store.value(forKey: Keys.advanceWithReturn, default: true)
         minAdvanceSec = store.value(forKey: Keys.minAdvanceSec, default: 0.3)
         bleAutoConnect = store.value(forKey: Keys.bleAutoConnect, default: true)
+        tr4aRegistrationCode = store.value(forKey: Keys.tr4aRegistrationCode, default: "")
         enableWheelVoiceInput = store.value(forKey: Keys.enableWheelVoiceInput, default: false)
         enableSeniorLayout = store.value(forKey: Keys.enableSeniorLayout, default: false)
         seniorZoneFontScaleRaw = store.value(forKey: Keys.seniorZoneFontScale, default: 1.0)

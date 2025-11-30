@@ -29,12 +29,19 @@ protocol BluetoothServicing: TemperatureSensorClient {
     var autoConnectOnDiscover: Bool { get set }
     var notifyCountUI: Int { get }
     var notifyHz: Double { get }
-    var registry: DeviceRegistrying? { get set }
+    var bleDebugLog: [BLEDebugLogEntry] { get }
+    var registry: (any DeviceRegistrying)? { get set }
     var autoConnectPublisher: AnyPublisher<Bool, Never> { get }
     var notifyHzPublisher: AnyPublisher<Double, Never> { get }
     var notifyCountPublisher: AnyPublisher<Int, Never> { get }
+    var bleDebugLogPublisher: AnyPublisher<[BLEDebugLogEntry], Never> { get }
 
     func setPreferredIDs(_ ids: Set<String>)
+    func refreshTR4ASettings()
+    func updateTR4ARecordInterval(seconds: UInt16)
+    func setTR4APollingInterval(seconds: TimeInterval)
+    func setTR4ARegistrationCode(_ code: String)
+    func clearDebugLog()
 }
 
 /// スキャンで見つけたデバイスを記録するレジストリのインターフェイス。

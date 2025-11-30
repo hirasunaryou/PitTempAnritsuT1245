@@ -15,17 +15,26 @@ protocol TemperaturePacketParsing {
 /// BLE の Notify(最大20B)から温度フレームを安全に取り出す既定実装。
 /// 例: HEX ... → ASCII="001+00243"（ID=001, 温度=24.3℃）
 final class TemperaturePacketParser: TemperaturePacketParsing {
+    /// 任意のデバッグログ出力先。BluetoothService から差し込んで、受信データの解釈過程を記録できる。
+    /// - Important: BLEログと一緒に確認できるよう、Human readable な文字列を渡すことを想定。
+    var logger: ((String) -> Void)?
 
     /// 1パケット(～20B)から取り出せるだけのフレームを返す（通常は1件）
     func parseFrames(_ data: Data) -> [TemperatureFrame] {
         guard !data.isEmpty else { return [] }
 
-        // 先にTR4AのSOHレスポンス(0x33/0x81)かどうかを判定。合致したらそちらを返す。
+        // 先にTR4AのSOHレスポンス(0x33/0x00 系)かどうかを判定。合致したらそちらを返す。
         if let tr4a = parseTR4AFrame(data) {
+            // 文字列整形でのエスケープミスを避けるため、String(format:) 側でメッセージまで組み立てる。
+            logger?(String(format: "TR4A 0x33 frame parsed → %.1f℃", tr4a.value))
             return [tr4a]
         }
 
-        return parseAnritsuASCII(data)
+        let frames = parseAnritsuASCII(data)
+        if let first = frames.first {
+            logger?(String(format: "Anritsu ASCII parsed → id=%ld value=%.1f℃", first.deviceID ?? -1, first.value))
+        }
+        return frames
     }
 
     // 時刻設定コマンドだけを公開。DATA 取得は通知購読に集約したため残さない。
@@ -38,6 +47,8 @@ final class TemperaturePacketParser: TemperaturePacketParsing {
 private extension TemperaturePacketParser {
     /// 既存Anritsu ASCIIフレームを分解する処理を切り出し（符号位置からID/温度を抽出）。
     func parseAnritsuASCII(_ data: Data) -> [TemperatureFrame] {
+        logger?("ASCII candidate: \(describeBytes(data))")
+
         // 可視ASCIIのみ取り出し
         var asciiBytes: [UInt8] = []
         asciiBytes.reserveCapacity(data.count)
@@ -94,35 +105,34 @@ private extension TemperaturePacketParser {
         return [TemperatureFrame(time: Date(), deviceID: deviceID, value: valueC, status: status)]
     }
 
-    /// TR4A「現在値取得(0x33/0x81)」の応答(最小24B)を簡易パースする。
-    /// - Assumption: データサイズ0x0018の先頭に[Type(0x00), CH数, 測定値(Int16 LE,0.01℃), 状態コード2...]が並ぶ。
-    ///   断線ビット(stateCode2 bit0)のみTemperatureFrame.Statusにマッピングし、温度は0.01℃→℃で返す。
+    /// TR4A「現在値取得(0x33/0x00)」の最小応答(11B)をパースする。
+    /// - Specification: オフセット5のInt16(LE)が (値-1000)/10 ℃ で表され、CH2は7-8byte目に格納される。
+    ///   TR45は1ch温度のみなのでCH1のみ返す。CRCは受信元（BLEスタック）で検証済みとみなしここでは省略する。
     func parseTR4AFrame(_ data: Data) -> TemperatureFrame? {
-        guard data.count >= 9 else { return nil }
-        guard data[0] == 0x01, data[1] == 0x33, data[2] == 0x81 else { return nil }
+        guard data.count >= 11 else { return nil }
+        guard data[0] == 0x01, data[1] == 0x33 else { return nil }
+
+        let status = data[2]
+        // 0x06 = ACK, 0x0F = REFUSE。ステータスをログに残し、ACK のみ温度に反映する。
+        logger?("TR4A candidate: status=0x\(String(format: "%02X", status)) bytes=\(describeBytes(data))")
+        guard status == 0x06 else { return nil }
 
         let sizeLE = UInt16(data[3]) | (UInt16(data[4]) << 8)
-        let payloadStart = 6 // status(1B)を飛ばした位置
-        let totalNeeded = payloadStart + Int(sizeLE) + 2 // CRC2B
-        guard data.count >= totalNeeded else { return nil }
+        let payloadStart = 5
+        let totalNeeded = payloadStart + Int(sizeLE) + 2 // CRC16 2byte を含めた必要長
+        guard data.count >= totalNeeded, sizeLE >= 4 else { return nil }
 
-        let status = data[5]
-        guard status == 0x00 else { return nil } // コマンド失敗時は温度を起こさない
+        let rawLE = UInt16(data[payloadStart]) | (UInt16(data[payloadStart + 1]) << 8)
+        let raw = Int16(bitPattern: rawLE)
+        // 仕様書の式: (Int16値 - 1000) / 10 で ℃ を得る
+        let valueC = (Double(raw) - 1000.0) / 10.0
 
-        let payload = data[payloadStart..<payloadStart + Int(sizeLE)]
-        guard payload.count >= 4 else { return nil }
+        return TemperatureFrame(time: Date(), deviceID: 1, value: valueC, status: nil)
+    }
 
-        let channel = Int(payload[payload.startIndex + 1])
-        let raw = Int16(bitPattern: UInt16(payload[payload.startIndex + 2])
-                        | (UInt16(payload[payload.startIndex + 3]) << 8))
-        let valueC = Double(raw) / 100.0
-
-        var frameStatus: TemperatureFrame.Status?
-        if payload.count > 4 {
-            let stateCode2 = payload[payload.startIndex + 4]
-            if stateCode2 & 0x01 == 1 { frameStatus = .bout }
-        }
-
-        return TemperatureFrame(time: Date(), deviceID: channel, value: valueC, status: frameStatus)
+    /// 受信データをログしやすい Hex 文字列に整形するユーティリティ。
+    /// - Note: 20byte超えでも全体を表示し、デバッグビューで生パケットの確認ができるようにする。
+    func describeBytes(_ data: Data) -> String {
+        data.map { String(format: "%02X", $0) }.joined(separator: " ")
     }
 }

@@ -4,10 +4,10 @@ import CoreBluetooth
 /// スキャンと発見処理を担当
 final class DeviceScanner {
     private let profiles: [BLEDeviceProfile]
-    weak var registry: DeviceRegistrying?
+    weak var registry: (any DeviceRegistrying)?
     var onDiscovered: ((ScannedDevice, CBPeripheral) -> Void)?
 
-    init(profiles: [BLEDeviceProfile], registry: DeviceRegistrying? = nil) {
+    init(profiles: [BLEDeviceProfile], registry: (any DeviceRegistrying)? = nil) {
         self.profiles = profiles
         self.registry = registry
     }

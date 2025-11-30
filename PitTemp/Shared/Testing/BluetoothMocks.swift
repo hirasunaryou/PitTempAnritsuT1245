@@ -10,7 +10,8 @@ final class MockBluetoothService: BluetoothServicing {
     @Published var autoConnectOnDiscover: Bool = false
     @Published var notifyCountUI: Int = 0
     @Published var notifyHz: Double = 0
-    var registry: DeviceRegistrying?
+    @Published var bleDebugLog: [BLEDebugLogEntry] = []
+    var registry: (any DeviceRegistrying)?
     var connectionStatePublisher: AnyPublisher<ConnectionState, Never> { $connectionState.eraseToAnyPublisher() }
     var scannedPublisher: AnyPublisher<[ScannedDevice], Never> { $scanned.eraseToAnyPublisher() }
     var deviceNamePublisher: AnyPublisher<String?, Never> { $deviceName.eraseToAnyPublisher() }
@@ -18,6 +19,7 @@ final class MockBluetoothService: BluetoothServicing {
     var autoConnectPublisher: AnyPublisher<Bool, Never> { $autoConnectOnDiscover.eraseToAnyPublisher() }
     var notifyHzPublisher: AnyPublisher<Double, Never> { $notifyHz.eraseToAnyPublisher() }
     var notifyCountPublisher: AnyPublisher<Int, Never> { $notifyCountUI.eraseToAnyPublisher() }
+    var bleDebugLogPublisher: AnyPublisher<[BLEDebugLogEntry], Never> { $bleDebugLog.eraseToAnyPublisher() }
 
     private let subject = PassthroughSubject<TemperatureFrame, Never>()
     var temperatureFrames: AnyPublisher<TemperatureFrame, Never> { subject.eraseToAnyPublisher() }
@@ -33,6 +35,11 @@ final class MockBluetoothService: BluetoothServicing {
     func disconnect() { didDisconnect = true }
     func setDeviceTime(to date: Date) { /* no-op for tests */ }
     func setPreferredIDs(_ ids: Set<String>) { /* record if needed */ }
+    func refreshTR4ASettings() { /* no-op in mock */ }
+    func updateTR4ARecordInterval(seconds: UInt16) { /* no-op in mock */ }
+    func setTR4APollingInterval(seconds: TimeInterval) { /* no-op in mock */ }
+    func setTR4ARegistrationCode(_ code: String) { /* no-op in mock */ }
+    func clearDebugLog() { bleDebugLog.removeAll() }
 
     /// テスト側から任意のフレームを流し込むためのヘルパー。
     func emit(frame: TemperatureFrame) { subject.send(frame) }

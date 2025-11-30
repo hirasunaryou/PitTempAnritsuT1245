@@ -29,7 +29,7 @@ protocol BluetoothServicing: TemperatureSensorClient {
     var autoConnectOnDiscover: Bool { get set }
     var notifyCountUI: Int { get }
     var notifyHz: Double { get }
-    var registry: DeviceRegistrying? { get set }
+    var registry: (any DeviceRegistrying)? { get set }
     var autoConnectPublisher: AnyPublisher<Bool, Never> { get }
     var notifyHzPublisher: AnyPublisher<Double, Never> { get }
     var notifyCountPublisher: AnyPublisher<Int, Never> { get }

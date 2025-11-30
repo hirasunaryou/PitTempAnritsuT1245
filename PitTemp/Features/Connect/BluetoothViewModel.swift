@@ -16,11 +16,11 @@ final class BluetoothViewModel: ObservableObject {
     @Published private(set) var notifyHzText: String = "Hz: --"
     @Published private(set) var notifyCountText: String = "N: --"
 
-    private let service: BluetoothServicing
-    private let registry: DeviceRegistrying
+    private let service: any BluetoothServicing
+    private let registry: any DeviceRegistrying
     private var cancellables: Set<AnyCancellable> = []
 
-    init(service: BluetoothServicing, registry: DeviceRegistrying) {
+    init(service: any BluetoothServicing, registry: any DeviceRegistrying) {
         self.service = service
         self.registry = registry
         // Seed with the current service state so the UI renders instantly.

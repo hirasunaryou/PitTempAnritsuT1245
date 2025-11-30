@@ -28,7 +28,7 @@ final class TR4ASOHSession {
 
     private weak var peripheral: CBPeripheral?
     private let writeChar: CBCharacteristic
-    private weak var registry: DeviceRegistrying?
+    private weak var registry: (any DeviceRegistrying)?
     private let logger: UILogPublishing?
     private let deviceID: String
     private let onTemperature: (TemperatureFrame) -> Void
@@ -40,7 +40,7 @@ final class TR4ASOHSession {
 
     init(peripheral: CBPeripheral,
          write: CBCharacteristic,
-         registry: DeviceRegistrying?,
+         registry: (any DeviceRegistrying)?,
          deviceID: String,
          logger: UILogPublishing?,
          onTemperature: @escaping (TemperatureFrame) -> Void) {
@@ -184,8 +184,9 @@ final class TR4ASOHSession {
         let serial = record.serialNumber ?? "(unknown serial)"
         log("Sending 0x76 for serial \(serial)")
         var codeValue: UInt32 = UInt32(code) ?? 0
+        var codeLE = codeValue.littleEndian // swiftlint:disable:this identifier_name
         var payload = Data()
-        withUnsafeBytes(of: &codeValue.littleEndian) { payload.append(contentsOf: $0) }
+        withUnsafeBytes(of: &codeLE) { payload.append(contentsOf: $0) }
         send(command: 0x76, subcommand: 0x00, payload: &payload)
     }
 

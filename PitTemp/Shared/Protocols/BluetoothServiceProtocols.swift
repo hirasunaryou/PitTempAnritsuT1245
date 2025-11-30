@@ -9,17 +9,21 @@ protocol TemperatureSensorClient: ObservableObject {
     var deviceName: String? { get }
     var scanned: [ScannedDevice] { get }
     var latestTemperature: Double? { get }
+    var tr4aSnapshot: TR4AStatusSnapshot? { get }
     var temperatureFrames: AnyPublisher<TemperatureFrame, Never> { get }
     var connectionStatePublisher: AnyPublisher<ConnectionState, Never> { get }
     var scannedPublisher: AnyPublisher<[ScannedDevice], Never> { get }
     var deviceNamePublisher: AnyPublisher<String?, Never> { get }
     var latestTemperaturePublisher: AnyPublisher<Double?, Never> { get }
+    var tr4aSnapshotPublisher: AnyPublisher<TR4AStatusSnapshot?, Never> { get }
 
     func startScan()
     func stopScan()
     func connect(deviceID: String)
     func disconnect()
     func setDeviceTime(to date: Date)
+    func applyTR4ASettings(_ settings: TR4ADeviceSettingsRequest)
+    func refreshTR4AStatus()
 }
 
 /// BluetoothService が公開する追加の制御系。

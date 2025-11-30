@@ -7,6 +7,7 @@ final class MockBluetoothService: BluetoothServicing {
     @Published var deviceName: String? = nil
     @Published var scanned: [ScannedDevice] = []
     @Published var latestTemperature: Double? = nil
+    @Published var tr4aSnapshot: TR4AStatusSnapshot? = nil
     @Published var autoConnectOnDiscover: Bool = false
     @Published var notifyCountUI: Int = 0
     @Published var notifyHz: Double = 0
@@ -15,6 +16,7 @@ final class MockBluetoothService: BluetoothServicing {
     var scannedPublisher: AnyPublisher<[ScannedDevice], Never> { $scanned.eraseToAnyPublisher() }
     var deviceNamePublisher: AnyPublisher<String?, Never> { $deviceName.eraseToAnyPublisher() }
     var latestTemperaturePublisher: AnyPublisher<Double?, Never> { $latestTemperature.eraseToAnyPublisher() }
+    var tr4aSnapshotPublisher: AnyPublisher<TR4AStatusSnapshot?, Never> { $tr4aSnapshot.eraseToAnyPublisher() }
     var autoConnectPublisher: AnyPublisher<Bool, Never> { $autoConnectOnDiscover.eraseToAnyPublisher() }
     var notifyHzPublisher: AnyPublisher<Double, Never> { $notifyHz.eraseToAnyPublisher() }
     var notifyCountPublisher: AnyPublisher<Int, Never> { $notifyCountUI.eraseToAnyPublisher() }
@@ -33,6 +35,8 @@ final class MockBluetoothService: BluetoothServicing {
     func disconnect() { didDisconnect = true }
     func setDeviceTime(to date: Date) { /* no-op for tests */ }
     func setPreferredIDs(_ ids: Set<String>) { /* record if needed */ }
+    func applyTR4ASettings(_ settings: TR4ADeviceSettingsRequest) { /* tests can inspect later */ }
+    func refreshTR4AStatus() { /* no-op */ }
 
     /// テスト側から任意のフレームを流し込むためのヘルパー。
     func emit(frame: TemperatureFrame) { subject.send(frame) }

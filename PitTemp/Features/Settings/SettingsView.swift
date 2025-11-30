@@ -17,12 +17,22 @@ struct SettingsView: View {
     @State private var showPicker = false
     @EnvironmentObject var registry: DeviceRegistry
     @EnvironmentObject var uiLog: UILogStore
+    @EnvironmentObject var registrationStore: TR4ARegistrationStore
     @State private var driveAlertMessage: String? = nil
 
     
     var body: some View {
         NavigationStack {
             Form {
+                Section("TR45 / BLE") {
+                    NavigationLink("TR45 Device Settings") { TR45DeviceSettingsView() }
+                    NavigationLink("TR45 Registration Codes") { TR4ARegistrationSettingsView() }
+                    NavigationLink("BLE Debug Log") { BLEDebugLogView() }
+                    Text("TR45 の現在値や設定コマンドを SOH で送受信する専用画面です。BLE ログでは実際に送ったフレームやエラー内容を追えます。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
                 // プロファイル
                 Section("Profile") {
                     // 端末のニックネーム。入力済みなら保存フォルダ名にも反映し、

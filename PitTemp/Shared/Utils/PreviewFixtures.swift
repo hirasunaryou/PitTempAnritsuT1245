@@ -18,6 +18,7 @@ struct MeasureViewPreviewFixtures {
     let bluetooth: BluetoothService
     let bluetoothVM: BluetoothViewModel
     let registry: DeviceRegistry
+    let registrationStore: TR4ARegistrationStore
     let driveService: GoogleDriveService
     let connectivity: ConnectivityMonitor
 
@@ -29,7 +30,8 @@ struct MeasureViewPreviewFixtures {
                                      autosaveStore: autosave,
                                      uiLog: logStore)
         folderBookmark = FolderBookmark()
-        bluetooth = BluetoothService()
+        registrationStore = TR4ARegistrationStore()
+        bluetooth = BluetoothService(uiLogger: logStore, registrationStore: registrationStore)
         registry = DeviceRegistry()
         bluetoothVM = BluetoothViewModel(service: bluetooth, registry: registry)
         driveService = GoogleDriveService()

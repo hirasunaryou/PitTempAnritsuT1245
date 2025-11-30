@@ -12,6 +12,7 @@ final class BluetoothViewModel: ObservableObject {
     @Published private(set) var deviceName: String?
     @Published private(set) var autoConnectOnDiscover: Bool
     @Published private(set) var latestTemperature: Double?
+    @Published private(set) var tr4aSnapshot: TR4AStatusSnapshot?
     // Debug metrics that were previously formatted inside the View.
     @Published private(set) var notifyHzText: String = "Hz: --"
     @Published private(set) var notifyCountText: String = "N: --"
@@ -29,6 +30,7 @@ final class BluetoothViewModel: ObservableObject {
         deviceName = service.deviceName
         autoConnectOnDiscover = service.autoConnectOnDiscover
         latestTemperature = service.latestTemperature
+        tr4aSnapshot = service.tr4aSnapshot
 
         bindServiceState()
     }
@@ -96,6 +98,14 @@ final class BluetoothViewModel: ObservableObject {
         service.disconnect()
     }
 
+    func applyTR4A(settings: TR4ADeviceSettingsRequest) {
+        service.applyTR4ASettings(settings)
+    }
+
+    func refreshTR4AStatus() {
+        service.refreshTR4AStatus()
+    }
+
     /// Update the auto-connect flag from Settings or a Toggle.
     func updateAutoConnect(isEnabled: Bool) {
         service.autoConnectOnDiscover = isEnabled
@@ -138,6 +148,13 @@ final class BluetoothViewModel: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] temperature in
                 self?.latestTemperature = temperature
+            }
+            .store(in: &cancellables)
+
+        service.tr4aSnapshotPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] snap in
+                self?.tr4aSnapshot = snap
             }
             .store(in: &cancellables)
 

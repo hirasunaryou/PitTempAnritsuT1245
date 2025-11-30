@@ -34,13 +34,13 @@ extension BLEDeviceProfile {
     )
 
     /// TR4A(TR41/42/43/45)のT&D SPPサービス向けプロファイル。
-    /// - Note: Data Line特性はWriteWithoutResponse/Notify兼用なので同一UUIDを設定する。
+    /// - Note: 仕様書に従い Write=0x0002, Notify=0x0003 の組み合わせを固定で使用する。
     static let tr4a = BLEDeviceProfile(
         key: "tr4a",
         allowedNamePrefixes: ["TR45", "TR44", "TR43", "TR42", "TR41", "TR4"],
         serviceUUIDString: "6e400001-b5a3-f393-e0a9-e50e24dcca42",
-        notifyCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
-        writeCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
+        notifyCharUUIDString: "6e400003-b5a3-f393-e0a9-e50e24dcca42",
+        writeCharUUIDString: "6e400002-b5a3-f393-e0a9-e50e24dcca42",
         requiresPollingForRealtime: true
     )
 }

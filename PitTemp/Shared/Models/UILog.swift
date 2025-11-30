@@ -11,6 +11,7 @@ struct UILogEntry: Identifiable, Equatable {
     enum Category: String {
         case general
         case autosave
+        case ble
     }
 
     let id = UUID()

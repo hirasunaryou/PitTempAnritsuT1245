@@ -14,6 +14,7 @@ struct PitTempApp: App {
     @StateObject private var registry: DeviceRegistry
     @StateObject private var bluetoothVM: BluetoothViewModel
     @StateObject private var uiLog: UILogStore
+    @StateObject private var registrationStore: TR4ARegistrationStore
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -21,13 +22,15 @@ struct PitTempApp: App {
         let log = UILogStore()
         let autosave = SessionAutosaveStore(uiLogger: log)
         let folder = FolderBookmark()
-        let ble = BluetoothService()
+        let registration = TR4ARegistrationStore()
+        let ble = BluetoothService(uiLogger: log, registrationStore: registration)
         let registry = DeviceRegistry()
         // CSV 書き出しから iCloud 共有フォルダ連携までを同じインスタンスで束ねる。
         let coordinator = SessionFileCoordinator(exporter: CSVExporter(), uploader: folder)
         _settings = StateObject(wrappedValue: s)
         _uiLog = StateObject(wrappedValue: log)
         _folderBM = StateObject(wrappedValue: folder)
+        _registrationStore = StateObject(wrappedValue: registration)
         let vm = SessionViewModel(settings: s,
                                   autosaveStore: autosave,
                                   uiLog: log,
@@ -53,6 +56,7 @@ struct PitTempApp: App {
                     .environmentObject(connectivity)
                     .environmentObject(bluetoothVM)
                     .environmentObject(registry)
+                    .environmentObject(registrationStore)
                     .environmentObject(uiLog)
                     .onAppear { ble.registry = registry }
         }

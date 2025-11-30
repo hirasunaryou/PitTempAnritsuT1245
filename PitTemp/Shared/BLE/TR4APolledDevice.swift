@@ -15,7 +15,13 @@ final class TR4APolledDevice: ThermometerDevice {
     var onNotifyHz: ((Double) -> Void)?
 
     private let connectionManager = ConnectionManager(profile: .tr4a)
-    private let notifyController: NotifyController
+    private let temperatureUseCase: TemperatureIngesting
+    private lazy var notifyController: NotifyController = {
+        // lazy 初期化で self を安全にキャプチャし、初期化順序の警告を防ぐ。
+        NotifyController(ingestor: temperatureUseCase) { [weak self] frame in
+            self?.onTemperature?(frame)
+        }
+    }()
     private let logger = Logger.shared
 
     private var pollTimer: DispatchSourceTimer?
@@ -25,9 +31,7 @@ final class TR4APolledDevice: ThermometerDevice {
         self.peripheral = peripheral
         self.name = name
         self.identifier = peripheral.identifier.uuidString
-        self.notifyController = NotifyController(ingestor: temperatureUseCase) { [weak self] frame in
-            self?.onTemperature?(frame)
-        }
+        self.temperatureUseCase = temperatureUseCase
         setupCallbacks()
     }
 

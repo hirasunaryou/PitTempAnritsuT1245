@@ -15,16 +15,20 @@ final class AnritsuDevice: ThermometerDevice {
     var onNotifyHz: ((Double) -> Void)?
 
     private let connectionManager = ConnectionManager(profile: .anritsu)
-    private let notifyController: NotifyController
+    private let temperatureUseCase: TemperatureIngesting
+    private lazy var notifyController: NotifyController = {
+        // lazy にすることで、self が完全に初期化された後に生成し、クロージャで self を安全に参照できる。
+        NotifyController(ingestor: temperatureUseCase) { [weak self] frame in
+            self?.onTemperature?(frame)
+        }
+    }()
     private let logger = Logger.shared
 
     init(peripheral: CBPeripheral, name: String, temperatureUseCase: TemperatureIngesting) {
         self.peripheral = peripheral
         self.name = name
         self.identifier = peripheral.identifier.uuidString
-        self.notifyController = NotifyController(ingestor: temperatureUseCase) { [weak self] frame in
-            self?.onTemperature?(frame)
-        }
+        self.temperatureUseCase = temperatureUseCase
         setupCallbacks()
     }
 

@@ -3,10 +3,10 @@ import CoreBluetooth
 
 /// スキャンと発見処理を担当
 final class DeviceScanner {
-    weak var registry: DeviceRegistrying?
+    weak var registry: (any DeviceRegistrying)?
     var onDiscovered: ((ScannedDevice, CBPeripheral, [String: Any]) -> Void)?
 
-    init(registry: DeviceRegistrying? = nil) {
+    init(registry: (any DeviceRegistrying)? = nil) {
         self.registry = registry
     }
 

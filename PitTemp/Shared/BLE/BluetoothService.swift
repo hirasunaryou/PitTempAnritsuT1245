@@ -22,7 +22,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     var temperatureFrames: AnyPublisher<TemperatureFrame, Never> { temperatureFramesSubject.eraseToAnyPublisher() }
 
     // 外部レジストリ（App から注入）
-    weak var registry: DeviceRegistrying? {
+    weak var registry: (any DeviceRegistrying)? {
         didSet { scanner.registry = registry }
     }
 

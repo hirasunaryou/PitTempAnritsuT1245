@@ -104,9 +104,6 @@ final class BluetoothService: NSObject, BluetoothServicing {
         if let parserBacked = temperatureUseCase as? TemperatureIngestUseCase,
            let parser = parserBacked.parser as? TemperaturePacketParser {
             self.parserForLogging = parser
-        } else if let parser = temperatureUseCase as? TemperaturePacketParser {
-            // テストなどで直に parser を注入したケース。
-            self.parserForLogging = parser
         }
 
         self.temperatureUseCase = temperatureUseCase
@@ -439,7 +436,15 @@ private extension BluetoothService {
     /// - Returns: SOH フレーム（CRC は XMODEM、CRC はローバイト→ハイバイトの順で付与）。
     static func buildTR4APasscodeFrame(passcodeBCD: [UInt8]) -> Data {
         // BCD は必ず4byteのはずなので、安全側にゼロ埋めして扱う。
-        let padded = passcodeBCD.count == 4 ? passcodeBCD : (passcodeBCD + Array(repeating: 0x00, count: max(0, 4 - passcodeBCD.count))).prefix(4)
+        let padded: [UInt8] = {
+            // BCD 配列が 4byte 未満の場合はゼロ埋めし、超過している場合は先頭 4byte に丸める。
+            var bytes = passcodeBCD
+            if bytes.count < 4 {
+                bytes += Array(repeating: 0x00, count: 4 - bytes.count)
+            }
+            return Array(bytes.prefix(4))
+        }()
+
         var frame = Data([0x01, 0x76, 0x00, 0x04, 0x00])
         frame.append(contentsOf: padded)
         let crc = TR4ACRC.xmodem(frame)

@@ -109,8 +109,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
 
     init(temperatureUseCase: TemperatureIngesting = TemperatureIngestUseCase()) {
         // 既定の UseCase が TemperaturePacketParser を使っている場合、後でロガーを差し込めるよう参照を保持する。
-        if let parserBacked = temperatureUseCase as? TemperatureIngestUseCase,
-           let parser = parserBacked.parser as? TemperaturePacketParser {
+        if let useCase = temperatureUseCase as? TemperatureIngestUseCase,
+           let parser = useCase.parser as? TemperaturePacketParser {
             self.parserForLogging = parser
         }
 
@@ -437,7 +437,7 @@ private extension BluetoothService {
                 self.stopTR4APolling()
                 return
             }
-            self.tr4PollsSinceResponse += 1
+            self.tr4aPollsSinceResponse += 1
             if self.activeProfile == .tr4 {
                 self.appendBLELog("→ Send TR4 0x33 request via 0x9F envelope")
                 self.sendTR4CurrentValue(peripheral: p)
@@ -448,8 +448,10 @@ private extension BluetoothService {
             }
 
             // しばらく応答がない場合は書き込み characteristic を次候補へ切り替えて再トライする。
-            if self.tr4PollsSinceResponse >= 3,
-               let next = self.advanceTR4AWriteCharacteristicIfPossible(reason: "no 0x33 response after \(self.tr4PollsSinceResponse) polls") {
+            if self.tr4aPollsSinceResponse >= 3,
+               let next = self.advanceTR4AWriteCharacteristicIfPossible(
+                reason: "no 0x33 response after \(self.tr4aPollsSinceResponse) polls"
+               ) {
                 self.startTR4APollingIfNeeded(peripheral: p, write: next, intervalSeconds: interval)
             }
         }
@@ -690,7 +692,7 @@ private extension BluetoothService {
         let tempC = Double(rawValue - 1000) / 10.0
         appendBLELog("TR4: decoded temperature \(tempC)℃ from raw=0x\(String(format: "%04X", innerTempLE))")
 
-        let frame = TemperatureFrame(value: tempC, timestamp: Date())
+        let frame = TemperatureFrame(time: Date(), deviceID: nil, value: tempC, status: nil)
         DispatchQueue.main.async { self.latestTemperature = tempC }
         temperatureFramesSubject.send(frame)
     }

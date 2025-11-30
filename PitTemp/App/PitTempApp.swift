@@ -21,7 +21,7 @@ struct PitTempApp: App {
         let log = UILogStore()
         let autosave = SessionAutosaveStore(uiLogger: log)
         let folder = FolderBookmark()
-        let ble = BluetoothService()
+        let ble = BluetoothService(uiLogger: log)
         let registry = DeviceRegistry()
         // CSV 書き出しから iCloud 共有フォルダ連携までを同じインスタンスで束ねる。
         let coordinator = SessionFileCoordinator(exporter: CSVExporter(), uploader: folder)

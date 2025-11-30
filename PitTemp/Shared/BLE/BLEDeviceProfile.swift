@@ -10,11 +10,16 @@ struct BLEDeviceProfile: Equatable, Codable {
     let serviceUUIDString: String
     let notifyCharUUIDString: String
     let writeCharUUIDString: String
+    /// TR45などTR4A系では Write / Notify の互換UUIDが複数存在するため、優先順で列挙しておく。
+    let alternateNotifyUUIDStrings: [String]?
+    let alternateWriteUUIDStrings: [String]?
     let requiresPollingForRealtime: Bool
 
     var serviceUUID: CBUUID { CBUUID(string: serviceUUIDString) }
     var notifyCharUUID: CBUUID { CBUUID(string: notifyCharUUIDString) }
     var writeCharUUID: CBUUID { CBUUID(string: writeCharUUIDString) }
+    var alternateNotifyUUIDs: [CBUUID] { (alternateNotifyUUIDStrings ?? []).map(CBUUID.init(string:)) }
+    var alternateWriteUUIDs: [CBUUID] { (alternateWriteUUIDStrings ?? []).map(CBUUID.init(string:)) }
 
     /// 広告に含まれるローカルネームからプロファイルを推定するシンプルなフィルタ。
     func matches(name: String) -> Bool {
@@ -30,6 +35,8 @@ extension BLEDeviceProfile {
         serviceUUIDString: "ada98080-888b-4e9f-9a7f-07ddc240f3ce",
         notifyCharUUIDString: "ada98081-888b-4e9f-9a7f-07ddc240f3ce",
         writeCharUUIDString: "ada98082-888b-4e9f-9a7f-07ddc240f3ce",
+        alternateNotifyUUIDStrings: nil,
+        alternateWriteUUIDStrings: nil,
         requiresPollingForRealtime: false
     )
 
@@ -39,8 +46,10 @@ extension BLEDeviceProfile {
         key: "tr4a",
         allowedNamePrefixes: ["TR45", "TR44", "TR43", "TR42", "TR41", "TR4"],
         serviceUUIDString: "6e400001-b5a3-f393-e0a9-e50e24dcca42",
-        notifyCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
-        writeCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
+        notifyCharUUIDString: "6e400004-b5a3-f393-e0a9-e50e24dcca42", // TR45推奨のNotify
+        writeCharUUIDString: "6e400002-b5a3-f393-e0a9-e50e24dcca42",  // Write with Responseを優先
+        alternateNotifyUUIDStrings: ["6e400008-b5a3-f393-e0a9-e50e24dcca42"],
+        alternateWriteUUIDStrings: ["6e400003-b5a3-f393-e0a9-e50e24dcca42", "6e400007-b5a3-f393-e0a9-e50e24dcca42"],
         requiresPollingForRealtime: true
     )
 }

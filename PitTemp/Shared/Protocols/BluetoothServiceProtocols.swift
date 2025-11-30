@@ -47,6 +47,7 @@ protocol DeviceRegistrying: AnyObject, ObservableObject {
     func record(forName name: String) -> DeviceRecord?
     func upsertSeen(id: String, name: String, rssi: Int?)
     func setAlias(_ alias: String?, for id: String)
+    func setRegister(serial: String?, code: String?, for id: String)
     func setAutoConnect(_ on: Bool, for id: String)
     func forget(id: String)
 }

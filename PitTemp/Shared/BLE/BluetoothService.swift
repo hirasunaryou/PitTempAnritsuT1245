@@ -50,6 +50,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
 
     // Parser / UseCase
     private let temperatureUseCase: TemperatureIngesting
+    private let uiLogger: UILogPublishing?
 
     // その他
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
@@ -77,8 +78,12 @@ final class BluetoothService: NSObject, BluetoothServicing {
         self.temperatureFramesSubject.send(frame)
     }
 
-    init(temperatureUseCase: TemperatureIngesting = TemperatureIngestUseCase()) {
+    private var tr4aSession: TR4ASOHSession?
+
+    init(temperatureUseCase: TemperatureIngesting = TemperatureIngestUseCase(),
+         uiLogger: UILogPublishing? = nil) {
         self.temperatureUseCase = temperatureUseCase
+        self.uiLogger = uiLogger
         super.init()
         central = CBCentralManager(delegate: self, queue: bleQueue)
         setupCallbacks()
@@ -102,6 +107,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil; readChar = nil; writeChar = nil
         stopTR4APolling()
+        tr4aSession?.stop(); tr4aSession = nil
         DispatchQueue.main.async { self.connectionState = .idle }
     }
 
@@ -174,7 +180,22 @@ private extension BluetoothService {
             DispatchQueue.main.async { self.connectionState = .ready }
             // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
             self.setDeviceTime()
-            startTR4APollingIfNeeded(peripheral: peripheral, write: write)
+            if self.activeProfile.requiresPollingForRealtime, let write {
+                // TR45 support: SOH セッションを起動し、0x68→0x76→0x33 の順に試行。
+                let session = TR4ASOHSession(peripheral: peripheral,
+                                             write: write,
+                                             registry: self.registry,
+                                             deviceID: peripheral.identifier.uuidString,
+                                             logger: self.uiLogger) { [weak self] frame in
+                    guard let self else { return }
+                    DispatchQueue.main.async { self.latestTemperature = frame.value }
+                    self.temperatureFramesSubject.send(frame)
+                }
+                self.tr4aSession = session
+                session.start()
+            } else {
+                startTR4APollingIfNeeded(peripheral: peripheral, write: write)
+            }
         }
         connectionManager.onFailed = { [weak self] message in
             DispatchQueue.main.async { self?.connectionState = .failed(message) }
@@ -306,6 +327,10 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
+        if activeProfile.requiresPollingForRealtime, let session = tr4aSession {
+            session.handleNotification(data)
+            return
+        }
         notifyController.handleNotification(data)
     }
 }

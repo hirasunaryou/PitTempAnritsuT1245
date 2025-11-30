@@ -87,6 +87,8 @@ struct DeviceRegistryDetailView: View {
 
     @State private var alias: String = ""
     @State private var autoConnect: Bool = false
+    @State private var serial: String = ""
+    @State private var registerCode: String = ""
 
     var body: some View {
         Form {
@@ -108,6 +110,25 @@ struct DeviceRegistryDetailView: View {
                 Toggle("Prefer auto-connect", isOn: $autoConnect)
             }
 
+            Section("TR45 Register Code") {
+                TextField("Serial number (e.g. 58300D09)", text: $serial)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                TextField("8-digit register code", text: $registerCode)
+                    .keyboardType(.numberPad)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !registerCode.isEmpty && !isCodeValid {
+                    Text("Register code must be 8 digits (0-9).")
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("Stored per device so 0x76 authentication can run automatically.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             Section {
                 Button(role: .destructive) {
                     registry.forget(id: device.id)
@@ -122,14 +143,20 @@ struct DeviceRegistryDetailView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") {
                     registry.setAlias(alias.isEmpty ? nil : alias, for: device.id)
+                    registry.setRegister(serial: serial.isEmpty ? nil : serial,
+                                         code: isCodeValid ? registerCode : nil,
+                                         for: device.id)
                     registry.setAutoConnect(autoConnect, for: device.id)
                     dismiss()
                 }
+                .disabled(!isCodeValid && !registerCode.isEmpty)
             }
         }
         .onAppear {
             alias = device.alias ?? ""
             autoConnect = device.autoConnect
+            serial = device.serialNumber ?? ""
+            registerCode = device.registerCode ?? ""
         }
     }
 
@@ -143,5 +170,9 @@ struct DeviceRegistryDetailView: View {
         if h < 24 { return "\(h)h ago" }
         let d = h / 24
         return "\(d)d ago"
+    }
+
+    private var isCodeValid: Bool {
+        registerCode.isEmpty || (registerCode.count == 8 && registerCode.allSatisfy { $0.isNumber })
     }
 }

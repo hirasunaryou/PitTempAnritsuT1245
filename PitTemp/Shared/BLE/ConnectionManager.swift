@@ -30,7 +30,10 @@ final class ConnectionManager {
             print("[BLE] target service not found yet")
             return
         }
-        peripheral.discoverCharacteristics([profile.notifyCharUUID, profile.writeCharUUID], for: service)
+        var uuids: [CBUUID] = [profile.notifyCharUUID, profile.writeCharUUID]
+        uuids.append(contentsOf: profile.alternateNotifyUUIDs)
+        uuids.append(contentsOf: profile.alternateWriteUUIDs)
+        peripheral.discoverCharacteristics(uuids, for: service)
     }
 
     func didDiscoverCharacteristics(for service: CBService, error: Error?) {
@@ -41,8 +44,18 @@ final class ConnectionManager {
         var readChar: CBCharacteristic?
         var writeChar: CBCharacteristic?
         service.characteristics?.forEach { ch in
-            if ch.uuid == profile.notifyCharUUID { readChar = ch }
-            if ch.uuid == profile.writeCharUUID { writeChar = ch }
+            if ch.uuid == profile.notifyCharUUID || profile.alternateNotifyUUIDs.contains(ch.uuid) {
+                // TR45 support: try to pick the recommended notify characteristic (0x0004) first.
+                if readChar == nil || ch.uuid == profile.notifyCharUUID {
+                    readChar = ch
+                }
+            }
+            if ch.uuid == profile.writeCharUUID || profile.alternateWriteUUIDs.contains(ch.uuid) {
+                // Prefer 0x0002 (with response) but fall back to others if not present.
+                if writeChar == nil || ch.uuid == profile.writeCharUUID {
+                    writeChar = ch
+                }
+            }
         }
         // CBService.peripheral は weak/optional なので、通知設定や後続のコールバックに渡す前に安全に unwrap する。
         guard let peripheral = service.peripheral else {

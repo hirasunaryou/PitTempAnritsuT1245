@@ -29,7 +29,7 @@ struct MeasureViewPreviewFixtures {
                                      autosaveStore: autosave,
                                      uiLog: logStore)
         folderBookmark = FolderBookmark()
-        bluetooth = BluetoothService()
+        bluetooth = BluetoothService(uiLogger: logStore)
         registry = DeviceRegistry()
         bluetoothVM = BluetoothViewModel(service: bluetooth, registry: registry)
         driveService = GoogleDriveService()

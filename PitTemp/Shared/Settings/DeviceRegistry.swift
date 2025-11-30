@@ -64,6 +64,8 @@ struct DeviceRecord: Identifiable, Codable, Equatable {
     var autoConnect: Bool        // 起動時に自動再接続するか
     var lastSeenAt: Date?        // 直近で見かけた時刻
     var lastRSSI: Int?           // 直近で見かけたRSSI（dBm）
+    var serialNumber: String?    // TR45用のシリアル（登録コードと紐付ける）
+    var registerCode: String?    // TR45の登録コード(8桁)
 }
 
 /// 既知デバイスのレジストリ。UserDefaults 以外にも切り替え可能。
@@ -98,7 +100,8 @@ final class DeviceRegistry: ObservableObject, DeviceRegistrying {
             } else {
                 self.known.append(DeviceRecord(
                     id: id, name: name, alias: nil, autoConnect: false,
-                    lastSeenAt: now, lastRSSI: rssi
+                    lastSeenAt: now, lastRSSI: rssi,
+                    serialNumber: nil, registerCode: nil
                 ))
             }
             self.save()
@@ -109,6 +112,16 @@ final class DeviceRegistry: ObservableObject, DeviceRegistrying {
         mutate(id) { rec in
             var r = rec
             r.alias = alias
+            return r
+        }
+    }
+
+    /// TR45 登録コードとシリアル番号を保存する。8桁固定のコードのみ受け付ける。
+    func setRegister(serial: String?, code: String?, for id: String) {
+        mutate(id) { rec in
+            var r = rec
+            r.serialNumber = serial?.isEmpty == true ? nil : serial
+            if let c = code, !c.isEmpty { r.registerCode = c } else { r.registerCode = nil }
             return r
         }
     }

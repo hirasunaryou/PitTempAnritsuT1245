@@ -44,9 +44,10 @@ final class MockDeviceRegistry: DeviceRegistrying {
     func record(for id: String) -> DeviceRecord? { known.first { $0.id == id } }
     func record(forName name: String) -> DeviceRecord? { known.first { $0.name == name || $0.alias == name } }
     func upsertSeen(id: String, name: String, rssi: Int?) {
-        known.append(DeviceRecord(id: id, name: name, alias: nil, autoConnect: false, lastSeenAt: Date(), lastRSSI: rssi))
+        known.append(DeviceRecord(id: id, name: name, alias: nil, autoConnect: false, lastSeenAt: Date(), lastRSSI: rssi, serialNumber: nil, registerCode: nil))
     }
     func setAlias(_ alias: String?, for id: String) { /* simplified */ }
+    func setRegister(serial: String?, code: String?, for id: String) { /* simplified */ }
     func setAutoConnect(_ on: Bool, for id: String) { /* simplified */ }
     func forget(id: String) { known.removeAll { $0.id == id } }
 }

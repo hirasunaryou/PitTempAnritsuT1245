@@ -64,16 +64,15 @@ final class ConnectionManager {
             return nil
         }
 
-        // 公式仕様では notify=0x0004/0x0006、write=0x0003(WriteNR)/0x0002(write) が混在する個体がある。
-        // 実機で writeWithoutResponse を持つ 0x0003 によく応答が集まるため write 順を 0x0003 → 0x0002 → 0x0007 に変更し、
-        // notify は実際に notify フラグを持つ 0x0004/0x0006/0x0005 を優先する。
-        let tr4aNotifyOrder: [CBUUID] = [
+        // TR4 (TR45) はコマンド/データ/レスポンスで複数 characteristic を使う。
+        // 仕様書では notify=0005/0006, write=0002/0003 を併用するため、プロパティを確認しつつ優先順で選ぶ。
+        let tr4NotifyOrder: [CBUUID] = [
             CBUUID(string: "6E400004-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400006-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400005-B5A3-F393-E0A9-E50E24DCCA42"),
             profile.notifyCharUUID
         ]
-        let tr4aWriteOrder: [CBUUID] = [
+        let tr4WriteOrder: [CBUUID] = [
             CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400007-B5A3-F393-E0A9-E50E24DCCA42"),
@@ -90,10 +89,9 @@ final class ConnectionManager {
         let readChar: CBCharacteristic?
         let writeChar: CBCharacteristic?
 
-        if profile == .tr4a {
-            readChar = firstMatch(in: tr4aNotifyOrder, where: notifyPredicate) ?? characteristics.first(where: notifyPredicate)
-            // WriteWithoutResponse を優先するため、writeNR を持つ characteristic を先に探す
-            writeChar = firstMatch(in: tr4aWriteOrder, where: writePredicate) ?? characteristics.first(where: writePredicate)
+        if profile == .tr4 {
+            readChar = firstMatch(in: tr4NotifyOrder, where: notifyPredicate) ?? characteristics.first(where: notifyPredicate)
+            writeChar = firstMatch(in: tr4WriteOrder, where: writePredicate) ?? characteristics.first(where: writePredicate)
         } else {
             readChar = characteristics.first { $0.uuid == profile.notifyCharUUID && notifyPredicate($0) }
                 ?? characteristics.first(where: notifyPredicate)
@@ -119,7 +117,7 @@ final class ConnectionManager {
             peripheral.setNotifyValue(true, for: finalRead)
         }
         // TR4A の場合は応答ラインが複数存在するので、すべて notify on しておく（どこにレスポンスが来ても拾うため）。
-        if profile == .tr4a {
+        if profile == .tr4 {
             let notifyPredicate: (CBCharacteristic) -> Bool = {
                 $0.properties.contains(.notify) || $0.properties.contains(.indicate)
             }
@@ -130,11 +128,11 @@ final class ConnectionManager {
                 }
             }
         }
-        if profile == .tr4a {
-            let usingSpecNotify = finalRead.uuid == CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42")
+        if profile == .tr4 {
+            let usingSpecNotify = finalRead.uuid == CBUUID(string: "6E400004-B5A3-F393-E0A9-E50E24DCCA42")
             let usingSpecWrite = finalWrite.uuid == CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA42")
             let fallbackNote = (!usingSpecNotify || !usingSpecWrite) ? " (fallback applied)" : ""
-            onLog?("TR4A: using \(finalWrite.uuid.uuidString) for write, \(finalRead.uuid.uuidString) for SOH notify (per TR4A spec)\(fallbackNote)", .info)
+            onLog?("TR4: using \(finalWrite.uuid.uuidString) for write, \(finalRead.uuid.uuidString) for SOH notify (per TR4 spec)\(fallbackNote)", .info)
         }
 
         onCharacteristicsReady?(peripheral, finalRead, finalWrite)

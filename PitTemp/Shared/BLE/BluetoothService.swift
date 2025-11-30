@@ -26,8 +26,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
         didSet { scanner.registry = registry }
     }
 
-    // 接続対象ごとのBLEプロファイル群（Anritsu + TR4A）
-    private let profiles: [BLEDeviceProfile] = [.anritsu, .tr4a]
+    // 接続対象ごとのBLEプロファイル群（Anritsu + TR4）
+    private let profiles: [BLEDeviceProfile] = [.anritsu, .tr4]
     private var activeProfile: BLEDeviceProfile = .anritsu {
         didSet {
             // UUIDを差し替えても接続済みインスタンスを再利用できるよう、ConnectionManagerにも伝搬する。
@@ -47,19 +47,19 @@ final class BluetoothService: NSObject, BluetoothServicing {
 
     // TR4A向けのポーリングタイマー（現在値取得を1秒ごとに送信）
     private var tr4aPollTimer: DispatchSourceTimer?
-    // TR4A ポーリング間隔（節電モードやログ間隔に合わせて可変にできるよう公開）。
+    // TR4/TR4A ポーリング間隔（節電モードやログ間隔に合わせて可変にできるよう公開）。
     private var tr4aPollingIntervalSeconds: TimeInterval = 1.0
     // TR4A 記録設定のスナップショットと保留中の更新値
     private var tr4aLatestSettingsTable: Data?
     private var tr4aPendingIntervalUpdateSeconds: UInt16?
-    // TR4A 受信組み立て用バッファ（20byte刻みで飛んでくる notify を1フレームにまとめる）。
+    // TR4/TR4A 受信組み立て用バッファ
     private var tr4aReceiveBuffer = Data()
     // TR4A の登録コード（パスコード）。REFUSE(0x0F) 応答時に 0x76 で投げる。仕様どおり「10進8桁を BCD で4byte化」したものを保持する。
     private var tr4aRegistrationCodeBCD: [UInt8]?
     private var tr4aAuthInFlight = false
     private var tr4aAuthSucceeded = false
     private var tr4aAuthTimeoutWorkItem: DispatchWorkItem?
-    // TR4A の書き込み characteristic は環境依存で 0x0002/0x0003/0x0007 が使われることがあるため、接続ごとに優先インデックスを保持する。
+    // TR4 の書き込み characteristic は環境依存で 0x0002/0x0003/0x0007 が使われることがあるため、接続ごとに優先インデックスを保持する。
     private let tr4aWriteCandidates: [CBUUID] = [
         // 0x0003 は writeWithoutResponse を持ち、実機でコマンドラインとして使われるケースがあるため最優先。
         CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
@@ -68,6 +68,11 @@ final class BluetoothService: NSObject, BluetoothServicing {
     ]
     private var tr4aWriteIndexForCurrentConnection: Int = 0
     private var tr4aDiscoveredCharacteristics: [CBUUID: CBCharacteristic] = [:]
+    private var tr4DataWrite: CBCharacteristic?
+    private var tr4CommandNotify: CBCharacteristic?
+    private var tr4DataNotify: CBCharacteristic?
+    private var tr4Fragments: [UInt8: Data] = [:]
+    private var tr4ExpectedLength: Int?
     private var tr4aPollsSinceResponse: Int = 0
 
     // Parser / UseCase（TR4AかAnritsuかでパースルートを変える。ログ連携のためParser参照も保持）
@@ -347,7 +352,7 @@ private extension BluetoothService {
             guard let self else { return }
             self.readChar = read
             self.writeChar = write
-            if self.activeProfile == .tr4a, let write { // 接続ごとに使用中インデックスを記憶
+            if self.activeProfile == .tr4, let write { // 接続ごとに使用中インデックスを記憶
                 self.tr4aWriteIndexForCurrentConnection = self.tr4aWriteCandidates.firstIndex(of: write.uuid) ?? 0
             }
             DispatchQueue.main.async { self.connectionState = .ready }
@@ -375,9 +380,12 @@ private extension BluetoothService {
                 return "\(c.uuid.uuidString) [\(props)]"
             }.joined(separator: ", ")
             appendBLELog("Characteristics under \(service.uuid.uuidString): \(entries)")
-            if self.activeProfile == .tr4a, service.uuid == self.activeProfile.serviceUUID {
-                // 接続中 peripheral の characteristic を辞書化しておき、0x76 タイムアウト時の書き込みフェールバックで再利用する。
+            if self.activeProfile == .tr4, service.uuid == self.activeProfile.serviceUUID {
+                // 接続中 peripheral の characteristic を辞書化しておき、0002/0003 書き込みや 0005/0006 notify を利用する。
                 self.tr4aDiscoveredCharacteristics = Dictionary(uniqueKeysWithValues: chars.map { ($0.uuid, $0) })
+                self.tr4DataWrite = self.tr4aDiscoveredCharacteristics[CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42")]
+                self.tr4CommandNotify = self.tr4aDiscoveredCharacteristics[CBUUID(string: "6E400005-B5A3-F393-E0A9-E50E24DCCA42")]
+                self.tr4DataNotify = self.tr4aDiscoveredCharacteristics[CBUUID(string: "6E400006-B5A3-F393-E0A9-E50E24DCCA42")]
             }
         }
 
@@ -397,10 +405,10 @@ private extension BluetoothService {
         if !profile.requiresPollingForRealtime { stopTR4APolling() }
     }
 
-    /// TR4Aの現在値取得（0x33-0x00コマンド）を1秒周期で発行し、Notify経由で値を受け取る。
-    /// - Important: TR4Aシリーズは「0x00（ブレーク）送信→20〜100ms待機→SOHコマンド送信」の順で
-    ///   送らないと応答が返らない。BLEの書き込み制限を考慮して、ブレークとコマンドを分離し、
-    ///   専用キューでディレイを挟んで送信している。
+    /// TR4/TR4Aの現在値取得を1秒周期で発行し、Notify経由で値を受け取る。
+    /// - TR4A: 従来通り BREAK→SOH で送信する。
+    /// - TR4 (TR45): TR4 Bluetooth 通信仕様書に従い、0x33 を 0x9F でラップしたパケットを
+    ///   0002/0003 へ分割送信し、0005/0006 の notify で受信する。
     func startTR4APollingIfNeeded(peripheral: CBPeripheral, write: CBCharacteristic?, intervalSeconds: TimeInterval? = nil) {
         stopTR4APolling()
         guard activeProfile.requiresPollingForRealtime, let write, peripheral.state == .connected else { return }
@@ -429,14 +437,19 @@ private extension BluetoothService {
                 self.stopTR4APolling()
                 return
             }
-            self.tr4aPollsSinceResponse += 1
-            let frame = self.buildTR4ACurrentValueCommand()
-            self.appendBLELog("→ Send 0x33 current-value request (size=\(frame.count))")
-            self.sendTR4ACommandWithBreak(frame, peripheral: p, write: write)
+            self.tr4PollsSinceResponse += 1
+            if self.activeProfile == .tr4 {
+                self.appendBLELog("→ Send TR4 0x33 request via 0x9F envelope")
+                self.sendTR4CurrentValue(peripheral: p)
+            } else {
+                let frame = self.buildTR4ACurrentValueCommand()
+                self.appendBLELog("→ Send 0x33 current-value request (size=\(frame.count))")
+                self.sendTR4ACommandWithBreak(frame, peripheral: p, write: write)
+            }
 
             // しばらく応答がない場合は書き込み characteristic を次候補へ切り替えて再トライする。
-            if self.tr4aPollsSinceResponse >= 3,
-               let next = self.advanceTR4AWriteCharacteristicIfPossible(reason: "no 0x33 response after \(self.tr4aPollsSinceResponse) polls") {
+            if self.tr4PollsSinceResponse >= 3,
+               let next = self.advanceTR4AWriteCharacteristicIfPossible(reason: "no 0x33 response after \(self.tr4PollsSinceResponse) polls") {
                 self.startTR4APollingIfNeeded(peripheral: p, write: next, intervalSeconds: interval)
             }
         }
@@ -460,6 +473,41 @@ private extension BluetoothService {
         frame.append(UInt8((crc >> 8) & 0xFF))
         frame.append(UInt8(crc & 0xFF))
         return frame
+    }
+
+    /// TR4 (TR45) の現在値取得 (0x33) を 0x9F ラッパーで構築する。
+    /// - Returns: 9F パケット本体（22byte想定）。送信時は 0002/0003 に分割する。
+    func buildTR4CurrentValueEnvelope() -> Data {
+        var frame = Data()
+        frame.append(0x01) // SOH
+        frame.append(0x9F) // Command
+        frame.append(0x00) // Subcommand
+        frame.append(contentsOf: [0x0F, 0x00]) // Length (LE)
+
+        let passBytes = tr4aRegistrationCodeBCD ?? [0x00, 0x00, 0x00, 0x00]
+        frame.append(contentsOf: passBytes)
+
+        frame.append(0x01) // inner SOH
+        frame.append(0x33)
+        frame.append(0x00)
+        frame.append(contentsOf: [0x04, 0x00]) // data length
+        frame.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // data
+
+        let checksum = tr4Checksum(frame)
+        frame.append(UInt8(checksum & 0xFF))
+        frame.append(UInt8((checksum >> 8) & 0xFF))
+
+        let crc = TR4ACRC.xmodem(frame)
+        frame.append(UInt8((crc >> 8) & 0xFF))
+        frame.append(UInt8(crc & 0xFF))
+        return frame
+    }
+
+    /// TR4 用のシンプルサム（16bit）。
+    private func tr4Checksum(_ data: Data) -> UInt16 {
+        data.reduce(0) { partial, byte in
+            (partial + UInt16(byte)) & 0xFFFF
+        }
     }
 
     /// TR4A「パスコード認証(0x76/0x00)」SOHコマンドフレームを組み立てる。
@@ -499,6 +547,48 @@ private extension BluetoothService {
         }
     }
 
+    /// TR4 (TR45) の 0x33 フローを 0002/0003 に分割送信する。
+    func sendTR4CurrentValue(peripheral: CBPeripheral) {
+        guard peripheral.state == .connected else { return }
+        let headerUUID = CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA42")
+        let dataUUID = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42")
+
+        guard let header = tr4aDiscoveredCharacteristics[headerUUID] ?? writeChar else {
+            appendBLELog("TR4: header characteristic 0002 not available", level: .error)
+            return
+        }
+        guard let dataLine = tr4DataWrite ?? tr4aDiscoveredCharacteristics[dataUUID] ?? writeChar else {
+            appendBLELog("TR4: data characteristic 0003 not available", level: .error)
+            return
+        }
+
+        let envelope = buildTR4CurrentValueEnvelope()
+        let totalLength: UInt16 = 24 // 9F payload(22B) + Checksum(2B)
+
+        var headerPacket = Data([0x01, 0x01])
+        headerPacket.append(UInt8(totalLength & 0xFF))
+        headerPacket.append(UInt8((totalLength >> 8) & 0xFF))
+        headerPacket.append(Data(repeating: 0x00, count: 17))
+
+        var body1 = Data([0x00, 0x00])
+        let firstChunk = envelope.prefix(16)
+        body1.append(firstChunk)
+        if body1.count < 18 { body1.append(Data(repeating: 0x00, count: 18 - body1.count)) }
+
+        var body2 = Data([0x01, 0x00])
+        let tail = envelope.dropFirst(16)
+        body2.append(tail)
+        if body2.count < 18 { body2.append(Data(repeating: 0x00, count: 18 - body2.count)) }
+
+        appendBLELog("TR4: DATA1 header → 0002 \(hexString(headerPacket))")
+        appendBLELog("TR4: DATA2 block0 → 0003 \(hexString(body1))")
+        appendBLELog("TR4: DATA3 block1 → 0003 \(hexString(body2))")
+
+        peripheral.writeValue(headerPacket, for: header, type: preferredWriteType(for: header))
+        peripheral.writeValue(body1, for: dataLine, type: preferredWriteType(for: dataLine))
+        peripheral.writeValue(body2, for: dataLine, type: preferredWriteType(for: dataLine))
+    }
+
     /// 0x76 パスコード認証フレームを構築して送信する。BCD 4byte を仕様どおりの順序で埋め込み、CRC16 は XMODEM を使用する。
     func sendTR4APasscodeIfNeeded(passcodeBCD: [UInt8], peripheral: CBPeripheral, write: CBCharacteristic, reason: String) {
         guard peripheral.state == .connected else { return }
@@ -535,6 +625,74 @@ private extension BluetoothService {
         }
         tr4aAuthTimeoutWorkItem = timeout
         bleQueue.asyncAfter(deadline: .now() + .seconds(3), execute: timeout)
+    }
+
+    /// TR4 通知（0005/0006）を結合し、0x9F ラップされた 0x33 応答を抽出する。
+    func processTR4Notification(chunk: Data, characteristic: CBCharacteristic, peripheral: CBPeripheral) {
+        let cmdNotifyUUID = CBUUID(string: "6E400005-B5A3-F393-E0A9-E50E24DCCA42")
+        let dataNotifyUUID = CBUUID(string: "6E400006-B5A3-F393-E0A9-E50E24DCCA42")
+
+        if characteristic.uuid == cmdNotifyUUID {
+            if chunk.count >= 4 {
+                let total = Int(UInt16(chunk[2]) | (UInt16(chunk[3]) << 8))
+                tr4ExpectedLength = total
+                appendBLELog("TR4: command notify header totalLen=\(total) raw=\(hexString(chunk))")
+            } else {
+                appendBLELog("TR4: command notify too short raw=\(hexString(chunk))", level: .warning)
+            }
+            return
+        }
+
+        if characteristic.uuid == dataNotifyUUID {
+            guard chunk.count >= 2 else {
+                appendBLELog("TR4: data notify too short raw=\(hexString(chunk))", level: .warning)
+                return
+            }
+            let block = chunk[0]
+            let payload = chunk.dropFirst(2)
+            tr4Fragments[block] = Data(payload)
+            let combined = tr4Fragments.keys.sorted().reduce(Data()) { acc, key in
+                var next = acc
+                if let part = tr4Fragments[key] { next.append(part) }
+                return next
+            }
+            if let expected = tr4ExpectedLength, combined.count >= expected {
+                tr4Fragments.removeAll()
+                tr4ExpectedLength = nil
+                appendBLELog("TR4: assembled envelope len=\(combined.count) hex=\(hexString(combined))")
+                handleTR4Envelope(Data(combined.prefix(expected)), peripheral: peripheral)
+            }
+            return
+        }
+    }
+
+    /// TR4 0x9F ラップの応答を解析し、温度を抽出して UI へ流す。
+    func handleTR4Envelope(_ envelope: Data, peripheral: CBPeripheral) {
+        guard envelope.count >= 18 else {
+            appendBLELog("TR4: envelope too small len=\(envelope.count) hex=\(hexString(envelope))", level: .warning)
+            return
+        }
+
+        let crcIndex = envelope.count - 2
+        let payload = envelope.prefix(crcIndex)
+        let receivedCRC = UInt16(envelope[crcIndex]) | (UInt16(envelope[crcIndex + 1]) << 8)
+        let computed = TR4ACRC.xmodem(payload)
+        if receivedCRC != computed {
+            appendBLELog("TR4: CRC mismatch recv=0x\(String(format: "%04X", receivedCRC)) expected=0x\(String(format: "%04X", computed)) raw=\(hexString(envelope))", level: .warning)
+        }
+
+        let innerTempLE = UInt16(envelope[14]) | (UInt16(envelope[15]) << 8)
+        if innerTempLE == 0xEEEE {
+            appendBLELog("TR4: received invalid temperature marker 0xEEEE", level: .warning)
+            return
+        }
+        let rawValue = Int16(bitPattern: innerTempLE)
+        let tempC = Double(rawValue - 1000) / 10.0
+        appendBLELog("TR4: decoded temperature \(tempC)℃ from raw=0x\(String(format: "%04X", innerTempLE))")
+
+        let frame = TemperatureFrame(value: tempC, timestamp: Date())
+        DispatchQueue.main.async { self.latestTemperature = tempC }
+        temperatureFramesSubject.send(frame)
     }
 
     /// TR4A 設定テーブル取得(0x85)の SOH コマンドを構築する。
@@ -846,6 +1004,13 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
 
         guard error == nil, let data = characteristic.value else { return }
         appendBLELog("← Notify \(characteristic.uuid) (\(data.count) bytes): \(hexString(data))")
+
+        // TR4 系は 0005/0006 へ飛んでくるフラグメントを組み立てる。
+        if activeProfile == .tr4 {
+            appendBLELog("TR4 raw notify uuid=\(characteristic.uuid.uuidString) len=\(data.count) hex=\(hexString(data))")
+            processTR4Notification(chunk: data, characteristic: characteristic, peripheral: peripheral)
+            return
+        }
 
         // TR4A 系は20Bチャンクをまとめる必要があるため、専用バッファで組み立てる。
         if activeProfile.requiresPollingForRealtime {

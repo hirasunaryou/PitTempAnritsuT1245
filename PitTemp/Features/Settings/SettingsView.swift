@@ -17,6 +17,7 @@ struct SettingsView: View {
     @State private var showPicker = false
     @EnvironmentObject var registry: DeviceRegistry
     @EnvironmentObject var uiLog: UILogStore
+    @EnvironmentObject var bluetoothVM: BluetoothViewModel
     @State private var driveAlertMessage: String? = nil
 
     
@@ -30,6 +31,48 @@ struct SettingsView: View {
                     TextField("Device nickname (saved into folder names)", text: $settings.deviceNickname)
                         .textInputAutocapitalization(.words)
                         .autocorrectionDisabled()
+                }
+
+                Section("Bluetooth") {
+                    Toggle("Auto connect first seen device", isOn: $settings.bleAutoConnect)
+                        .onChange(of: settings.bleAutoConnect) { _, _ in
+                            // ここは必要なら反映を書く（MeasureView 側で反映しているなら何もしなくてOK）
+                            // 例）ble.autoConnectOnDiscover = newValue
+                            // 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
+                        }
+
+                    NavigationLink("Device Registry") {
+                        DeviceRegistryView()
+                            .environmentObject(registry) // MeasureView や App で注入済みなら OK
+                    }
+
+                    NavigationLink("BLE Debug Log") {
+                        BLEDebugLogView()
+                    }
+
+                    Text("If ON, the app connects to the first matching device it discovers. Turn OFF to pick a device manually.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Section("TR45 / TR4A") {
+                    TextField(
+                        "TR45/TR4A registration code (8 decimal digits, e.g. 74976167)",
+                        text: $settings.tr4aRegistrationCode
+                    )
+                    .textInputAutocapitalization(.none)
+                    .autocorrectionDisabled()
+                    .font(.body.monospaced())
+                    .onChange(of: settings.tr4aRegistrationCode) { _, newValue in
+                        // Settings タブを開かなくても起動時に同期されるが、ここでも即時反映させておく。
+                        bluetoothVM.updateTR4ARegistrationCode(newValue)
+                    }
+
+                    Text("登録コード（本体やパッケージに印字）を 10進8桁で入力すると、パスコードロックが有効な TR45/TR4A でも 0x76 コマンドで解錠してから 0x33 を投げるようになります。空欄なら送信しません。8桁の数字以外は無視されます。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // 共有フォルダ
@@ -354,25 +397,6 @@ struct SettingsView: View {
                     }
                 }
                 
-                Section("Bluetooth") {
-                    Toggle("Auto connect first seen device", isOn: $settings.bleAutoConnect)
-                        .onChange(of: settings.bleAutoConnect) { _, newValue in
-                            // ここは必要なら反映を書く（MeasureView 側で反映しているなら何もしなくてOK）
-                            // 例）ble.autoConnectOnDiscover = newValue
-                            // 'onChange(of:perform:)' was deprecated in iOS 17.0: Use `onChange` with a two or zero parameter action closure instead.
-                        }
-
-                    NavigationLink("Device Registry") {
-                        DeviceRegistryView()
-                            .environmentObject(registry) // MeasureView や App で注入済みなら OK
-                    }
-
-                    Text("If ON, the app connects to the first matching device it discovers. Turn OFF to pick a device manually.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                
                 // デバイス & ロケーション
                 Section("Device & Location") {
                     HStack {
@@ -426,6 +450,10 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                // 保存済みの登録コードを BLE 層に同期しておく。設定画面を開いた時点で反映される。
+                bluetoothVM.updateTR4ARegistrationCode(settings.tr4aRegistrationCode)
+            }
         }
         .fileImporter(
             isPresented: $showPicker,

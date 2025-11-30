@@ -8,7 +8,8 @@ protocol TemperatureIngesting {
 }
 
 struct TemperatureIngestUseCase: TemperatureIngesting {
-    private let parser: TemperaturePacketParsing
+    /// 具体的なパーサー（デバッグ時にログを差し替えたいケースに備え公開）。
+    let parser: TemperaturePacketParsing
 
     init(parser: TemperaturePacketParsing = TemperaturePacketParser()) {
         self.parser = parser

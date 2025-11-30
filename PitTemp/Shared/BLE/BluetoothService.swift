@@ -229,20 +229,36 @@ final class BluetoothService: NSObject, BluetoothServicing {
             return
         }
 
-        // 「0x」付きは16進、それ以外は10進として受け付ける。UInt32 に収まらなければ無効。
-        let normalized = trimmed.lowercased()
-        let radix: Int = normalized.hasPrefix("0x") ? 16 : 10
-        let digits = normalized.replacingOccurrences(of: "0x", with: "")
-
-        guard let value = UInt32(digits, radix: radix) else {
+        guard let value = BluetoothService.parseTR4ARegistrationCode(trimmed) else {
             appendBLELog("Invalid TR4A registration code input: \(code)", level: .warning)
+            tr4aRegistrationCode = nil
+            tr4aAuthSucceeded = false
             return
         }
 
         tr4aRegistrationCode = value
         tr4aAuthSucceeded = false
-        appendBLELog("TR4A registration code stored (radix=\(radix), digits=\(digits.count))")
+        let digitsCount = BluetoothService.sanitizeTR4ARegistrationCode(trimmed).count
+        appendBLELog("TR4A registration code stored (radix=16, digits=\(String(format: "%02d", digitsCount)))")
         appendBLELog("TR4A registration code UInt32 value=\(value)")
+        if digitsCount != 8 {
+            appendBLELog("TR4A registration code should be 8 hex digits; received \(digitsCount)", level: .warning)
+        }
+    }
+
+    /// 入力文字列から TR4A 用のパスコードをパースする。仕様に合わせ「文字列を16進の32bit値として解釈」する。
+    /// - Returns: UInt32 値（リトルエンディアン埋め込み用の生値）。"0x" 接頭辞は許可し、それ以外の文字が含まれていれば nil。
+    static func parseTR4ARegistrationCode(_ code: String) -> UInt32? {
+        let sanitized = sanitizeTR4ARegistrationCode(code)
+        guard !sanitized.isEmpty else { return nil }
+        return UInt32(sanitized, radix: 16)
+    }
+
+    /// 入力の 0x 接頭辞を除去し、大文字を小文字にそろえたものを返す。
+    static func sanitizeTR4ARegistrationCode(_ code: String) -> String {
+        code.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: "0x", with: "")
     }
 
     /// 内部デバッグログに追加するユーティリティ。BLEキューから呼ばれるため Main へ hop する。
@@ -351,6 +367,11 @@ private extension BluetoothService {
         stopTR4APolling()
         guard activeProfile.requiresPollingForRealtime, let write, peripheral.state == .connected else { return }
 
+        if let _ = tr4aRegistrationCode, !tr4aAuthSucceeded {
+            appendBLELog("TR4A polling deferred until 0x76 succeeds")
+            return
+        }
+
         // 接続維持のため最低1秒周期、0なら停止。UIから渡された値を優先し、未指定なら保存値を利用。
         let interval = max(intervalSeconds ?? tr4aPollingIntervalSeconds, 0)
         guard interval > 0 else { return }
@@ -392,6 +413,20 @@ private extension BluetoothService {
         return frame
     }
 
+    /// TR4A「パスコード認証(0x76/0x00)」SOHコマンドフレームを組み立てる。
+    /// - Parameter code: 仕様通り **16進の 32bit 値** として解釈したパスコード（例: "74976167" → 0x74976167）。
+    static func buildTR4APasscodeFrame(code: UInt32) -> Data {
+        var frame = Data([0x01, 0x76, 0x00, 0x04, 0x00])
+        frame.append(UInt8(code & 0xFF))
+        frame.append(UInt8((code >> 8) & 0xFF))
+        frame.append(UInt8((code >> 16) & 0xFF))
+        frame.append(UInt8((code >> 24) & 0xFF))
+        let crc = TR4ACRC.xmodem(frame)
+        frame.append(UInt8((crc >> 8) & 0xFF))
+        frame.append(UInt8(crc & 0xFF))
+        return frame
+    }
+
     /// TR4Aコマンド送信の共通ユーティリティ（ブレーク→所定のSOHフレーム）。
     /// - Parameter delayMs: ブレーク後に挟むウェイト。仕様上20〜100msが推奨されるため、50msを既定値にしている。
     func sendTR4ACommandWithBreak(_ frame: Data, peripheral: CBPeripheral, write: CBCharacteristic, delayMs: Int = 50) {
@@ -412,15 +447,7 @@ private extension BluetoothService {
         guard !tr4aAuthInFlight else { return }
         guard !tr4aAuthSucceeded else { return }
 
-        var frame = Data([0x01, 0x76, 0x00, 0x04, 0x00])
-        frame.append(UInt8(code & 0xFF))
-        frame.append(UInt8((code >> 8) & 0xFF))
-        frame.append(UInt8((code >> 16) & 0xFF))
-        frame.append(UInt8((code >> 24) & 0xFF))
-        let crc = TR4ACRC.xmodem(frame)
-        frame.append(UInt8((crc >> 8) & 0xFF))
-        frame.append(UInt8(crc & 0xFF))
-
+        let frame = BluetoothService.buildTR4APasscodeFrame(code: code)
         tr4aAuthInFlight = true
         appendBLELog("→ Send 0x76 passcode (reason=\(reason)) frame=\(hexString(frame))")
         sendTR4ACommandWithBreak(frame, peripheral: peripheral, write: write)
@@ -527,6 +554,7 @@ private extension BluetoothService {
 
         if command == 0x33, status == 0x0F {
             appendBLELog("TR4A 0x33 REFUSE (status=0x0F). Registration code likely required.", level: .warning)
+            stopTR4APolling()
             tr4aAuthInFlight = false // 応答が返らず inFlight が張り付いた場合も再送できるようにする。
             if let write = writeChar, let code = tr4aRegistrationCode {
                 sendTR4APasscodeIfNeeded(code: code, peripheral: peripheral, write: write, reason: "0x33 refused")
@@ -537,9 +565,13 @@ private extension BluetoothService {
 
         if command == 0x76 {
             tr4aAuthInFlight = false
+            appendBLELog("← 0x76 response status=0x\(String(format: "%02X", status)) payload=\(hexString(payload))")
             if status == 0x06 {
                 tr4aAuthSucceeded = true
                 appendBLELog("TR4A passcode accepted (0x76 ACK)")
+                if let write = writeChar {
+                    startTR4APollingIfNeeded(peripheral: peripheral, write: write)
+                }
             } else {
                 tr4aAuthSucceeded = false
                 appendBLELog("TR4A passcode rejected (status=0x\(String(format: "%02X", status)))", level: .warning)

@@ -8,11 +8,22 @@ final class TR4ACRCTests: XCTestCase {
         XCTAssertEqual(TR4ACRC.xmodem(samplePasscode), 0x0DBF)
 
         // Additional vectors observed in field logs to guard against regressions.
-        let passcode74976167 = data(fromHex: "01 76 00 04 00 A7 0B 78 04")
-        XCTAssertEqual(TR4ACRC.xmodem(passcode74976167), 0x579B)
+        let passcode74976167 = data(fromHex: "01 76 00 04 00 67 61 97 74")
+        XCTAssertEqual(TR4ACRC.xmodem(passcode74976167), 0xC68E)
 
         let currentValue = data(fromHex: "01 33 00 04 00 00 00 00 00")
         XCTAssertEqual(TR4ACRC.xmodem(currentValue), 0x632B)
+    }
+
+    func testRegistrationCodeParsingUsesHexString() {
+        XCTAssertEqual(BluetoothService.parseTR4ARegistrationCode("74976167"), 0x74976167)
+        XCTAssertEqual(BluetoothService.parseTR4ARegistrationCode("0x74976167"), 0x74976167)
+        XCTAssertNil(BluetoothService.parseTR4ARegistrationCode(""))
+    }
+
+    func testPasscodeFrameBuildingMatchesSpec() {
+        let frame = BluetoothService.buildTR4APasscodeFrame(code: 0x74976167)
+        XCTAssertEqual(frame, data(fromHex: "01 76 00 04 00 67 61 97 74 C6 8E"))
     }
 
     // MARK: - Helpers

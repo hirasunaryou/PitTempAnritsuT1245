@@ -58,6 +58,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
     private var tr4aRegistrationCode: UInt32?
     private var tr4aAuthInFlight = false
     private var tr4aAuthSucceeded = false
+    private var tr4aAuthTimeoutWorkItem: DispatchWorkItem?
 
     // Parser / UseCase（TR4AかAnritsuかでパースルートを変える。ログ連携のためParser参照も保持）
     private let temperatureUseCase: TemperatureIngesting
@@ -319,11 +320,6 @@ private extension BluetoothService {
                 self.setDeviceTime()
             }
             self.appendBLELog("Notify=\(read?.uuid.uuidString ?? "nil"), Write=\(write?.uuid.uuidString ?? "nil") selected")
-
-            // 登録コードが設定されている場合、TR4A では最初に認証を飛ばしておくと REFUSE(0x0F) で足踏みしない。
-            if self.activeProfile.requiresPollingForRealtime, let write, let pCode = self.tr4aRegistrationCode {
-                self.sendTR4APasscodeIfNeeded(code: pCode, peripheral: peripheral, write: write, reason: "on-ready")
-            }
             startTR4APollingIfNeeded(peripheral: peripheral, write: write)
         }
         connectionManager.onFailed = { [weak self] message in
@@ -451,6 +447,17 @@ private extension BluetoothService {
         tr4aAuthInFlight = true
         appendBLELog("→ Send 0x76 passcode (reason=\(reason)) frame=\(hexString(frame))")
         sendTR4ACommandWithBreak(frame, peripheral: peripheral, write: write)
+
+        tr4aAuthTimeoutWorkItem?.cancel()
+        let timeout = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            if self.tr4aAuthInFlight {
+                self.tr4aAuthInFlight = false
+                self.appendBLELog("TR4A: 0x76 passcode handshake timed out; no response from device", level: .warning)
+            }
+        }
+        tr4aAuthTimeoutWorkItem = timeout
+        bleQueue.asyncAfter(deadline: .now() + .seconds(3), execute: timeout)
     }
 
     /// TR4A 設定テーブル取得(0x85)の SOH コマンドを構築する。
@@ -565,6 +572,7 @@ private extension BluetoothService {
 
         if command == 0x76 {
             tr4aAuthInFlight = false
+            tr4aAuthTimeoutWorkItem?.cancel()
             appendBLELog("← 0x76 response status=0x\(String(format: "%02X", status)) payload=\(hexString(payload))")
             if status == 0x06 {
                 tr4aAuthSucceeded = true
@@ -650,6 +658,7 @@ private extension BluetoothService {
         tr4aReceiveBuffer.removeAll()
         tr4aAuthInFlight = false
         tr4aAuthSucceeded = false
+        tr4aAuthTimeoutWorkItem?.cancel()
         if resetState {
             DispatchQueue.main.async { self.connectionState = .idle }
         }
@@ -725,6 +734,22 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         }
         print("[BLE] notify state \(characteristic.uuid): \(characteristic.isNotifying)")
         appendBLELog("Notify state \(characteristic.uuid) = \(characteristic.isNotifying)")
+
+        // TR4A は notify ready を待ってから 0x76 を送信する。早送りすると ACK を受信できず無限待ちになるため、ここで投げる。
+        if activeProfile.requiresPollingForRealtime,
+           characteristic.isNotifying,
+           let read = readChar,
+           characteristic.uuid == read.uuid,
+           let p = characteristic.service?.peripheral,
+           p.state == .connected {
+            if let code = tr4aRegistrationCode, let write = writeChar {
+                appendBLELog("TR4A: notifications ready; sending 0x76 passcode (reason=on-notify-ready)")
+                sendTR4APasscodeIfNeeded(code: code, peripheral: p, write: write, reason: "on-notify-ready")
+            }
+            if let write = writeChar {
+                startTR4APollingIfNeeded(peripheral: p, write: write)
+            }
+        }
     }
 
     func peripheral(_ peripheral: CBPeripheral,

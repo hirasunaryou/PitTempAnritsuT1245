@@ -64,14 +64,17 @@ final class ConnectionManager {
             return nil
         }
 
-        // TR4A の実機では notify が 0x0004/0x0006、write が 0x0007（writeNR）や 0x0003（writeNR）が返ることがある。
-        // 公式サンプルが想定する 0x0004 (notify) + 0x0007 (writeNR) 優先の並びを用意し、最後にプロパティのみでフォールバックする。
+        // 公式仕様では notify=0x0003, write=0x0002（WriteWithoutResponse）を想定。
+        // 実機では 0x0004/0x0006 (notify) や 0x0007/0x0003 (writeNR) が返る個体もあるため、
+        // まず仕様順で探し、なければ広いフェールバックへ落とす。
         let tr4aNotifyOrder: [CBUUID] = [
+            CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400004-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400006-B5A3-F393-E0A9-E50E24DCCA42"),
             profile.notifyCharUUID
         ]
         let tr4aWriteOrder: [CBUUID] = [
+            CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400007-B5A3-F393-E0A9-E50E24DCCA42"),
             CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42"),
             profile.writeCharUUID
@@ -127,6 +130,13 @@ final class ConnectionManager {
                 }
             }
         }
+        if profile == .tr4a {
+            let usingSpecNotify = finalRead.uuid == CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA42")
+            let usingSpecWrite = finalWrite.uuid == CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA42")
+            let fallbackNote = (!usingSpecNotify || !usingSpecWrite) ? " (fallback applied)" : ""
+            onLog?("TR4A: using \(finalWrite.uuid.uuidString) for write, \(finalRead.uuid.uuidString) for SOH notify (per TR4A spec)\(fallbackNote)", .info)
+        }
+
         onCharacteristicsReady?(peripheral, finalRead, finalWrite)
     }
 }

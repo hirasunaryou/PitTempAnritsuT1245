@@ -4,9 +4,9 @@
 
 ## 接続とサービス探索
 - 使用サービス UUID: `6E400001-B5A3-F393-E0A9-E50E24DCCA42`（T&D SPP/Nordic UART）。
-- 通知特性 (Data Line RX): 実機では `6E400004-...` または `6E400006-...` が notify を持つケースが多い。
-- 書き込み特性 (Data Line TX): `6E400007-...`（writeNR）や `6E400003-...`（writeNR）、`6E400002-...`（write）を状況に応じて利用。
-- `ConnectionManager` はサービス内の全 characteristic を取得し、**通知系はすべて setNotifyValue(true) で有効化**。優先順は `0x0004`→`0x0006`→プロファイル指定、書き込みは writeNR を優先しつつプロパティが一致するものへフェールバックします。
+- 通知特性 (Data Line RX): 仕様上の本命は `6E400003-...`。実機では `6E400004-...` や `6E400006-...` が notify を持つケースがあるため、すべて enable してフォールバックします。
+- 書き込み特性 (Data Line TX): 仕様上の本命は `6E400002-...`（writeNR/write）。実機では `6E400007-...`（writeNR）や `6E400003-...`（writeNR）が露出することもあるため、プロパティを見て決定します。
+- `ConnectionManager` はサービス内の全 characteristic を取得し、**通知系はすべて setNotifyValue(true) で有効化**。優先順は `0x0003`→`0x0004`→`0x0006`→プロファイル指定、書き込みは `0x0002`→`0x0007`→`0x0003`→プロファイル指定の順で探し、プロパティが一致するものへフェールバックします。
 
 ## 現在温度の取得（SOH 0x33/0x00）
 - `BluetoothService.startTR4APollingIfNeeded` が 1 秒以上の間隔でポーリング。

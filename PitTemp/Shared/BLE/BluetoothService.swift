@@ -59,6 +59,13 @@ final class BluetoothService: NSObject, BluetoothServicing {
     private var tr4aAuthInFlight = false
     private var tr4aAuthSucceeded = false
     private var tr4aAuthTimeoutWorkItem: DispatchWorkItem?
+    // TR4A の書き込み characteristic は環境依存で 0x0002/0x0007 が使われることがあるため、接続ごとに優先インデックスを保持する。
+    private let tr4aWriteCandidates: [CBUUID] = [
+        CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA42"),
+        CBUUID(string: "6E400007-B5A3-F393-E0A9-E50E24DCCA42")
+    ]
+    private var tr4aWriteIndexForCurrentConnection: Int = 0
+    private var tr4aDiscoveredCharacteristics: [CBUUID: CBCharacteristic] = [:]
 
     // Parser / UseCase（TR4AかAnritsuかでパースルートを変える。ログ連携のためParser参照も保持）
     private let temperatureUseCase: TemperatureIngesting
@@ -312,6 +319,9 @@ private extension BluetoothService {
             guard let self else { return }
             self.readChar = read
             self.writeChar = write
+            if self.activeProfile == .tr4a, let write { // 接続ごとに使用中インデックスを記憶
+                self.tr4aWriteIndexForCurrentConnection = self.tr4aWriteCandidates.firstIndex(of: write.uuid) ?? 0
+            }
             DispatchQueue.main.async { self.connectionState = .ready }
             // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）。
             // TR4A 系は TIME コマンド仕様が異なり、MTU 23 で 25Byte を一括送ると分割処理が必要になるため
@@ -337,6 +347,10 @@ private extension BluetoothService {
                 return "\(c.uuid.uuidString) [\(props)]"
             }.joined(separator: ", ")
             appendBLELog("Characteristics under \(service.uuid.uuidString): \(entries)")
+            if self.activeProfile == .tr4a, service.uuid == self.activeProfile.serviceUUID {
+                // 接続中 peripheral の characteristic を辞書化しておき、0x76 タイムアウト時の書き込みフェールバックで再利用する。
+                self.tr4aDiscoveredCharacteristics = Dictionary(uniqueKeysWithValues: chars.map { ($0.uuid, $0) })
+            }
         }
 
         notifyController.onCountUpdate = { [weak self] count in
@@ -453,6 +467,23 @@ private extension BluetoothService {
             guard let self else { return }
             if self.tr4aAuthInFlight {
                 self.tr4aAuthInFlight = false
+                let currentWriteUUID = write.uuid
+                if self.activeProfile.requiresPollingForRealtime,
+                   self.tr4aWriteIndexForCurrentConnection + 1 < self.tr4aWriteCandidates.count,
+                   let peripheral = self.peripheral,
+                   peripheral.state == .connected {
+                    let nextIndex = self.tr4aWriteIndexForCurrentConnection + 1
+                    let nextUUID = self.tr4aWriteCandidates[nextIndex]
+                    if let nextWrite = self.tr4aDiscoveredCharacteristics[nextUUID] {
+                        self.tr4aWriteIndexForCurrentConnection = nextIndex
+                        self.writeChar = nextWrite
+                        self.appendBLELog(
+                            "TR4A: 0x76 handshake timed out on \(currentWriteUUID.uuidString); retrying 0x76 using \(nextUUID.uuidString)"
+                        )
+                        self.sendTR4APasscodeIfNeeded(code: code, peripheral: peripheral, write: nextWrite, reason: "retry-after-timeout")
+                        return
+                    }
+                }
                 self.appendBLELog("TR4A: 0x76 passcode handshake timed out; no response from device", level: .warning)
             }
         }
@@ -659,6 +690,8 @@ private extension BluetoothService {
         tr4aAuthInFlight = false
         tr4aAuthSucceeded = false
         tr4aAuthTimeoutWorkItem?.cancel()
+        tr4aDiscoveredCharacteristics.removeAll()
+        tr4aWriteIndexForCurrentConnection = 0
         if resetState {
             DispatchQueue.main.async { self.connectionState = .idle }
         }
@@ -693,6 +726,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
     func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {
         print("[BLE] connected to \(p.name ?? "?")")
         appendBLELog("Connected to \(p.name ?? p.identifier.uuidString)")
+        tr4aWriteIndexForCurrentConnection = 0
         p.delegate = self
         appendBLELog("TR4A: set delegate for \(p.identifier.uuidString) to \(String(describing: self))")
         connectionManager.didConnect(p)
@@ -767,6 +801,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
 
         // TR4A 系は20Bチャンクをまとめる必要があるため、専用バッファで組み立てる。
         if activeProfile.requiresPollingForRealtime {
+            appendBLELog("TR4A raw notify uuid=\(characteristic.uuid.uuidString) len=\(data.count) hex=\(hexString(data))")
             processTR4ANotification(chunk: data, peripheral: peripheral)
             return
         }

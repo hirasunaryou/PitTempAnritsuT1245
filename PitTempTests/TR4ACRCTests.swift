@@ -8,22 +8,22 @@ final class TR4ACRCTests: XCTestCase {
         XCTAssertEqual(TR4ACRC.xmodem(samplePasscode), 0x0DBF)
 
         // Additional vectors observed in field logs to guard against regressions.
-        let passcode74976167 = data(fromHex: "01 76 00 04 00 67 61 97 74")
-        XCTAssertEqual(TR4ACRC.xmodem(passcode74976167), 0xC68E)
+        let passcode74976167BCD = data(fromHex: "01 76 00 04 00 74 97 61 67")
+        XCTAssertEqual(TR4ACRC.xmodem(passcode74976167BCD), 0x8C32)
 
         let currentValue = data(fromHex: "01 33 00 04 00 00 00 00 00")
         XCTAssertEqual(TR4ACRC.xmodem(currentValue), 0x632B)
     }
 
-    func testRegistrationCodeParsingUsesHexString() {
-        XCTAssertEqual(BluetoothService.parseTR4ARegistrationCode("74976167"), 0x74976167)
-        XCTAssertEqual(BluetoothService.parseTR4ARegistrationCode("0x74976167"), 0x74976167)
+    func testRegistrationCodeParsingUsesBCD() {
+        XCTAssertEqual(BluetoothService.parseTR4ARegistrationCode("74976167"), [0x74, 0x97, 0x61, 0x67])
+        XCTAssertNil(BluetoothService.parseTR4ARegistrationCode("0x74976167"))
         XCTAssertNil(BluetoothService.parseTR4ARegistrationCode(""))
     }
 
     func testPasscodeFrameBuildingMatchesSpec() {
-        let frame = BluetoothService.buildTR4APasscodeFrame(code: 0x74976167)
-        XCTAssertEqual(frame, data(fromHex: "01 76 00 04 00 67 61 97 74 C6 8E"))
+        let frame = BluetoothService.buildTR4APasscodeFrame(passcodeBCD: [0x74, 0x97, 0x61, 0x67])
+        XCTAssertEqual(frame, data(fromHex: "01 76 00 04 00 74 97 61 67 32 8C"))
     }
 
     // MARK: - Helpers

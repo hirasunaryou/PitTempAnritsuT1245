@@ -58,7 +58,7 @@ struct SettingsView: View {
 
                 Section("TR45 / TR4A") {
                     TextField(
-                        "TR45/TR4A registration code (hex, e.g. 74976167 or 0x74976167)",
+                        "TR45/TR4A registration code (8 decimal digits, e.g. 74976167)",
                         text: $settings.tr4aRegistrationCode
                     )
                     .textInputAutocapitalization(.none)
@@ -69,7 +69,7 @@ struct SettingsView: View {
                         bluetoothVM.updateTR4ARegistrationCode(newValue)
                     }
 
-                    Text("登録コード（本体やパッケージに印字）を 16進8桁で入力すると、パスコードロックが有効な TR45/TR4A でも 0x76 コマンドで解錠してから 0x33 を投げるようになります。空欄なら送信しません。")
+                    Text("登録コード（本体やパッケージに印字）を 10進8桁で入力すると、パスコードロックが有効な TR45/TR4A でも 0x76 コマンドで解錠してから 0x33 を投げるようになります。空欄なら送信しません。8桁の数字以外は無視されます。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

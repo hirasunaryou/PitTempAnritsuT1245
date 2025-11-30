@@ -29,7 +29,8 @@ struct RootView: View {
     let log = UILogStore()
     let folder = FolderBookmark()
     let coordinator = SessionFileCoordinator(exporter: CSVExporter(), uploader: folder)
-    let bluetooth = BluetoothService()
+    let registration = RegistrationCodeStore()
+    let bluetooth = BluetoothService(registrationStore: registration)
     let registry = DeviceRegistry()
     let bluetoothVM = BluetoothViewModel(service: bluetooth, registry: registry)
     let vm = SessionViewModel(settings: settings,
@@ -44,4 +45,5 @@ struct RootView: View {
         .environmentObject(bluetoothVM)
         .environmentObject(registry)
         .environmentObject(log)
+        .environmentObject(registration)
 }

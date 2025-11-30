@@ -7,12 +7,14 @@ import Combine
 protocol TemperatureSensorClient: ObservableObject {
     var connectionState: ConnectionState { get }
     var deviceName: String? { get }
+    var currentPeripheralID: String? { get }
     var scanned: [ScannedDevice] { get }
     var latestTemperature: Double? { get }
     var temperatureFrames: AnyPublisher<TemperatureFrame, Never> { get }
     var connectionStatePublisher: AnyPublisher<ConnectionState, Never> { get }
     var scannedPublisher: AnyPublisher<[ScannedDevice], Never> { get }
     var deviceNamePublisher: AnyPublisher<String?, Never> { get }
+    var currentPeripheralIDPublisher: AnyPublisher<String?, Never> { get }
     var latestTemperaturePublisher: AnyPublisher<Double?, Never> { get }
 
     func startScan()
@@ -33,8 +35,14 @@ protocol BluetoothServicing: TemperatureSensorClient {
     var autoConnectPublisher: AnyPublisher<Bool, Never> { get }
     var notifyHzPublisher: AnyPublisher<Double, Never> { get }
     var notifyCountPublisher: AnyPublisher<Int, Never> { get }
+    var tr4aStatePublisher: AnyPublisher<TR4ADeviceState, Never> { get }
 
     func setPreferredIDs(_ ids: Set<String>)
+    func requestTR4ASettings()
+    func updateTR4ARecording(interval: UInt8, endless: Bool)
+    func startTR4ARecording()
+    func stopTR4ARecording()
+    func sendTR4APasscode(_ code: String)
 }
 
 /// スキャンで見つけたデバイスを記録するレジストリのインターフェイス。

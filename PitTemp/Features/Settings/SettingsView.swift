@@ -13,10 +13,12 @@ struct SettingsView: View {
     @EnvironmentObject var folderBM: FolderBookmark
     @EnvironmentObject var settings: SettingsStore   // ← 追加：設定は SettingsStore に集約
     @EnvironmentObject var driveService: GoogleDriveService
-
+    @EnvironmentObject var bluetooth: BluetoothViewModel
+    
     @State private var showPicker = false
     @EnvironmentObject var registry: DeviceRegistry
     @EnvironmentObject var uiLog: UILogStore
+    @EnvironmentObject var registrationStore: RegistrationCodeStore
     @State private var driveAlertMessage: String? = nil
 
     
@@ -365,6 +367,18 @@ struct SettingsView: View {
                     NavigationLink("Device Registry") {
                         DeviceRegistryView()
                             .environmentObject(registry) // MeasureView や App で注入済みなら OK
+                    }
+
+                    NavigationLink("TR45 controls / passcode") {
+                        TR4ASettingsView()
+                            .environmentObject(bluetooth)
+                            .environmentObject(registrationStore)
+                            .environmentObject(uiLog)
+                    }
+
+                    NavigationLink("BLE debug log") {
+                        BLELogView()
+                            .environmentObject(uiLog)
                     }
 
                     Text("If ON, the app connects to the first matching device it discovers. Turn OFF to pick a device manually.")

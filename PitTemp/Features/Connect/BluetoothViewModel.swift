@@ -10,8 +10,10 @@ final class BluetoothViewModel: ObservableObject {
     @Published private(set) var connectionState: ConnectionState
     @Published private(set) var scanned: [ScannedDevice]
     @Published private(set) var deviceName: String?
+    @Published private(set) var currentPeripheralID: String?
     @Published private(set) var autoConnectOnDiscover: Bool
     @Published private(set) var latestTemperature: Double?
+    @Published private(set) var tr4aState: TR4ADeviceState?
     // Debug metrics that were previously formatted inside the View.
     @Published private(set) var notifyHzText: String = "Hz: --"
     @Published private(set) var notifyCountText: String = "N: --"
@@ -27,8 +29,10 @@ final class BluetoothViewModel: ObservableObject {
         connectionState = service.connectionState
         scanned = service.scanned
         deviceName = service.deviceName
+        currentPeripheralID = service.currentPeripheralID
         autoConnectOnDiscover = service.autoConnectOnDiscover
         latestTemperature = service.latestTemperature
+        tr4aState = nil
 
         bindServiceState()
     }
@@ -109,6 +113,14 @@ final class BluetoothViewModel: ObservableObject {
         service.setPreferredIDs(preferred)
     }
 
+    // MARK: - TR4A device control
+
+    func refreshTR4ASettings() { service.requestTR4ASettings() }
+    func updateTR4ARecording(interval: UInt8, endless: Bool) { service.updateTR4ARecording(interval: interval, endless: endless) }
+    func startTR4ARecording() { service.startTR4ARecording() }
+    func stopTR4ARecording() { service.stopTR4ARecording() }
+    func sendTR4APasscode(_ code: String) { service.sendTR4APasscode(code) }
+
     // MARK: - Private
 
     /// Subscribe to BluetoothService so views receive MainActor updates only from here.
@@ -134,10 +146,24 @@ final class BluetoothViewModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        service.currentPeripheralIDPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] identifier in
+                self?.currentPeripheralID = identifier
+            }
+            .store(in: &cancellables)
+
         service.latestTemperaturePublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] temperature in
                 self?.latestTemperature = temperature
+            }
+            .store(in: &cancellables)
+
+        service.tr4aStatePublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                self?.tr4aState = state
             }
             .store(in: &cancellables)
 

@@ -14,6 +14,7 @@ struct PitTempApp: App {
     @StateObject private var registry: DeviceRegistry
     @StateObject private var bluetoothVM: BluetoothViewModel
     @StateObject private var uiLog: UILogStore
+    @StateObject private var registrationStore: RegistrationCodeStore
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -21,7 +22,8 @@ struct PitTempApp: App {
         let log = UILogStore()
         let autosave = SessionAutosaveStore(uiLogger: log)
         let folder = FolderBookmark()
-        let ble = BluetoothService()
+        let registration = RegistrationCodeStore()
+        let ble = BluetoothService(registrationStore: registration, uiLogger: log)
         let registry = DeviceRegistry()
         // CSV 書き出しから iCloud 共有フォルダ連携までを同じインスタンスで束ねる。
         let coordinator = SessionFileCoordinator(exporter: CSVExporter(), uploader: folder)
@@ -36,6 +38,7 @@ struct PitTempApp: App {
         _ble = StateObject(wrappedValue: ble)
         _registry = StateObject(wrappedValue: registry)
         _bluetoothVM = StateObject(wrappedValue: BluetoothViewModel(service: ble, registry: registry))
+        _registrationStore = StateObject(wrappedValue: registration)
 
         // ViewModel 側で Combine のキャンセル管理を一元化する。
         vm.bindBluetooth(service: ble)
@@ -54,6 +57,7 @@ struct PitTempApp: App {
                     .environmentObject(bluetoothVM)
                     .environmentObject(registry)
                     .environmentObject(uiLog)
+                    .environmentObject(registrationStore)
                     .onAppear { ble.registry = registry }
         }
         // 起動時に一度だけBLE→Recorderを結線

@@ -15,11 +15,15 @@ final class BluetoothService: NSObject, BluetoothServicing {
     @Published var connectionState: ConnectionState = .idle
     @Published var latestTemperature: Double?
     @Published var deviceName: String?
+    @Published var currentPeripheralID: String?
     @Published var scanned: [ScannedDevice] = []
+    @Published var tr4aState: TR4ADeviceState? = nil
 
     // ストリーム（TemperatureFrame で統一）
     private let temperatureFramesSubject = PassthroughSubject<TemperatureFrame, Never>()
     var temperatureFrames: AnyPublisher<TemperatureFrame, Never> { temperatureFramesSubject.eraseToAnyPublisher() }
+    private let tr4aStateSubject = PassthroughSubject<TR4ADeviceState, Never>()
+    var tr4aStatePublisher: AnyPublisher<TR4ADeviceState, Never> { tr4aStateSubject.eraseToAnyPublisher() }
 
     // 外部レジストリ（App から注入）
     weak var registry: DeviceRegistrying? {
@@ -42,6 +46,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
     private var readChar: CBCharacteristic?
     private var writeChar: CBCharacteristic?
 
+    private var tr4aClient: TR4AThermometerClient?
+
     // 受信処理用の専用キュー
     private let bleQueue = DispatchQueue(label: "BLE.AnritsuT1245")
 
@@ -50,6 +56,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
 
     // Parser / UseCase
     private let temperatureUseCase: TemperatureIngesting
+    private let registrationStore: RegistrationCodeStore
+    private weak var uiLogger: UILogPublishing?
 
     // その他
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
@@ -63,10 +71,12 @@ final class BluetoothService: NSObject, BluetoothServicing {
     var connectionStatePublisher: AnyPublisher<ConnectionState, Never> { $connectionState.eraseToAnyPublisher() }
     var scannedPublisher: AnyPublisher<[ScannedDevice], Never> { $scanned.eraseToAnyPublisher() }
     var deviceNamePublisher: AnyPublisher<String?, Never> { $deviceName.eraseToAnyPublisher() }
+    var currentPeripheralIDPublisher: AnyPublisher<String?, Never> { $currentPeripheralID.eraseToAnyPublisher() }
     var latestTemperaturePublisher: AnyPublisher<Double?, Never> { $latestTemperature.eraseToAnyPublisher() }
     var autoConnectPublisher: AnyPublisher<Bool, Never> { $autoConnectOnDiscover.eraseToAnyPublisher() }
     var notifyHzPublisher: AnyPublisher<Double, Never> { $notifyHz.eraseToAnyPublisher() }
     var notifyCountPublisher: AnyPublisher<Int, Never> { $notifyCountUI.eraseToAnyPublisher() }
+    var tr4aStatePublisher: AnyPublisher<TR4ADeviceState, Never> { tr4aStateSubject.eraseToAnyPublisher() }
 
     // コンポーネント
     private lazy var scanner = DeviceScanner(profiles: profiles, registry: registry)
@@ -77,8 +87,12 @@ final class BluetoothService: NSObject, BluetoothServicing {
         self.temperatureFramesSubject.send(frame)
     }
 
-    init(temperatureUseCase: TemperatureIngesting = TemperatureIngestUseCase()) {
+    init(temperatureUseCase: TemperatureIngesting = TemperatureIngestUseCase(),
+         registrationStore: RegistrationCodeStore = RegistrationCodeStore(),
+         uiLogger: UILogPublishing? = nil) {
         self.temperatureUseCase = temperatureUseCase
+        self.registrationStore = registrationStore
+        self.uiLogger = uiLogger
         super.init()
         central = CBCentralManager(delegate: self, queue: bleQueue)
         setupCallbacks()
@@ -102,6 +116,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
         if let p = peripheral { central.cancelPeripheralConnection(p) }
         peripheral = nil; readChar = nil; writeChar = nil
         stopTR4APolling()
+        tr4aClient = nil
+        currentPeripheralID = nil
         DispatchQueue.main.async { self.connectionState = .idle }
     }
 
@@ -111,6 +127,7 @@ final class BluetoothService: NSObject, BluetoothServicing {
         if let found = central.retrievePeripherals(withIdentifiers: [UUID(uuidString: deviceID)!]).first {
             stopScan()
             peripheral = found
+            currentPeripheralID = found.identifier.uuidString
             if let profile = scannedProfiles[deviceID] { switchProfile(to: profile) }
             DispatchQueue.main.async {
                 self.deviceName = found.name ?? "Unknown"
@@ -135,6 +152,21 @@ final class BluetoothService: NSObject, BluetoothServicing {
         // UIスレッドから来るのでそのまま代入でOK
         preferredIDs = ids
     }
+
+    func requestTR4ASettings() { tr4aClient?.requestRecordingSettings() }
+
+    func updateTR4ARecording(interval: UInt8, endless: Bool) {
+        tr4aClient?.updateRecording(interval: interval, endless: endless)
+    }
+
+    func startTR4ARecording() { tr4aClient?.startRecording() }
+
+    func stopTR4ARecording() { tr4aClient?.stopRecording() }
+
+    func sendTR4APasscode(_ code: String) {
+        tr4aClient?.saveRegistrationCode(code)
+        tr4aClient?.sendPasscode(code)
+    }
 }
 
 // MARK: - Private
@@ -156,6 +188,7 @@ private extension BluetoothService {
                 if self.preferredIDs.isEmpty || self.preferredIDs.contains(pid) {
                     self.stopScan()
                     self.peripheral = peripheral
+                    self.currentPeripheralID = pid
                     self.switchProfile(to: entry.profile)
                     DispatchQueue.main.async {
                         self.deviceName = entry.name
@@ -172,9 +205,10 @@ private extension BluetoothService {
             self.readChar = read
             self.writeChar = write
             DispatchQueue.main.async { self.connectionState = .ready }
+            self.log("Characteristics ready. notify=\(read?.uuid.uuidString ?? "none"), write=\(write?.uuid.uuidString ?? "none")")
             // 初回接続時に時刻同期（必要なら Settings で ON/OFF 化）
             self.setDeviceTime()
-            startTR4APollingIfNeeded(peripheral: peripheral, write: write)
+            self.startTR4AIfNeeded(peripheral: peripheral, notify: read, write: write)
         }
         connectionManager.onFailed = { [weak self] message in
             DispatchQueue.main.async { self?.connectionState = .failed(message) }
@@ -195,58 +229,46 @@ private extension BluetoothService {
         if !profile.requiresPollingForRealtime { stopTR4APolling() }
     }
 
-    /// TR4Aの現在値取得（0x33-0x01コマンド）を1秒周期で発行し、Notify経由で値を受け取る。
-    /// - Note: T&Dの仕様書にある「SOH直前の0x00(ブレーク信号)→20〜100ms後コマンド送信」を
-    ///   一続きのWriteWithoutResponseでまとめ、1秒以上間隔を空けることで実機負荷を抑える。
-    func startTR4APollingIfNeeded(peripheral: CBPeripheral, write: CBCharacteristic?) {
+    /// TR4A クライアントを初期化し、Notify/ポーリングを開始する。TR4A 以外では既存の NotifyController に任せる。
+    func startTR4AIfNeeded(peripheral: CBPeripheral, notify: CBCharacteristic?, write: CBCharacteristic?) {
         stopTR4APolling()
-        guard activeProfile.requiresPollingForRealtime, let write else { return }
+        tr4aClient = nil
+        guard activeProfile.requiresPollingForRealtime,
+              let notify,
+              let write else { return }
 
-        let timer = DispatchSource.makeTimerSource(queue: bleQueue)
-        timer.schedule(deadline: .now() + .milliseconds(200), repeating: .seconds(1))
-        timer.setEventHandler { [weak self, weak peripheral] in
-            guard let self, let p = peripheral else { return }
-            let cmd = self.buildTR4ACurrentValueCommand()
-            // TR4AはData Line特性にWriteWithoutResponseで流し込む。
-            p.writeValue(cmd, for: write, type: .withoutResponse)
-        }
-        timer.resume()
-        tr4aPollTimer = timer
+        let client = TR4AThermometerClient(
+            peripheral: peripheral,
+            notifyCharacteristic: notify,
+            writeCharacteristic: write,
+            registrationStore: registrationStore
+        ).configure(handlers: TR4AThermometerClient.EventHandlers(
+            onTemperature: { [weak self] frame in
+                self?.temperatureFramesSubject.send(frame)
+                DispatchQueue.main.async { self?.latestTemperature = frame.value }
+            },
+            onStateUpdate: { [weak self] state in
+                self?.tr4aStateSubject.send(state)
+                DispatchQueue.main.async { self?.tr4aState = state }
+            },
+            onLog: { [weak self] message in self?.log(message) },
+            onSecurityNeeded: { [weak self] in self?.log("Security required – waiting for passcode") },
+            onError: { [weak self] error in self?.log(error) }
+        ))
+        tr4aClient = client
+        client.start()
+        client.startPolling()
     }
 
     func stopTR4APolling() {
         tr4aPollTimer?.cancel()
         tr4aPollTimer = nil
+        tr4aClient?.stopPolling()
     }
 
-    /// TR4A「現在値取得(0x33/0x01)」SOHコマンドフレームを組み立てる。
-    /// - Structure: 0x00(ブレーク) + SOH(0x01) + CMD + SUB + DataSize(LE) + CRC16-BE。
-    /// - DataSizeは0（ペイロード無し）。CRCはSOH以降をCCITT初期値0xFFFFで計算。
-    func buildTR4ACurrentValueCommand() -> Data {
-        var frame = Data([0x01, 0x33, 0x01, 0x00, 0x00])
-        let crc = crc16CCITT(frame)
-        frame.append(UInt8((crc >> 8) & 0xFF))
-        frame.append(UInt8(crc & 0xFF))
-
-        var packet = Data([0x00])
-        packet.append(frame)
-        return packet
-    }
-
-    /// TR4A仕様書に従い、SOH〜データまでを対象にCRC16-CCITT(0x1021)を計算する。
-    func crc16CCITT(_ data: Data) -> UInt16 {
-        var crc: UInt16 = 0xFFFF
-        for byte in data {
-            crc ^= UInt16(byte) << 8
-            for _ in 0..<8 {
-                if crc & 0x8000 != 0 {
-                    crc = (crc << 1) ^ 0x1021
-                } else {
-                    crc = crc << 1
-                }
-            }
-        }
-        return crc
+    func log(_ message: String) {
+        print("[BLE-DEBUG]", message)
+        uiLogger?.publish(UILogEntry(message: message, level: .info, category: .ble))
     }
 }
 
@@ -306,6 +328,10 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
                     didUpdateValueFor characteristic: CBCharacteristic,
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
-        notifyController.handleNotification(data)
+        if activeProfile.requiresPollingForRealtime {
+            tr4aClient?.handleNotification(data)
+        } else {
+            notifyController.handleNotification(data)
+        }
     }
 }

@@ -385,10 +385,9 @@ private extension BluetoothService {
         stopTR4APolling()
         guard activeProfile.requiresPollingForRealtime, let write, peripheral.state == .connected else { return }
 
-        if let _ = tr4aRegistrationCodeBCD, !tr4aAuthSucceeded {
-            appendBLELog("TR4A polling deferred until 0x76 succeeds")
-            return
-        }
+        // 仕様上、セキュリティが OFF の端末では 0x33 単体で応答が返るため、
+        // いったん常にポーリングを開始し、REFUSE(0x0F) を受け取った場合のみ
+        // 0x76 を送る後追いフローに任せる。
 
         // 接続維持のため最低1秒周期、0なら停止。UIから渡された値を優先し、未指定なら保存値を利用。
         let interval = max(intervalSeconds ?? tr4aPollingIntervalSeconds, 0)
@@ -791,20 +790,20 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
         print("[BLE] notify state \(characteristic.uuid): \(characteristic.isNotifying)")
         appendBLELog("Notify state \(characteristic.uuid) = \(characteristic.isNotifying)")
 
-        // TR4A は notify ready を待ってから 0x76 を送信する。早送りすると ACK を受信できず無限待ちになるため、ここで投げる。
+        // 通知が有効化されたら即 0x33 ポーリングを開始し、REFUSE(0x0F) を検知した場合にのみ
+        // 0x76 を送る。セキュリティ OFF 機では 0x76 を送ると切断されるケースがあるため、
+        // ここではパスコードをスキップする。
         if activeProfile.requiresPollingForRealtime,
            characteristic.isNotifying,
            let read = readChar,
            characteristic.uuid == read.uuid,
            let p = characteristic.service?.peripheral,
-           p.state == .connected {
-            if let code = tr4aRegistrationCodeBCD, let write = writeChar {
-                appendBLELog("TR4A: notifications ready; sending 0x76 passcode (reason=on-notify-ready)")
-                sendTR4APasscodeIfNeeded(passcodeBCD: code, peripheral: p, write: write, reason: "on-notify-ready")
+           p.state == .connected,
+           let write = writeChar {
+            if tr4aRegistrationCodeBCD != nil {
+                appendBLELog("TR4A: notifications ready; skipping 0x76 until REFUSE is observed (security may be OFF)")
             }
-            if let write = writeChar {
-                startTR4APollingIfNeeded(peripheral: p, write: write)
-            }
+            startTR4APollingIfNeeded(peripheral: p, write: write)
         }
     }
 

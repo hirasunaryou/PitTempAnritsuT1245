@@ -18,6 +18,7 @@ struct SettingsView: View {
     @EnvironmentObject var registry: DeviceRegistry
     @EnvironmentObject var uiLog: UILogStore
     @State private var driveAlertMessage: String? = nil
+    @State private var showLogger = false
 
     
     var body: some View {
@@ -424,8 +425,24 @@ struct SettingsView: View {
                         }
                     }
                 }
+
+                Section("Debug") {
+                    Button {
+                        showLogger = true
+                        Logger.shared.log("Logger opened from Settings", category: .ui)
+                    } label: {
+                        Label("Open BLE Logger", systemImage: "waveform.path.ecg")
+                    }
+                    Text("直近500件のBLE送受信やUIログを参照し、クリップボードコピーや共有ができます。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .navigationTitle("Settings")
+        }
+        .sheet(isPresented: $showLogger) {
+            LoggerView()
         }
         .fileImporter(
             isPresented: $showPicker,

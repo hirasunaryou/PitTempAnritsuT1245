@@ -3,12 +3,10 @@ import CoreBluetooth
 
 /// スキャンと発見処理を担当
 final class DeviceScanner {
-    private let profiles: [BLEDeviceProfile]
     weak var registry: DeviceRegistrying?
-    var onDiscovered: ((ScannedDevice, CBPeripheral) -> Void)?
+    var onDiscovered: ((ScannedDevice, CBPeripheral, [String: Any]) -> Void)?
 
-    init(profiles: [BLEDeviceProfile], registry: DeviceRegistrying? = nil) {
-        self.profiles = profiles
+    init(registry: DeviceRegistrying? = nil) {
         self.registry = registry
     }
 
@@ -26,7 +24,7 @@ final class DeviceScanner {
                    ?? peripheral.name ?? "Unknown"
 
         // プロファイルに合致しない機器は一覧に出さない。
-        guard let profile = profiles.first(where: { $0.matches(name: name) }) else { return }
+        guard let profile = ThermometerDeviceFactory.profile(for: name) else { return }
 
         registry?.upsertSeen(id: peripheral.identifier.uuidString, name: name, rssi: rssi.intValue)
 
@@ -37,6 +35,6 @@ final class DeviceScanner {
             lastSeenAt: Date(),
             profile: profile
         )
-        onDiscovered?(entry, peripheral)
+        onDiscovered?(entry, peripheral, advertisementData)
     }
 }

@@ -37,10 +37,20 @@ extension BLEDeviceProfile {
     /// - Note: Data Line特性はWriteWithoutResponse/Notify兼用なので同一UUIDを設定する。
     static let tr4a = BLEDeviceProfile(
         key: "tr4a",
-        allowedNamePrefixes: ["TR45", "TR44", "TR43", "TR42", "TR41", "TR4"],
+        allowedNamePrefixes: ["TR44", "TR43", "TR42", "TR41", "TR4A"],
         serviceUUIDString: "6e400001-b5a3-f393-e0a9-e50e24dcca42",
         notifyCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
         writeCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
         requiresPollingForRealtime: true
+    )
+
+    /// TR45 (TR4 シリーズ) 向けの分割パケットプロファイル。
+    static let tr45 = BLEDeviceProfile(
+        key: "tr45",
+        allowedNamePrefixes: ["TR45"],
+        serviceUUIDString: "6e400001-b5a3-f393-e0a9-e50e24dcca42",
+        notifyCharUUIDString: "6e400005-b5a3-f393-e0a9-e50e24dcca42", // Header Notify
+        writeCharUUIDString: "6e400002-b5a3-f393-e0a9-e50e24dcca42", // Header Write（Bodyはデバイス側で保持）
+        requiresPollingForRealtime: false
     )
 }

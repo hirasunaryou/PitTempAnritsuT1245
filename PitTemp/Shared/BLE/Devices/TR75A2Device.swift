@@ -66,9 +66,17 @@ final class TR75A2Device: NSObject, ThermometerDevice {
 
     func startMeasurement() {
         guard let ioCharacteristic else { return }
-        let command = buildCurrentValueCommand()
-        Logger.shared.log("TR75A2 TX → \(command.hexString)", category: .bleSend)
-        peripheral?.writeValue(command, for: ioCharacteristic, type: .withoutResponse)
+
+        // TR7A2/A シリーズはスリープ解除のため、SOH コマンド直前にブレーク信号 (0x00) を送る必要がある。
+        // さらに、通知が無効なまま送信するとレスポンスを受け取れないため、事前に Notify を確認する。
+        if !ioCharacteristic.isNotifying {
+            // 念のためここでも通知を有効化し、次回以降の送信で確実に受信できるようにする。
+            peripheral?.setNotifyValue(true, for: ioCharacteristic)
+            return
+        }
+
+        // 0x33 現在値コマンドをブレーク信号付きで送信する。
+        sendWithBreakSignal(command: buildCurrentValueCommand(), characteristic: ioCharacteristic)
     }
 
     func disconnect() {
@@ -130,6 +138,28 @@ private extension TR75A2Device {
             }
         }
         return crc
+    }
+
+    /// 仕様書 4.5 の「ブレーク信号 → 待機 → コマンド送信」を実装する。
+    /// - Parameters:
+    ///   - command: 実際に送りたい SOH から始まるコマンドデータ。
+    ///   - characteristic: TR75A2 の書き込み/Notify 兼用キャラクタリスティック。
+    /// - Note: 送信タイプは WriteWithoutResponse を用いる。0x00 送信後に応答待ちが発生しないようにするため。
+    func sendWithBreakSignal(command: Data, characteristic: CBCharacteristic) {
+        // 1) ブレーク信号として Null(0x00) を送信。TR75A2 の省電力スリープを起こす。
+        let wakeSignal = Data([0x00])
+        Logger.shared.log("TR75A2 TX (wake) → \(wakeSignal.hexString)", category: .bleSend)
+        peripheral?.writeValue(wakeSignal, for: characteristic, type: .withoutResponse)
+
+        // 2) 20〜100ms の待機。仕様書推奨値に合わせて 50ms ディレイを挿入する。
+        let delay: DispatchTimeInterval = .milliseconds(50)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+
+            // 3) 本体コマンドを送信。Wake 後なのでデバイスが確実に認識できる。
+            Logger.shared.log("TR75A2 TX → \(command.hexString)", category: .bleSend)
+            self.peripheral?.writeValue(command, for: characteristic, type: .withoutResponse)
+        }
     }
 }
 

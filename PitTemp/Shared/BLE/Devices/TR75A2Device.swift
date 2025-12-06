@@ -12,6 +12,7 @@ final class TR75A2Device: NSObject, ThermometerDevice {
 
     private var peripheral: CBPeripheral?
     private var ioCharacteristic: CBCharacteristic?
+    private var isNotifyReady = false
 
     var onFrame: ((TemperatureFrame) -> Void)?
     var onReady: (() -> Void)?
@@ -46,8 +47,16 @@ final class TR75A2Device: NSObject, ThermometerDevice {
         }
 
         // Notify を有効化し、準備完了を通知
-        if let notify = ioCharacteristic { peripheral?.setNotifyValue(true, for: notify) }
-        onReady?()
+        if let notify = ioCharacteristic {
+            // 仕様では Notify 有効化後にコマンド送信する必要があるため、まず通知を起動する。
+            peripheral?.setNotifyValue(true, for: notify)
+
+            // すでに通知状態になっている場合は即座に準備完了を伝える。通常は didUpdateNotificationState で遷移。
+            if notify.isNotifying {
+                isNotifyReady = true
+                onReady?()
+            }
+        }
     }
 
     func didUpdateValue(for characteristic: CBCharacteristic, data: Data) {
@@ -60,12 +69,41 @@ final class TR75A2Device: NSObject, ThermometerDevice {
         if let error { Logger.shared.log("TR75A2 write error: \(error.localizedDescription)", category: .bleSend) }
     }
 
+    func didUpdateNotificationState(for characteristic: CBCharacteristic, error: Error?) {
+        guard characteristic.uuid == profile.notifyCharUUID else { return }
+
+        if let error {
+            Logger.shared.log("TR75A2 notify state error: \(error.localizedDescription)", category: .bleReceive)
+            return
+        }
+
+        // 通知が有効化されたことを確認した上で、計測リクエストを開始する。
+        isNotifyReady = characteristic.isNotifying
+        if isNotifyReady { onReady?() }
+    }
+
     func setDeviceTime(_ date: Date) {
         // プロトコル資料に時刻同期コマンドがないため、ここでは何もしない。
     }
 
     func startMeasurement() {
         guard let ioCharacteristic else { return }
+
+        // ブレーク信号送信前に Notify が有効か確認。未準備ならスキップして次のポーリングに任せる。
+        guard isNotifyReady else {
+            Logger.shared.log("TR75A2 notify not ready; skip startMeasurement", category: .bleSend)
+            return
+        }
+
+        // 仕様書 4.5: ブレーク信号として Null(0x00) を 1 バイト送る。Write Without Response が推奨。
+        let breakSignal = Data([0x00])
+        Logger.shared.log("TR75A2 TX (break) → \(breakSignal.hexString)", category: .bleSend)
+        peripheral?.writeValue(breakSignal, for: ioCharacteristic, type: .withoutResponse)
+
+        // 20〜100ms の待機が求められている。実装では 50ms の遅延で確実に Wake-up を挟む。
+        usleep(50_000)
+
+        // ブレーク後に本来の SOH コマンドを送信する。CRC 生成は既存ロジックを流用。
         let command = buildCurrentValueCommand()
         Logger.shared.log("TR75A2 TX → \(command.hexString)", category: .bleSend)
         peripheral?.writeValue(command, for: ioCharacteristic, type: .withoutResponse)
@@ -74,6 +112,7 @@ final class TR75A2Device: NSObject, ThermometerDevice {
     func disconnect() {
         peripheral = nil
         ioCharacteristic = nil
+        isNotifyReady = false
     }
 }
 

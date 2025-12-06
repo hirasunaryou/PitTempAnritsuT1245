@@ -23,6 +23,7 @@ protocol ThermometerDevice: AnyObject {
     func didDiscoverCharacteristics(error: Error?)
     func didUpdateValue(for characteristic: CBCharacteristic, data: Data)
     func didWriteValue(for characteristic: CBCharacteristic, error: Error?)
+    func didUpdateNotificationState(for characteristic: CBCharacteristic, error: Error?)
 
     /// 端末時刻同期。
     func setDeviceTime(_ date: Date)
@@ -38,4 +39,9 @@ protocol ThermometerDevice: AnyObject {
 
     /// デバイスが計測可能になったタイミングで呼ばれるコールバック。
     var onReady: (() -> Void)? { get set }
+}
+
+// デフォルト実装を用意し、通知状態の更新を扱わないデバイスでもコンパイルエラーにならないようにする。
+extension ThermometerDevice {
+    func didUpdateNotificationState(for characteristic: CBCharacteristic, error: Error?) {}
 }

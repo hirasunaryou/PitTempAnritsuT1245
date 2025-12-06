@@ -251,6 +251,7 @@ extension BluetoothService: CBCentralManagerDelegate, CBPeripheralDelegate {
             return
         }
         print("[BLE] notify state \(characteristic.uuid): \(characteristic.isNotifying)")
+        activeDevice?.didUpdateNotificationState(for: characteristic, error: error)
     }
 
     func peripheral(_ peripheral: CBPeripheral,

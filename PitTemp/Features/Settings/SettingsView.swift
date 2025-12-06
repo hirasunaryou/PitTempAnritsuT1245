@@ -13,6 +13,7 @@ struct SettingsView: View {
     @EnvironmentObject var folderBM: FolderBookmark
     @EnvironmentObject var settings: SettingsStore   // ← 追加：設定は SettingsStore に集約
     @EnvironmentObject var driveService: GoogleDriveService
+    @EnvironmentObject var bluetooth: BluetoothViewModel
 
     @State private var showPicker = false
     @EnvironmentObject var registry: DeviceRegistry
@@ -188,6 +189,26 @@ struct SettingsView: View {
                     Toggle("Enable tyre voice input controls", isOn: $settings.enableWheelVoiceInput)
                         .tint(.orange)
                         .accessibilityHint("When off, pressure and memo voice buttons stay hidden by default")
+
+                    // TR75A2 のどちらのチャンネルを読むかをユーザーが選べるようにする。
+                    Picker(
+                        "TR75A2 channel",
+                        selection: Binding(
+                            get: { settings.tr75Channel },
+                            set: { settings.tr75Channel = $0 }
+                        )
+                    ) {
+                        Text("Ch1").tag(1)
+                        Text("Ch2").tag(2)
+                    }
+                    .pickerStyle(.segmented)
+                    .onChange(of: settings.tr75Channel) { _, newValue in
+                        // BLE サービスへ即反映し、次回の計測要求が選択チャンネルになるようにする。
+                        bluetooth.setTR75Channel(newValue)
+                    }
+                    Text("TR75A2 has two inputs (Ch1/Ch2). Pick the one you want to see in the live view.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
 
                     // 👇 追加：Zone順序の切替
                     Picker(

@@ -109,6 +109,11 @@ final class BluetoothViewModel: ObservableObject {
         service.setPreferredIDs(preferred)
     }
 
+    /// TR75A2 の Ch1/Ch2 を UI から切り替えるための窓口。無効値はサービス側で丸める。
+    func setTR75Channel(_ channel: Int) {
+        service.setTR75Channel(channel)
+    }
+
     // MARK: - Private
 
     /// Subscribe to BluetoothService so views receive MainActor updates only from here.

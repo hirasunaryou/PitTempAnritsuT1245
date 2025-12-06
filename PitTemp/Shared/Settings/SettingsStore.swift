@@ -52,6 +52,7 @@ final class SettingsStore: ObservableObject {
         static let advanceWithReturn = "pref.advanceWithReturn"
         static let minAdvanceSec = "pref.minAdvanceSec"
         static let bleAutoConnect = "ble.autoConnect"
+        static let tr75Channel = "ble.tr75.channel"
         static let enableWheelVoiceInput = "pref.enableWheelVoiceInput"
         static let enableSeniorLayout = "pref.enableSeniorLayout"
         static let seniorZoneFontScale = "pref.senior.zoneFontScale"
@@ -86,6 +87,7 @@ final class SettingsStore: ObservableObject {
     @Published var advanceWithReturn: Bool { didSet { save(advanceWithReturn, key: Keys.advanceWithReturn) } }
     @Published var minAdvanceSec: Double { didSet { save(minAdvanceSec, key: Keys.minAdvanceSec) } }
     @Published var bleAutoConnect: Bool { didSet { save(bleAutoConnect, key: Keys.bleAutoConnect) } }
+    @Published var tr75Channel: Int { didSet { save(Self.clampTR75Channel(tr75Channel), key: Keys.tr75Channel) } }
     @Published var enableWheelVoiceInput: Bool { didSet { save(enableWheelVoiceInput, key: Keys.enableWheelVoiceInput) } }
     @Published var enableSeniorLayout: Bool { didSet { save(enableSeniorLayout, key: Keys.enableSeniorLayout) } }
     @Published private var seniorZoneFontScaleRaw: Double { didSet { save(seniorZoneFontScaleRaw, key: Keys.seniorZoneFontScale) } }
@@ -121,6 +123,7 @@ final class SettingsStore: ObservableObject {
         advanceWithReturn = store.value(forKey: Keys.advanceWithReturn, default: true)
         minAdvanceSec = store.value(forKey: Keys.minAdvanceSec, default: 0.3)
         bleAutoConnect = store.value(forKey: Keys.bleAutoConnect, default: true)
+        tr75Channel = Self.clampTR75Channel(store.value(forKey: Keys.tr75Channel, default: 1))
         enableWheelVoiceInput = store.value(forKey: Keys.enableWheelVoiceInput, default: false)
         enableSeniorLayout = store.value(forKey: Keys.enableSeniorLayout, default: false)
         seniorZoneFontScaleRaw = store.value(forKey: Keys.seniorZoneFontScale, default: 1.0)
@@ -311,6 +314,11 @@ final class SettingsStore: ObservableObject {
     private func normalizeKeywordInput(_ input: String) -> String {
         let components = parseKeywordList(input)
         return components.joined(separator: components.isEmpty ? "" : ", ")
+    }
+
+    private static func clampTR75Channel(_ value: Int) -> Int {
+        // Ch1/Ch2 以外の値を入れられても安全側の Ch1 で固定する。
+        (value == 2) ? 2 : 1
     }
 
     private func clampedScale(_ value: Double) -> Double {

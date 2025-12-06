@@ -8,6 +8,7 @@ final class TR75A2Device: NSObject, ThermometerDevice {
     let requiresPollingForRealtime: Bool = true
 
     /// どちらのチャンネルを UI へ流すかを示す。1 または 2 を想定。
+    /// - Note: TR75A2 は Ch1/Ch2 の2系統を持つため、UI 側からの指示を保存しておく。
     private var selectedChannel: Int
 
     private var peripheral: CBPeripheral?
@@ -18,12 +19,15 @@ final class TR75A2Device: NSObject, ThermometerDevice {
 
     init(channel: Int = 1) {
         // UI 側でチャンネルを切り替えられるよう、イニシャライザで受け取る
-        self.selectedChannel = channel
+        // 「想定外の値なら Ch1 に丸める」という防御的実装にしておく。
+        self.selectedChannel = (channel == 2) ? 2 : 1
     }
 
-    /// 外部からチャンネルを変更するための簡易セッター。
-    func setChannel(_ channel: Int) {
+    /// ThermometerDevice プロトコル経由で呼ばれるチャンネル設定用フック。
+    func setInputChannel(_ channel: Int) {
+        // 仕様上 Ch1/Ch2 の 2 択なので、無効値は Ch1 に丸める。
         selectedChannel = (channel == 2) ? 2 : 1
+        Logger.shared.log("TR75A2 channel set → Ch\(selectedChannel)", category: .bleSend)
     }
 
     // MARK: - ThermometerDevice

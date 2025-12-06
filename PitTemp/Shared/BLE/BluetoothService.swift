@@ -26,8 +26,8 @@ final class BluetoothService: NSObject, BluetoothServicing {
         didSet { scanner.registry = registry }
     }
 
-    // 接続対象ごとのBLEプロファイル群（Anritsu + TR4）
-    private let profiles: [BLEDeviceProfile] = [.anritsu, .tr4]
+    // 接続対象ごとのBLEプロファイル群（Anritsu + TR4 + TR75A2）
+    private let profiles: [BLEDeviceProfile] = [.anritsu, .tr4, .tr75a2]
     private var activeProfile: BLEDeviceProfile = .anritsu
     private var scannedProfiles: [String: BLEDeviceProfile] = [:] // peripheralID→profile
 

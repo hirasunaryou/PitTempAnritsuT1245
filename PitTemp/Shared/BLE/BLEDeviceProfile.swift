@@ -50,4 +50,16 @@ extension BLEDeviceProfile {
         additionalNotifyUUIDStrings: ["6e400006-b5a3-f393-e0a9-e50e24dcca42"],
         additionalWriteUUIDStrings: ["6e400003-b5a3-f393-e0a9-e50e24dcca42", "6e400007-b5a3-f393-e0a9-e50e24dcca42"]
     )
+
+    /// T&D TR75A2 の UART 風サービス用プロファイル（単一キャラクタリスティックで書き込み/Notify）。
+    static let tr75a2 = BLEDeviceProfile(
+        key: "tr75a2",
+        allowedNamePrefixes: ["TR75A2"],
+        serviceUUIDString: "6e400001-b5a3-f393-e0a9-e50e24dcca42",
+        notifyCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
+        writeCharUUIDString: "6e400008-b5a3-f393-e0a9-e50e24dcca42",
+        requiresPollingForRealtime: true,
+        additionalNotifyUUIDStrings: [],
+        additionalWriteUUIDStrings: []
+    )
 }

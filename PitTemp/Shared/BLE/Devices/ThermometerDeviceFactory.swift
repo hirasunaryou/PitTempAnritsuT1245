@@ -8,6 +8,8 @@ struct ThermometerDeviceFactory {
             return AnritsuDevice(ingestor: temperatureUseCase)
         case BLEDeviceProfile.tr4.key:
             return TR4Device()
+        case BLEDeviceProfile.tr75a2.key:
+            return TR75A2Device()
         default:
             return AnritsuDevice(ingestor: temperatureUseCase)
         }

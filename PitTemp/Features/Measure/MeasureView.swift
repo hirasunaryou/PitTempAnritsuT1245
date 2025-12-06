@@ -265,6 +265,7 @@ struct MeasureView: View {
             }
             // 接続前の下準備を ViewModel に集約し、View は依存を持たない。
             bluetooth.applyPreferencesFromRegistry(autoConnectEnabled: settings.bleAutoConnect)
+            bluetooth.setTR75Channel(settings.tr75Channel)
             bluetooth.startScan()
             if let current = vm.currentWheel {
                 selectedWheel = current
@@ -311,6 +312,10 @@ struct MeasureView: View {
                 if speech.isRecording { speech.stop() }
                 if pressureSpeech.isRecording { pressureSpeech.stop() }
             }
+        }
+        .onChange(of: settings.tr75Channel) { _, newValue in
+            // チャンネル変更を検知したら直ちに BLE へ伝えて、次の測定要求に反映させる。
+            bluetooth.setTR75Channel(newValue)
         }
         .onReceive(vm.$results) { _ in
             if isManualInteractionActive { syncManualDefaults(for: selectedWheel) }

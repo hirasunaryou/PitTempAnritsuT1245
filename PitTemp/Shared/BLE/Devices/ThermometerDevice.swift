@@ -33,9 +33,18 @@ protocol ThermometerDevice: AnyObject {
     /// 切断時のリセット処理。
     func disconnect()
 
+    /// 複数チャンネルを持つデバイスで、どのチャンネルを取得対象にするかを外部から指示するためのフック。
+    /// - Note: チャンネルを持たないデバイスはデフォルト実装の no-op をそのまま使う。
+    func setInputChannel(_ channel: Int)
+
     /// UI へ温度フレームを流すコールバック。
     var onFrame: ((TemperatureFrame) -> Void)? { get set }
 
     /// デバイスが計測可能になったタイミングで呼ばれるコールバック。
     var onReady: (() -> Void)? { get set }
+}
+
+extension ThermometerDevice {
+    /// チャンネル非対応デバイス向けのデフォルト実装（何もしない）。
+    func setInputChannel(_ channel: Int) { /* default no-op */ }
 }

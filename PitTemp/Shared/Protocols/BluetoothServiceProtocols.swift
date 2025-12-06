@@ -35,6 +35,9 @@ protocol BluetoothServicing: TemperatureSensorClient {
     var notifyCountPublisher: AnyPublisher<Int, Never> { get }
 
     func setPreferredIDs(_ ids: Set<String>)
+
+    /// TR75A2 の Ch1/Ch2 をアプリ側で選べるようにするための設定口。
+    func setTR75Channel(_ channel: Int)
 }
 
 /// スキャンで見つけたデバイスを記録するレジストリのインターフェイス。

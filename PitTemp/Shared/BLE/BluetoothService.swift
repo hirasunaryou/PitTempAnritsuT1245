@@ -46,6 +46,10 @@ final class BluetoothService: NSObject, BluetoothServicing {
     private let deviceFactory = ThermometerDeviceFactory()
     private var activeDevice: ThermometerDevice?
 
+    /// TR75A2 の Ch1/Ch2 を UI から切り替えるための保存先。
+    /// - Note: デフォルトは Ch1。無効値を渡された場合も Ch1 に丸める。
+    private var tr75Channel: Int = 1
+
     // その他
     @Published var notifyCountUI: Int = 0  // UI表示用（Mainで増やす）
     @Published var notifyHz: Double = 0
@@ -119,6 +123,15 @@ final class BluetoothService: NSObject, BluetoothServicing {
         activeDevice?.setDeviceTime(date)
     }
 
+    /// TR75A2 の測定チャンネルを UI から設定できるようにするためのセッター。
+    func setTR75Channel(_ channel: Int) {
+        let clamped = (channel == 2) ? 2 : 1
+        tr75Channel = clamped
+
+        // 既に TR75A2 がアクティブなら即座に反映する。
+        activeDevice?.setInputChannel(clamped)
+    }
+
     // UI から設定するためのセッターを用意
     func setPreferredIDs(_ ids: Set<String>) {
         // UIスレッドから来るのでそのまま代入でOK
@@ -161,6 +174,7 @@ private extension BluetoothService {
     func switchProfile(to profile: BLEDeviceProfile) {
         activeProfile = profile
         activeDevice = deviceFactory.make(for: profile, temperatureUseCase: temperatureUseCase)
+        activeDevice?.setInputChannel(tr75Channel)
         activeDevice?.onFrame = { [weak self] frame in
             guard let self else { return }
             DispatchQueue.main.async { self.latestTemperature = frame.value }

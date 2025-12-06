@@ -14,6 +14,11 @@ final class TR75A2Device: NSObject, ThermometerDevice {
     private var peripheral: CBPeripheral?
     private var ioCharacteristic: CBCharacteristic?
 
+    /// TR7A2/A の送信順序（ブレーク→待機→SOH）を崩さないようにするための専用キュー。
+    /// - Important: CoreBluetooth のコールバックキューと同じ serial queue で扱うことで、
+    ///   コマンドとウェイクアップシグナルの順序が逆転しないようにしている。
+    private let commandQueue = DispatchQueue(label: "BLE.TR75A2.CommandQueue")
+
     var onFrame: ((TemperatureFrame) -> Void)?
     var onReady: (() -> Void)?
 
@@ -50,7 +55,10 @@ final class TR75A2Device: NSObject, ThermometerDevice {
         }
 
         // Notify を有効化し、準備完了を通知
-        if let notify = ioCharacteristic { peripheral?.setNotifyValue(true, for: notify) }
+        if let notify = ioCharacteristic {
+            Logger.shared.log("TR75A2 enabling notify on Data Line (\(notify.uuid.uuidString))", category: .bleSend)
+            peripheral?.setNotifyValue(true, for: notify)
+        }
         onReady?()
     }
 
@@ -75,12 +83,13 @@ final class TR75A2Device: NSObject, ThermometerDevice {
         // さらに、通知が無効なまま送信するとレスポンスを受け取れないため、事前に Notify を確認する。
         if !ioCharacteristic.isNotifying {
             // 念のためここでも通知を有効化し、次回以降の送信で確実に受信できるようにする。
+            Logger.shared.log("TR75A2 notify was off, enabling before sending 0x33", category: .bleSend)
             peripheral?.setNotifyValue(true, for: ioCharacteristic)
             return
         }
 
         // 0x33 現在値コマンドをブレーク信号付きで送信する。
-        sendWithBreakSignal(command: buildCurrentValueCommand(), characteristic: ioCharacteristic)
+        sendTR7A2Command(frame: buildCurrentValueCommand(), characteristic: ioCharacteristic)
     }
 
     func disconnect() {
@@ -94,19 +103,18 @@ private extension TR75A2Device {
     /// 0x33 現在値取得コマンドを組み立てる。
     /// - Important: CRC16(CCITT)のみ Big Endian で付与する。
     func buildCurrentValueCommand() -> Data {
-        var frame = Data([0x01, 0x33, 0x00, 0x04, 0x00])
-        let crc = crc16CCITT(frame)
-        // Big Endian で上位→下位の順に格納
-        frame.append(UInt8((crc >> 8) & 0xFF))
-        frame.append(UInt8(crc & 0xFF))
-        return frame
+        // TR7A2/A の「現在値・警報状態取得」は 01 33 00 04 00 + CRC16(D1 A0) で送る。
+        // expectedDataLength はレスポンスで返ってくるデータ部のバイト数（Ch1/Ch2 合計 4 バイト）。
+        return TR7A2CommandBuilder.buildFrame(command: 0x33,
+                                              expectedDataLength: 0x0004,
+                                              payload: Data([0x00]))
     }
 
     /// TR75A2 のレスポンスを解釈し、選択チャンネルの温度を TemperatureFrame として通知する。
     func parseResponse(_ payload: Data) {
         // 1) 最低限のヘッダ検証と想定サイズ(ヘッダ5 + データ長)チェック
         guard payload.count >= 9, payload[0] == 0x01, payload[1] == 0x33 else { return }
-        let dataLength = Int(UInt16(low: payload[3], high: payload[4]))
+        let dataLength = Int(UInt16(high: payload[3], low: payload[4]))
         let totalLength = 5 + dataLength
         guard payload.count >= totalLength else { return }
 
@@ -128,45 +136,31 @@ private extension TR75A2Device {
         onFrame?(TemperatureFrame(time: Date(), deviceID: selectedChannel, value: channelValue, status: nil))
     }
 
-    /// CRC16-CCITT (poly 0x1021, init 0x0000) を計算する。資料のC実装をSwiftへ移植。
-    func crc16CCITT(_ data: Data) -> UInt16 {
-        var crc: UInt16 = 0x0000
-        for byte in data {
-            crc ^= UInt16(byte) << 8
-            for _ in 0..<8 {
-                if crc & 0x8000 != 0 {
-                    crc = (crc << 1) ^ 0x1021
-                } else {
-                    crc = crc << 1
-                }
-            }
-        }
-        return crc
-    }
-
-    /// 仕様書 4.5 の「ブレーク信号 → 待機 → コマンド送信」を実装する。
+    /// 仕様書 4.5 の「ブレーク信号 → 20-100ms 待機 → SOH コマンド送信」を実装する。
     /// - Parameters:
-    ///   - command: 実際に送りたい SOH から始まるコマンドデータ。
+    ///   - frame: CRC 付きの SOH コマンドフレーム（事前に `TR7A2CommandBuilder` で組み立てる）。
     ///   - characteristic: TR75A2 の書き込み/Notify 兼用キャラクタリスティック。
-    /// - Note: 送信タイプは WriteWithoutResponse を用いる。0x00 送信後に応答待ちが発生しないようにするため。
-    func sendWithBreakSignal(command: Data, characteristic: CBCharacteristic) {
+    func sendTR7A2Command(frame: Data, characteristic: CBCharacteristic) {
         // 1) ブレーク信号として Null(0x00) を送信。TR75A2 の省電力スリープを起こす。
         let wakeSignal = Data([0x00])
-        Logger.shared.log("TR75A2 TX (wake) → \(wakeSignal.hexString)", category: .bleSend)
-        peripheral?.writeValue(wakeSignal, for: characteristic, type: .withoutResponse)
-
-        // 2) 20〜100ms の待機。仕様書推奨値に合わせて 50ms ディレイを挿入する。
-        let delay: DispatchTimeInterval = .milliseconds(50)
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        commandQueue.async { [weak self] in
             guard let self else { return }
+            Logger.shared.log("TR75A2 TX (wake) → \(wakeSignal.hexString)", category: .bleSend)
+            self.peripheral?.writeValue(wakeSignal, for: characteristic, type: .withoutResponse)
 
-            // 3) 本体コマンドを送信。Wake 後なのでデバイスが確実に認識できる。
-            Logger.shared.log("TR75A2 TX → \(command.hexString)", category: .bleSend)
-            self.peripheral?.writeValue(command, for: characteristic, type: .withoutResponse)
+            // 2) 20〜100ms の待機。仕様書推奨値に合わせて 50ms ディレイを挿入する。
+            self.commandQueue.asyncAfter(deadline: .now() + .milliseconds(50)) { [weak self] in
+                guard let self else { return }
+
+                // 3) 本体コマンドを送信。Wake 後なのでデバイスが確実に認識できる。
+                Logger.shared.log("TR75A2 TX → \(frame.hexString)", category: .bleSend)
+                self.peripheral?.writeValue(frame, for: characteristic, type: .withoutResponse)
+            }
         }
     }
 }
 
 private extension UInt16 {
     init(low: UInt8, high: UInt8) { self = UInt16(low) | (UInt16(high) << 8) }
+    init(high: UInt8, low: UInt8) { self = UInt16(high) << 8 | UInt16(low) }
 }
